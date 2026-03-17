@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, lazy, Suspense } from "react";
+import { useState, useCallback, useEffect, lazy, Suspense, type SyntheticEvent } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FlaskConical, Workflow, Loader2, ArrowLeft } from "lucide-react";
@@ -62,6 +62,16 @@ export function ArisResearchPage() {
       setDialogOpen(true);
     }
   }, []);
+
+  // Listen for skill launch events from sessions panel "Next Steps"
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { skillId } = (e as CustomEvent).detail ?? {};
+      if (skillId) handleLaunchById(skillId);
+    };
+    window.addEventListener("aris-launch-skill", handler);
+    return () => window.removeEventListener("aris-launch-skill", handler);
+  }, [handleLaunchById]);
 
   return (
     <div className="flex flex-col h-full">

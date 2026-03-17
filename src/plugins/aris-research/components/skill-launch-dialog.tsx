@@ -49,13 +49,31 @@ function buildOutputInstructions(skill: ArisSkill, cwd: string): string {
   const out = CATEGORY_OUTPUT[skill.category] ?? CATEGORY_OUTPUT.utility;
   return [
     "",
-    "## IMPORTANT: File Output Required",
-    `Working directory: ${cwd}`,
-    `You MUST write your complete output to files in \`${out.dir}\`.`,
-    `Expected output files: ${out.files}`,
-    "Do NOT just print results to chat. Use the Write tool to create well-structured markdown files.",
-    `If the directory doesn't exist, create it first.`,
-    "After writing, confirm which files were created and their paths.",
+    "## CRITICAL: Autonomous Execution Rules",
+    "",
+    "### 1. Working Directory",
+    `Your working directory is: ${cwd}`,
+    "ALL output files MUST be written here. Use absolute paths.",
+    "",
+    "### 2. File Output — MANDATORY",
+    `Write complete output to \`${cwd}/${out.dir}\`.`,
+    `Expected files: ${out.files}`,
+    "- Use the Write tool to create well-structured markdown files",
+    "- Do NOT ask the user whether to save — ALWAYS save automatically",
+    "- Do NOT just print results to chat — write to FILES",
+    "- Create directories if they don't exist (use Bash: mkdir -p)",
+    "",
+    "### 3. No Confirmation Needed",
+    "- You have full permissions (--dangerously-skip-permissions)",
+    "- Do NOT ask 'should I save?' or 'would you like me to write?'",
+    "- Just DO it. Write files, run commands, create directories.",
+    "- After writing, list all created files with their full paths.",
+    "",
+    "### 4. Be Thorough",
+    "- If doing literature survey: cover 15-20+ papers minimum",
+    "- If generating ideas: produce 8-12 well-developed ideas",
+    "- If writing analysis: be detailed with tables, comparisons, citations",
+    "- Read existing files in the workspace first for context",
   ].join("\n");
 }
 
@@ -253,17 +271,46 @@ export function SkillLaunchDialog({
 
   const handleRunBackground = async () => {
     setSubmitted(true);
-    if (validationErrors.length > 0) return;
+    if (validationErrors.length > 0 || !skill) return;
     setLaunching(true);
     try {
+      // Auto-create workspace if not already in an aris- workspace
+      let workspacePath = launchCwd;
+      if (!workspacePath.includes("aris-")) {
+        // Create a workspace from the first param value or skill name
+        const topic = values[params[0]?.name] || skill.name;
+        const wsRes = await fetch("/api/plugins/aris-research/workspaces", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pipelineId: `standalone-${Date.now()}`,
+            topic,
+          }),
+        });
+        const wsData = await wsRes.json();
+        if (wsData.workspace?.path) {
+          workspacePath = wsData.workspace.path;
+          setLaunchCwd(workspacePath);
+        }
+      }
+
+      const fullPrompt = buildOutputInstructions(skill, workspacePath)
+        ? (() => {
+            const parts = [command];
+            if (stageContext) parts.push(`\nContext:\n${stageContext}`);
+            parts.push(buildOutputInstructions(skill, workspacePath));
+            return parts.join("\n");
+          })()
+        : buildFullPrompt();
+
       const res = await fetch("/api/plugins/aris-research/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          skill: skill?.name ?? "unknown",
-          command: buildFullPrompt(),
+          skill: skill.name,
+          command: fullPrompt,
           stageContext: stageContext || undefined,
-          workspacePath: launchCwd || undefined,
+          workspacePath,
         }),
       });
       if (res.ok) {
@@ -458,7 +505,7 @@ export function SkillLaunchDialog({
 
         <DialogFooter>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             className="gap-1.5"
             onClick={handleCopyTerminal}
@@ -466,10 +513,10 @@ export function SkillLaunchDialog({
             {copied ? (
               <><Check className="h-3.5 w-3.5" />{isZh ? "已复制" : "Copied"}</>
             ) : (
-              <><Terminal className="h-3.5 w-3.5" />{isZh ? "复制命令" : "Copy Cmd"}</>
+              <><Terminal className="h-3.5 w-3.5" />{isZh ? "命令" : "Cmd"}</>
             )}
           </Button>
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={handleRunInChat}>
+          <Button size="sm" variant="ghost" className="gap-1.5" onClick={handleRunInChat}>
             <MessageCircle className="h-3.5 w-3.5" />
             Chat
           </Button>

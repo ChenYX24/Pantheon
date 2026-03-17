@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { useChatStream } from "@/hooks/use-chat-stream";
@@ -97,7 +97,9 @@ export function useChatPage(t: TranslateFn) {
     () => mergeAllCommands({ provider: chatProvider, cliSlashCommands, toolboxCommands }),
     [chatProvider, cliSlashCommands, toolboxCommands],
   );
-  const showCommandMenu = chatInput.startsWith("/") && !chatSending && !cmdMenuDismissed;
+  // Use deferred value for command menu to avoid blocking input on every keystroke
+  const deferredChatInput = useDeferredValue(chatInput);
+  const showCommandMenu = deferredChatInput.startsWith("/") && !chatSending && !cmdMenuDismissed;
 
   const visible = useMemo(() => {
     if (!sessionDetail) return [];
@@ -270,7 +272,9 @@ export function useChatPage(t: TranslateFn) {
   }, [selectedSessionKey, sessionDetail, sessions, autoRefresh, chatMode]);
 
   useEffect(() => { chatInputRef.current = chatInput; }, [chatInput]);
-  useEffect(() => { setCmdMenuIndex(0); setCmdMenuDismissed(false); }, [chatInput]);
+  // Only reset command menu state when input prefix changes (not every keystroke)
+  const inputPrefix = chatInput.startsWith("/") ? chatInput.split(/\s/)[0] : "";
+  useEffect(() => { setCmdMenuIndex(0); setCmdMenuDismissed(false); }, [inputPrefix]);
 
   useEffect(() => {
     if (!chatContainerRef.current) return;

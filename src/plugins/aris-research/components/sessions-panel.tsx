@@ -19,7 +19,9 @@ import {
   Trash2,
   Eye,
   RefreshCw,
+  ArrowRight,
 } from "lucide-react";
+import { ARIS_SKILLS } from "../skill-data";
 
 interface ArisSession {
   id: string;
@@ -190,6 +192,87 @@ function LogViewer({ logFile, isZh }: { logFile: string; isZh?: boolean }) {
   );
 }
 
+/** Suggest next skills to run based on what just completed */
+function NextStepsSuggestion({
+  completedSkill,
+  isZh,
+  onLaunch,
+}: {
+  completedSkill: string;
+  isZh: boolean;
+  onLaunch: (skillId: string) => void;
+}) {
+  // Find skills that depend on the completed skill
+  const nextSkills = useMemo(() => {
+    // Find the completed skill's ID by name
+    const completed = ARIS_SKILLS.find(
+      (s) => s.name === completedSkill || s.nameZh === completedSkill
+    );
+    if (!completed) return [];
+
+    // Find skills that list this as a dependency
+    const dependents = ARIS_SKILLS.filter(
+      (s) => s.dependencies?.includes(completed.id)
+    );
+
+    // Also add natural next steps based on common flows
+    const flowMap: Record<string, string[]> = {
+      "research-lit": ["idea-creator", "novelty-check"],
+      "idea-creator": ["novelty-check", "research-review", "research-refine"],
+      "novelty-check": ["research-refine", "experiment-plan"],
+      "research-review": ["research-refine"],
+      "research-refine": ["experiment-plan", "research-refine-pipeline"],
+      "experiment-plan": ["run-experiment"],
+      "run-experiment": ["monitor-experiment", "auto-review-loop"],
+      "auto-review-loop": ["paper-plan", "paper-writing"],
+      "paper-plan": ["paper-figure", "paper-write"],
+      "paper-write": ["paper-compile"],
+      "paper-compile": ["auto-paper-improvement-loop"],
+    };
+
+    const flowIds = flowMap[completed.id] ?? [];
+    const flowSkills = flowIds
+      .map((id) => ARIS_SKILLS.find((s) => s.id === id))
+      .filter(Boolean) as typeof ARIS_SKILLS;
+
+    // Merge & deduplicate
+    const seen = new Set<string>();
+    const result: typeof ARIS_SKILLS = [];
+    for (const s of [...flowSkills, ...dependents]) {
+      if (!seen.has(s.id)) {
+        seen.add(s.id);
+        result.push(s);
+      }
+    }
+    return result.slice(0, 4);
+  }, [completedSkill]);
+
+  if (nextSkills.length === 0) return null;
+
+  return (
+    <div className="border-t pt-3 mt-2">
+      <div className="text-xs font-semibold mb-2 flex items-center gap-1.5">
+        <ArrowRight className="h-3 w-3" />
+        {isZh ? "下一步建议" : "Next Steps"}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {nextSkills.map((s) => (
+          <Button
+            key={s.id}
+            size="sm"
+            variant="outline"
+            className="h-7 text-[11px] gap-1"
+            onClick={() => onLaunch(s.id)}
+          >
+            {isZh ? s.nameZh : s.name}
+            <ArrowRight className="h-2.5 w-2.5" />
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface SessionsButtonProps {
   isZh: boolean;
 }
@@ -315,6 +398,20 @@ export function SessionsButton({ isZh }: SessionsButtonProps) {
             </DialogTitle>
           </DialogHeader>
           {viewingLog && <LogViewer logFile={viewingLog.logFile} isZh={isZh} />}
+
+          {/* Next Steps — show after completion */}
+          {viewingLog?.status === "completed" && (
+            <NextStepsSuggestion
+              completedSkill={viewingLog.skill}
+              isZh={isZh}
+              onLaunch={(skillId) => {
+                setViewingLog(null);
+                setOpen(false);
+                // Trigger skill launch via custom event (parent listens)
+                window.dispatchEvent(new CustomEvent("aris-launch-skill", { detail: { skillId } }));
+              }}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </>
