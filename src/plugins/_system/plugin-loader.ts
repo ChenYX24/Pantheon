@@ -18,12 +18,14 @@ import type { PluginModule } from "./plugin-types";
 import { plugin as apiManagementPlugin } from "@/plugins/api-management";
 import { plugin as agentTeamsPlugin } from "@/plugins/agent-teams";
 import { plugin as arisPlugin } from "@/plugins/aris-research";
+import { plugin as skillTreePlugin } from "@/plugins/skill-tree";
 
 // ---- All known plugins ----
 const PLUGINS: PluginModule[] = [
   apiManagementPlugin,
   agentTeamsPlugin,
   arisPlugin,
+  skillTreePlugin,
 ];
 
 // ---- Loader ----
