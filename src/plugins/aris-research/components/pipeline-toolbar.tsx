@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { LayoutGrid, Maximize2, Save, Play, Trash2, Plus, Check, FolderOpen, Square, Loader2 } from "lucide-react";
+import { LayoutGrid, Maximize2, Save, Play, Trash2, Plus, Check, FolderOpen, Square, Loader2, RotateCcw } from "lucide-react";
 import { PIPELINE_TEMPLATES } from "../pipeline-templates";
 import { getPipelinesSync } from "../pipeline-store";
 
@@ -25,6 +25,8 @@ interface PipelineToolbarProps {
   onSave: () => void;
   onRun: () => void;
   onStop: () => void;
+  onResume?: () => void;
+  canResume?: boolean;
   onNew: () => void;
   onDelete: () => void;
   hasNodes: boolean;
@@ -43,6 +45,8 @@ export function PipelineToolbar({
   onSave,
   onRun,
   onStop,
+  onResume,
+  canResume,
   onNew,
   onDelete,
   hasNodes,
@@ -62,8 +66,11 @@ export function PipelineToolbar({
         placeholder={isZh ? "流水线名称" : "Pipeline name"}
       />
 
-      {/* Template selector */}
-      <Select onValueChange={onLoadTemplate}>
+      {/* Template selector — fires onLoadTemplate then resets to placeholder */}
+      <Select
+        value=""
+        onValueChange={(v) => { if (v) onLoadTemplate(v); }}
+      >
         <SelectTrigger className="h-7 text-xs w-36">
           <SelectValue placeholder={isZh ? "模板..." : "Template..."} />
         </SelectTrigger>
@@ -76,9 +83,12 @@ export function PipelineToolbar({
         </SelectContent>
       </Select>
 
-      {/* Load saved pipelines */}
+      {/* Load saved pipelines — fires onLoadSaved then resets to placeholder */}
       {saved.length > 0 && (
-        <Select onValueChange={onLoadSaved}>
+        <Select
+          value=""
+          onValueChange={(v) => { if (v) onLoadSaved(v); }}
+        >
           <SelectTrigger className="h-7 text-xs w-36">
             <SelectValue placeholder={isZh ? "已保存..." : "Saved..."} />
           </SelectTrigger>
@@ -111,6 +121,13 @@ export function PipelineToolbar({
         {saveStatus === "saved" ? <Check className="h-3 w-3 text-green-500" /> : <Save className="h-3 w-3" />}
         {saveStatus === "saved" ? (isZh ? "已保存" : "Saved") : (isZh ? "保存" : "Save")}
       </Button>
+
+      {canResume && !isRunning && (
+        <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs gap-1 border-amber-500 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950" onClick={onResume}>
+          <RotateCcw className="h-3 w-3" />
+          {isZh ? "恢复" : "Resume"}
+        </Button>
+      )}
 
       {isRunning ? (
         <Button size="sm" variant="destructive" className="h-7 px-2.5 text-xs gap-1" onClick={onStop}>

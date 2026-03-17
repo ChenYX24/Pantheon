@@ -16,10 +16,14 @@ import type { PluginModule } from "./plugin-types";
 // ---- Static plugin imports ----
 // Add new plugin imports here:
 import { plugin as apiManagementPlugin } from "@/plugins/api-management";
+import { plugin as agentTeamsPlugin } from "@/plugins/agent-teams";
+import { plugin as arisPlugin } from "@/plugins/aris-research";
 
 // ---- All known plugins ----
 const PLUGINS: PluginModule[] = [
   apiManagementPlugin,
+  agentTeamsPlugin,
+  arisPlugin,
 ];
 
 // ---- Loader ----

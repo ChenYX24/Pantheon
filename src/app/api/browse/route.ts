@@ -7,31 +7,31 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { isPathAllowed } from "@/lib/path-security";
 
 export const dynamic = "force-dynamic";
-
-// Only allow browsing certain root paths for safety
-const ALLOWED_ROOTS = [
-  os.homedir(),
-  "C:\\",
-  "D:\\",
-  "E:\\",
-  "F:\\",
-  "/home",
-  "/Users",
-  "/mnt",
-  "/opt",
-];
-
-function isPathAllowed(targetPath: string): boolean {
-  const normalized = path.resolve(targetPath);
-  return ALLOWED_ROOTS.some((root) => normalized.startsWith(path.resolve(root)));
-}
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const dirPath = searchParams.get("path");
+
+    // Open folder in system file explorer
+    const openPath = searchParams.get("open");
+    if (openPath && isPathAllowed(openPath)) {
+      const { exec } = await import("child_process");
+      const normalizedPath = path.resolve(openPath);
+      if (fs.existsSync(normalizedPath)) {
+        const cmd = process.platform === "win32"
+          ? `explorer "${normalizedPath}"`
+          : process.platform === "darwin"
+            ? `open "${normalizedPath}"`
+            : `xdg-open "${normalizedPath}"`;
+        exec(cmd);
+        return NextResponse.json({ ok: true });
+      }
+      return NextResponse.json({ error: "Path not found" }, { status: 404 });
+    }
 
     // Special: list drive roots
     if (!dirPath || dirPath === "__drives__") {

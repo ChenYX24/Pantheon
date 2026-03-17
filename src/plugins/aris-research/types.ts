@@ -111,6 +111,15 @@ export interface StageData {
   updatedAt?: string;
 }
 
+/** Extended pipeline with execution state reference */
+export interface PipelineWithState extends Pipeline {
+  executionState?: {
+    lastCompletedNodeId: string;
+    startedAt: string;
+    status: "running" | "completed" | "error" | "paused";
+  };
+}
+
 /** Runtime state of a research workflow */
 export interface ResearchState {
   currentWorkflow: string | null;

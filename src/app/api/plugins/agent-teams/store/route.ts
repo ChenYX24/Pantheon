@@ -3,8 +3,8 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-const DATA_DIR = path.join(os.homedir(), ".claude", "aris-data");
-const ALLOWED_KEYS = ["config", "research-state", "pipelines", "stage-data", "execution-states"];
+const DATA_DIR = path.join(os.homedir(), ".claude", "scc-data", "teams");
+const ALLOWED_KEYS = ["teams", "runs"];
 
 interface Envelope<T = unknown> {
   version: number;
@@ -50,16 +50,19 @@ function writeEnvelope(key: string, data: unknown, currentVersion: number): Enve
   return envelope;
 }
 
-/** GET /api/plugins/aris-research/store?key=config */
+/** GET /api/plugins/agent-teams/store?key=teams */
 export async function GET(req: NextRequest) {
   const key = req.nextUrl.searchParams.get("key");
   if (!key || !ALLOWED_KEYS.includes(key)) {
-    return NextResponse.json({ error: `Invalid key. Allowed: ${ALLOWED_KEYS.join(", ")}` }, { status: 400 });
+    return NextResponse.json(
+      { error: `Invalid key. Allowed: ${ALLOWED_KEYS.join(", ")}` },
+      { status: 400 }
+    );
   }
   return NextResponse.json(readEnvelope(key));
 }
 
-/** PUT /api/plugins/aris-research/store */
+/** PUT /api/plugins/agent-teams/store */
 export async function PUT(req: NextRequest) {
   const body = await req.json();
   const { key, data, expectedVersion } = body as {
@@ -69,7 +72,10 @@ export async function PUT(req: NextRequest) {
   };
 
   if (!key || !ALLOWED_KEYS.includes(key)) {
-    return NextResponse.json({ error: `Invalid key. Allowed: ${ALLOWED_KEYS.join(", ")}` }, { status: 400 });
+    return NextResponse.json(
+      { error: `Invalid key. Allowed: ${ALLOWED_KEYS.join(", ")}` },
+      { status: 400 }
+    );
   }
 
   const current = readEnvelope(key);

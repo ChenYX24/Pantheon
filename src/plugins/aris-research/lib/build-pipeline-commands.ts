@@ -1,8 +1,33 @@
 /**
  * Build ordered pipeline commands via topological sort
  */
-import type { Pipeline, PipelineNode, PipelineEdge, ArisSkill, ArisParam } from "../types";
+import type { Pipeline, PipelineNode, PipelineEdge, ArisSkill, ArisParam, SkillCategory } from "../types";
 import { ARIS_SKILLS } from "../skill-data";
+
+/** Result of building a command with workspace context */
+export interface BuildCommandResult {
+  command: string;        // the /skill-name args
+  stageContext: string;   // description of what upstream stages produce
+  outputDir: string;      // where this skill should write outputs (relative)
+}
+
+/** Map skill category to its conventional output directory */
+const CATEGORY_OUTPUT_DIR: Record<SkillCategory, string> = {
+  research: "agent-docs/knowledge/",
+  workflow: "agent-docs/plan/",
+  experiment: "experiments/",
+  paper: "paper/",
+  utility: "agent-docs/",
+};
+
+/** Map skill category to a human-readable description of its outputs */
+const CATEGORY_OUTPUT_DESCRIPTION: Record<SkillCategory, string> = {
+  research: "literature reviews, idea lists, novelty reports, and analysis in agent-docs/knowledge/",
+  workflow: "pipeline plans and orchestration notes in agent-docs/plan/",
+  experiment: "experiment scripts, configs, and results in experiments/",
+  paper: "paper drafts, figures, and LaTeX files in paper/",
+  utility: "utility outputs and logs in agent-docs/",
+};
 
 /** Build the command string from skill + param values */
 export function buildCommand(skill: ArisSkill, values: Record<string, string>): string {
@@ -20,6 +45,28 @@ export function buildCommand(skill: ArisSkill, values: Record<string, string>): 
   }
 
   return parts.join(" ");
+}
+
+/** Build command with workspace-aware context */
+export function buildCommandWithContext(
+  skill: ArisSkill,
+  values: Record<string, string>,
+  upstreamSkills?: ArisSkill[]
+): BuildCommandResult {
+  const command = buildCommand(skill, values);
+  const outputDir = CATEGORY_OUTPUT_DIR[skill.category] ?? "agent-docs/";
+
+  // Build stage context from upstream skills
+  let stageContext = "";
+  if (upstreamSkills && upstreamSkills.length > 0) {
+    const lines = upstreamSkills.map((us) => {
+      const desc = CATEGORY_OUTPUT_DESCRIPTION[us.category] ?? "outputs in agent-docs/";
+      return `- ${us.name}: produces ${desc}`;
+    });
+    stageContext = lines.join("\n");
+  }
+
+  return { command, stageContext, outputDir };
 }
 
 /** Check if all required params are filled */
@@ -70,21 +117,55 @@ function topoSort(nodes: PipelineNode[], edges: PipelineEdge[]): PipelineNode[] 
   return sorted;
 }
 
-/** Build ordered commands for a pipeline */
+/** Build ordered commands for a pipeline (with optional workspace context) */
 export function buildPipelineCommands(
   pipeline: Pipeline
-): { nodeId: string; skillId: string; command: string; skillName: string }[] {
+): { nodeId: string; skillId: string; command: string; skillName: string; stageContext: string; outputDir: string }[] {
   const sorted = topoSort(pipeline.nodes, pipeline.edges);
+
+  // Build adjacency map: target -> source nodes (for upstream lookup)
+  const incomingMap = new Map<string, string[]>();
+  for (const e of pipeline.edges) {
+    const existing = incomingMap.get(e.target) ?? [];
+    existing.push(e.source);
+    incomingMap.set(e.target, existing);
+  }
+
+  // Map nodeId -> skill for upstream resolution
+  const nodeSkillMap = new Map<string, ArisSkill>();
+  for (const node of pipeline.nodes) {
+    const skill = ARIS_SKILLS.find((s) => s.id === node.skillId);
+    if (skill) nodeSkillMap.set(node.id, skill);
+  }
+
   return sorted.map((node) => {
     const skill = ARIS_SKILLS.find((s) => s.id === node.skillId);
     if (!skill) {
-      return { nodeId: node.id, skillId: node.skillId, command: `# Unknown skill: ${node.skillId}`, skillName: node.skillId };
+      return {
+        nodeId: node.id,
+        skillId: node.skillId,
+        command: `# Unknown skill: ${node.skillId}`,
+        skillName: node.skillId,
+        stageContext: "",
+        outputDir: "agent-docs/",
+      };
     }
+
+    // Resolve upstream skills from incoming edges
+    const upstreamNodeIds = incomingMap.get(node.id) ?? [];
+    const upstreamSkills = upstreamNodeIds
+      .map((nid) => nodeSkillMap.get(nid))
+      .filter((s): s is ArisSkill => !!s);
+
+    const result = buildCommandWithContext(skill, node.paramValues, upstreamSkills);
+
     return {
       nodeId: node.id,
       skillId: node.skillId,
-      command: buildCommand(skill, node.paramValues),
+      command: result.command,
       skillName: skill.name,
+      stageContext: result.stageContext,
+      outputDir: result.outputDir,
     };
   });
 }

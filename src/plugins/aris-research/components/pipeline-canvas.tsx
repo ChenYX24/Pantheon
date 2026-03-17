@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useMemo, type DragEvent } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect, type DragEvent } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -25,6 +25,7 @@ import { autoLayout } from "../lib/auto-layout";
 import { PIPELINE_TEMPLATES } from "../pipeline-templates";
 import { savePipeline, getPipeline } from "../pipeline-store";
 import { PipelineExecutor, type ExecutionEvent } from "../lib/pipeline-executor";
+import { getExecutionState, clearExecutionState } from "../lib/execution-state";
 import { nodeTypes } from "./skill-node";
 import { SkillPalette } from "./skill-palette";
 import { PipelineToolbar } from "./pipeline-toolbar";
@@ -85,7 +86,14 @@ function PipelineCanvasInner({ locale }: { locale: string }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [executionLogs, setExecutionLogs] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState(true);
+  const [canResume, setCanResume] = useState(false);
+  const [resumeNodeId, setResumeNodeId] = useState<string | null>(null);
+  const [workspacePath, setWorkspacePath] = useState<string | null>(null);
+  const [workspaceName, setWorkspaceName] = useState<string | null>(null);
   const executorRef = useRef<PipelineExecutor | null>(null);
+  // True when executor is actively running in THIS browser tab (not restored from reload)
+  const executorActiveRef = useRef(false);
 
   const selectedNode = useMemo(() => {
     if (!selectedNodeId) return null;
@@ -154,6 +162,116 @@ function PipelineCanvasInner({ locale }: { locale: string }) {
     setTimeout(() => fitView({ padding: 0.2 }), 100);
   }, [setNodes, setEdges, fitView, isZh]);
 
+  // Check for resumable execution state when pipeline changes
+  const checkResumable = useCallback(async (plId: string) => {
+    try {
+      const state = await getExecutionState(plId);
+      if (!state || state.completedNodes.length === 0) {
+        setCanResume(false);
+        setResumeNodeId(null);
+        return;
+      }
+
+      // Restore node statuses from persisted state
+      for (const id of state.completedNodes) {
+        updateNodeStatus(id, "done");
+      }
+      for (const id of Object.keys(state.errorNodes)) {
+        updateNodeStatus(id, "error");
+      }
+      for (const id of state.skippedNodes) {
+        updateNodeStatus(id, "skipped");
+      }
+      // Restore logs
+      if (state.logs.length > 0) {
+        setExecutionLogs(state.logs);
+        setShowLogs(true);
+      }
+
+      // If state says "running", verify by checking live sessions
+      if (state.status === "running") {
+        try {
+          const res = await fetch("/api/plugins/aris-research/sessions");
+          const data = await res.json();
+          const hasRunning = (data.sessions ?? []).some(
+            (s: { status: string }) => s.status === "running"
+          );
+          if (hasRunning) {
+            // Truly still running — enable polling
+            setIsRunning(true);
+            setCanResume(false);
+          } else {
+            // State says running but no live sessions — it finished while we were away
+            setIsRunning(false);
+            setCanResume(true);
+            setResumeNodeId(state.completedNodes[state.completedNodes.length - 1]);
+          }
+        } catch {
+          setIsRunning(false);
+          setCanResume(true);
+          setResumeNodeId(state.completedNodes[state.completedNodes.length - 1]);
+        }
+      } else if (state.status === "completed") {
+        // Fully completed — no resume needed
+        setCanResume(false);
+        setResumeNodeId(null);
+        setIsRunning(false);
+      } else {
+        // Paused or error — allow resume
+        setCanResume(true);
+        setResumeNodeId(state.completedNodes[state.completedNodes.length - 1]);
+        setIsRunning(false);
+      }
+    } catch {
+      setCanResume(false);
+      setResumeNodeId(null);
+    }
+  }, [updateNodeStatus]);
+
+  // Poll sessions API to update running node statuses (works even after page reload)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!isRunning) {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      return;
+    }
+
+    const pollSessions = async () => {
+      // Don't interfere if executor is actively running in this tab
+      if (executorActiveRef.current) return;
+
+      try {
+        const res = await fetch("/api/plugins/aris-research/sessions");
+        const data = await res.json();
+        const sessions = data.sessions ?? [];
+        const hasRunning = sessions.some((s: { status: string }) => s.status === "running");
+
+        if (!hasRunning) {
+          // No more live sessions — execution is done
+          setIsRunning(false);
+          // Refresh node statuses from execution state
+          const state = await getExecutionState(pipelineId);
+          if (state) {
+            for (const id of state.completedNodes) updateNodeStatus(id, "done");
+            for (const id of Object.keys(state.errorNodes)) updateNodeStatus(id, "error");
+            for (const id of state.skippedNodes) updateNodeStatus(id, "skipped");
+          }
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    pollingRef.current = setInterval(pollSessions, 10000);
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [isRunning, pipelineId, updateNodeStatus]);
+
   // Load saved pipeline
   const handleLoadSaved = useCallback(async (plId: string) => {
     const pl = await getPipeline(plId);
@@ -166,7 +284,9 @@ function PipelineCanvasInner({ locale }: { locale: string }) {
     setSelectedNodeId(null);
     setSaveStatus("idle");
     setTimeout(() => fitView({ padding: 0.2 }), 100);
-  }, [setNodes, setEdges, fitView, isZh]);
+    // Check if there's a resumable execution state
+    checkResumable(pl.id);
+  }, [setNodes, setEdges, fitView, isZh, checkResumable]);
 
   const handleAutoLayout = useCallback(() => {
     const laid = autoLayout(fromFlowNodes(nodes), fromFlowEdges(edges));
@@ -181,11 +301,8 @@ function PipelineCanvasInner({ locale }: { locale: string }) {
   }, [currentPipeline]);
 
   // --- Execution ---
-  const handleRun = useCallback(() => {
-    setIsRunning(true);
-    setExecutionLogs([]);
-
-    const executor = new PipelineExecutor(currentPipeline, (event: ExecutionEvent) => {
+  const createExecutionListener = useCallback((onDone?: () => void) => {
+    return (event: ExecutionEvent) => {
       if (event.type === "node-status" && event.nodeId && event.status) {
         updateNodeStatus(event.nodeId, event.status);
       }
@@ -194,18 +311,75 @@ function PipelineCanvasInner({ locale }: { locale: string }) {
       }
       if (event.type === "pipeline-done" || event.type === "pipeline-error") {
         setIsRunning(false);
+        setCanResume(false);
+        setResumeNodeId(null);
         setExecutionLogs((prev) => [...prev, `\n=== ${event.message} ===`]);
+        onDone?.();
       }
-    });
+    };
+  }, [updateNodeStatus]);
+
+  const handleRun = useCallback(async () => {
+    setIsRunning(true);
+    setExecutionLogs([]);
+    setShowLogs(true);
+    setCanResume(false);
+    executorActiveRef.current = true;
+
+    // Create workspace for this run
+    try {
+      // Use pipeline name as topic; only fall back to brief if it's not placeholder text
+      const briefText = program.brief?.trim() ?? "";
+      const isPlaceholder = !briefText || briefText.includes("Describe your research") || briefText.includes("Research Direction") || briefText.length < 5;
+      const topic = isPlaceholder ? name : briefText.slice(0, 100);
+      const res = await fetch("/api/plugins/aris-research/workspaces", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pipelineId, topic }),
+      });
+      const ws = await res.json();
+      if (ws.path) {
+        setWorkspacePath(ws.path);
+        setWorkspaceName(ws.name);
+      }
+    } catch {
+      // Non-blocking — execution continues without workspace
+    }
+
+    const executor = new PipelineExecutor(
+      currentPipeline,
+      createExecutionListener(() => { executorActiveRef.current = false; }),
+      { maxParallel: 2 }
+    );
 
     executorRef.current = executor;
     executor.run();
-  }, [currentPipeline, updateNodeStatus]);
+  }, [currentPipeline, createExecutionListener, program.brief, name, pipelineId]);
+
+  const handleResume = useCallback(() => {
+    if (!resumeNodeId) return;
+    setIsRunning(true);
+    setExecutionLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] Resuming from checkpoint...`]);
+    executorActiveRef.current = true;
+
+    const executor = new PipelineExecutor(
+      currentPipeline,
+      createExecutionListener(() => { executorActiveRef.current = false; }),
+      { maxParallel: 2, resumeFrom: resumeNodeId }
+    );
+
+    executorRef.current = executor;
+    setCanResume(false);
+    executor.run();
+  }, [currentPipeline, resumeNodeId, createExecutionListener]);
 
   const handleStop = useCallback(() => {
     executorRef.current?.abort();
+    executorActiveRef.current = false;
     setIsRunning(false);
-  }, []);
+    // After stop, check if we can resume later
+    setTimeout(() => checkResumable(pipelineId), 500);
+  }, [checkResumable, pipelineId]);
 
   const handleNew = useCallback(() => {
     setNodes([]); setEdges([]);
@@ -215,6 +389,8 @@ function PipelineCanvasInner({ locale }: { locale: string }) {
     setSelectedNodeId(null);
     setSaveStatus("idle");
     setExecutionLogs([]);
+    setCanResume(false);
+    setResumeNodeId(null);
   }, [setNodes, setEdges, isZh]);
 
   return (
@@ -226,6 +402,7 @@ function PipelineCanvasInner({ locale }: { locale: string }) {
         onAutoLayout={handleAutoLayout}
         onFitView={() => fitView({ padding: 0.2 })}
         onSave={handleSave} onRun={handleRun} onStop={handleStop}
+        onResume={handleResume} canResume={canResume}
         onNew={handleNew} onDelete={handleNew}
         hasNodes={nodes.length > 0} isRunning={isRunning}
         isZh={isZh} saveStatus={saveStatus}
@@ -257,14 +434,35 @@ function PipelineCanvasInner({ locale }: { locale: string }) {
           </ReactFlow>
 
           {/* Execution log overlay */}
-          {executionLogs.length > 0 && (
+          {executionLogs.length > 0 && showLogs && (
             <div className="absolute bottom-2 left-14 right-2 max-h-[150px] bg-zinc-950/90 backdrop-blur-sm text-zinc-200 rounded-lg p-3 overflow-y-auto font-mono text-[11px] leading-relaxed border border-zinc-700">
+              <button
+                onClick={() => setShowLogs(false)}
+                className="absolute top-1 right-2 text-zinc-400 hover:text-zinc-100 text-xs px-1"
+                title={isZh ? "关闭日志" : "Close logs"}
+              >
+                ✕
+              </button>
+              {workspaceName && (
+                <div className="text-zinc-400 mb-1 text-[10px]">
+                  {workspaceName} — {workspacePath}
+                </div>
+              )}
               {executionLogs.map((log, i) => (
                 <div key={i} className={log.includes("ERROR") ? "text-red-400" : log.includes("Completed") ? "text-green-400" : ""}>
                   {log}
                 </div>
               ))}
             </div>
+          )}
+          {/* Show logs button when hidden */}
+          {executionLogs.length > 0 && !showLogs && (
+            <button
+              onClick={() => setShowLogs(true)}
+              className="absolute bottom-2 right-2 bg-zinc-950/80 text-zinc-300 hover:text-zinc-100 rounded px-2 py-1 text-[11px] font-mono border border-zinc-700"
+            >
+              {isZh ? "显示日志" : "Show Logs"} ({executionLogs.length})
+            </button>
           )}
         </div>
 

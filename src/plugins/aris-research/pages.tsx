@@ -12,6 +12,7 @@ import { ConfigPanel } from "./components/config-panel";
 import { SkillLaunchDialog } from "./components/skill-launch-dialog";
 import { StagePipeline } from "./components/stage-pipeline";
 import { SessionsButton } from "./components/sessions-panel";
+import { WorkspacesButton } from "./components/workspace-panel";
 
 const PipelineCanvas = lazy(() =>
   import("./components/pipeline-canvas").then((m) => ({ default: m.PipelineCanvas }))
@@ -78,6 +79,7 @@ export function ArisResearchPage() {
           <Badge variant="outline" className="text-xs">
             {ARIS_SKILLS.length} {t("skillCount")}
           </Badge>
+          <WorkspacesButton isZh={isZh} locale={locale} />
           <SessionsButton isZh={isZh} />
           <ConfigPanel />
           {showCustomPipeline ? (
