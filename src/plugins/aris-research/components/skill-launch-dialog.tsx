@@ -23,10 +23,12 @@ import {
 import {
   MessageCircle,
   Terminal,
+  Rocket,
   Copy,
   Check,
   AlertCircle,
   GitBranch,
+  Loader2,
 } from "lucide-react";
 import type { ArisSkill, ArisParam } from "../types";
 import { ARIS_SKILLS } from "../skill-data";
@@ -153,6 +155,8 @@ export function SkillLaunchDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const [launched, setLaunched] = useState(false);
 
   const params = skill?.params ?? [];
   const deps = skill?.dependencies ?? [];
@@ -193,6 +197,30 @@ export function SkillLaunchDialog({
     resetState();
   };
 
+  const handleRunBackground = async () => {
+    setSubmitted(true);
+    if (validationErrors.length > 0) return;
+    setLaunching(true);
+    try {
+      const res = await fetch("/api/plugins/aris-research/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skill: skill?.name ?? "unknown", command }),
+      });
+      if (res.ok) {
+        setLaunched(true);
+        setTimeout(() => {
+          onOpenChange(false);
+          resetState();
+        }, 1500);
+      }
+    } catch {
+      // silent
+    } finally {
+      setLaunching(false);
+    }
+  };
+
   const handleCopyTerminal = () => {
     setSubmitted(true);
     if (validationErrors.length > 0) return;
@@ -205,6 +233,8 @@ export function SkillLaunchDialog({
     setValues({});
     setSubmitted(false);
     setCopied(false);
+    setLaunching(false);
+    setLaunched(false);
   };
 
   const handleOpenChange = (o: boolean) => {
@@ -322,20 +352,28 @@ export function SkillLaunchDialog({
             onClick={handleCopyTerminal}
           >
             {copied ? (
-              <>
-                <Check className="h-3.5 w-3.5" />
-                {isZh ? "已复制" : "Copied"}
-              </>
+              <><Check className="h-3.5 w-3.5" />{isZh ? "已复制" : "Copied"}</>
             ) : (
-              <>
-                <Terminal className="h-3.5 w-3.5" />
-                {isZh ? "复制终端命令" : "Copy Terminal"}
-              </>
+              <><Terminal className="h-3.5 w-3.5" />{isZh ? "复制命令" : "Copy Cmd"}</>
             )}
           </Button>
-          <Button size="sm" className="gap-1.5" onClick={handleRunInChat}>
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={handleRunInChat}>
             <MessageCircle className="h-3.5 w-3.5" />
-            {isZh ? "在 Chat 中运行" : "Run in Chat"}
+            Chat
+          </Button>
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={handleRunBackground}
+            disabled={launching || launched}
+          >
+            {launched ? (
+              <><Check className="h-3.5 w-3.5" />{isZh ? "已启动" : "Launched"}</>
+            ) : launching ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" />{isZh ? "启动中..." : "Starting..."}</>
+            ) : (
+              <><Rocket className="h-3.5 w-3.5" />{isZh ? "后台运行" : "Run in BG"}</>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

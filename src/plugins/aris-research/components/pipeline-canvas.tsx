@@ -45,10 +45,11 @@ function toFlowNodes(pNodes: PipelineNode[], isZh: boolean): Node[] {
   }));
 }
 
-function toFlowEdges(pEdges: PipelineEdge[]): Edge[] {
+function toFlowEdges(pEdges: PipelineEdge[], runningNodeIds?: Set<string>): Edge[] {
   return pEdges.map((e) => ({
     id: e.id, source: e.source, target: e.target,
-    animated: false, style: { strokeWidth: 2 },
+    animated: runningNodeIds?.has(e.source) || runningNodeIds?.has(e.target) || false,
+    style: { strokeWidth: 2 },
   }));
 }
 

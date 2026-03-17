@@ -138,7 +138,6 @@ export function SessionsPanel({ isZh }: SessionsPanelProps) {
   const runningCount = sessions.filter((s) => s.status === "running").length;
 
   if (loading) return null;
-  if (sessions.length === 0) return null;
 
   return (
     <>
@@ -160,6 +159,11 @@ export function SessionsPanel({ isZh }: SessionsPanelProps) {
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-4 space-y-2">
+          {sessions.length === 0 && (
+            <p className="text-xs text-muted-foreground text-center py-3">
+              {isZh ? "暂无运行会话。启动一个技能后会在这里显示。" : "No sessions yet. Launch a skill to see it here."}
+            </p>
+          )}
           {sessions.slice(0, 10).map((session) => {
             const cfg = STATUS_CONFIG[session.status] ?? STATUS_CONFIG.unknown;
             return (
