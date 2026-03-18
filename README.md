@@ -1,109 +1,144 @@
-# Super Claude Code
+<p align="center">
+  <img src="docs/logo.png" alt="Super Claude Code" width="120" />
+</p>
 
-[English](./README.md) | [中文](./README_CN.md)
+<h1 align="center">Super Claude Code</h1>
 
-A web dashboard for managing and monitoring [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions, teams, tokens, MCP servers, and configuration files.
+<p align="center">
+  <strong>The management dashboard for Claude Code — monitor, chat, orchestrate, research, and customize.</strong>
+</p>
 
-Built with **Next.js 16** + **TypeScript** + **Tailwind CSS v4** + **shadcn/ui** + **Recharts**
+<p align="center">
+  <a href="#features">Features</a> &bull;
+  <a href="#quick-start">Quick Start</a> &bull;
+  <a href="#screenshots">Screenshots</a> &bull;
+  <a href="#architecture">Architecture</a> &bull;
+  <a href="./README_CN.md">中文</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-4.4.0-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/Next.js-16-black" alt="Next.js" />
+  <img src="https://img.shields.io/badge/TypeScript-5.x-blue" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
+  <img src="https://img.shields.io/badge/i18n-EN%20%7C%20中文-orange" alt="i18n" />
+</p>
+
+<!-- TODO: Add demo GIF here -->
+<!-- ![Demo](docs/demo.gif) -->
+
+---
 
 ## Features
 
-### Overview Dashboard
-- 6 stat cards (Total Sessions, Active Teams, Agents, Token Usage, Avg Cost/Session, Cache Hit Rate)
-- Active Processes detection with status indicators
-- Token Summary with 7-day mini trend charts
-- Recent Sessions quick access
-- Quick Actions panel
-- Teams overview
+### Dashboard & Monitoring
 
-### Team Board
-- Real-time view of team members with status indicators (working / idle / completed / stale / terminated)
-- Task Kanban board (Pending → In Progress → Completed) with task persistence
-- Message stream showing inter-agent communication
-- Past agents discovery and collapsible display
-- Team selector dropdown for multiple teams
+| Feature | Description |
+|---------|-------------|
+| **Overview** | 6 stat cards, active process detection, 7-day token sparkline, quick actions |
+| **Sessions** | Grid/List view, ClaudeGlance colors, search, filters, favorites, markdown export |
+| **Tokens** | Interactive charts with brush zoom, model pie chart, CSV export, cost tracking |
+| **Queue** | Background task queue management with auto-refresh |
 
-### Sessions
-- Grid/List view toggle for all sessions across all projects
-- Color-coded status blocks (ClaudeGlance-style)
-- **Favorites/Star** system with localStorage persistence
-- **Date and Model filters** for quick session lookup
-- **Search** functionality across session names and projects
-- **Sort** options (newest/oldest, cost, tokens)
-- **Auto-refresh** every 10 seconds
-- Card/Terminal view modes with localStorage memory
-- Session detail view with conversation messages
-- File preview for referenced files
-- **Markdown export** for session conversations
-- Deep linking from Team Board to related sessions
+### AI Chat
 
-### Token Usage
-- **Time range selector** (7d / 14d / 30d / all time)
-- **Interactive AreaChart** with Recharts + Brush zoom control
-- **Chart/Table toggle** for data visualization
-- **Paginated table** with per-page controls
-- **Model breakdown PieChart** showing distribution by model
-- **CSV export** (Detail mode & Summary mode)
-- **Today vs Week comparison** statistics
-- **Cache savings** calculation and display
-- Per-session and per-project token consumption tracking
-- Input / Output / Cache Read / Cache Write breakdown
-- Total cost estimation with model-specific pricing
+| Feature | Description |
+|---------|-------------|
+| **Streaming Chat** | GPT-style interface with real-time streaming, tool call visualization |
+| **Multi-Provider** | Switch between Claude and Codex (GPT-5.4 / o3-pro / codex-mini) |
+| **Dual Compare** | Side-by-side Claude vs Codex comparison mode |
+| **Slash Commands** | `/` triggers command menu with fuzzy search and keyboard navigation |
+| **Command Palette** | Ctrl+K global search across pages, commands, sessions |
 
-### Chat
-- **Bubble-style conversation viewer** for interactive session playback
-- **Auto-scroll** to latest messages
-- **Tool call collapse/expand** for better readability
-- **Thinking blocks** display for extended thinking content
-- **Session selector** to switch between sessions
-- Real-time conversation rendering with markdown support
+### Skill Tree
 
-### Toolbox (Configuration Hub)
-- **5-tab interface**: MCP + Skills & Commands + Hooks + Agents + Rules
-- **MCP Marketplace**: 14 popular servers with one-click installation
-  - Includes: Filesystem, Fetch, GitHub, Brave Search, Postgres, Playwright, Memory, Puppeteer, Slack, Sequential Thinking, Time, EverythingSearch, Perplexity, Google Drive
-- **Full CRUD operations** for all tool types (Create, Read, Update, Delete)
-- **Skills & Agents & Rules template marketplace** for quick setup
-- **Help documentation** for each tool type
-- **Summary view** showing counts and status
-- Health check for MCP servers
+| Feature | Description |
+|---------|-------------|
+| **Dual View** | List view (8 categories) + Graph view (React Flow hex nodes with tier bands) |
+| **49+ Skills** | Foundation, Coding, Research, Management, Creative, Integration, Advanced |
+| **Auto-Detect** | Verify Setup button + Scan All batch verification |
+| **Smart Creator** | Describe a skill in natural language — AI analyzes dependencies and creates skill graph |
+| **Config Fields** | Per-skill parameter UI (e.g., SSH server selector for Experiment Runner) |
+| **Usage Examples** | "Try It" section with clickable links and terminal commands |
+| **Dependency Check** | Blocks activation if prerequisites not met, shows warning |
 
-### CLAUDE.md Editor
-- Split-pane editor with live Markdown preview
-- Edit global and project-level CLAUDE.md files
-- Create new CLAUDE.md files via:
-  - **Project presets** (auto-detected from `~/.claude/projects/`)
-  - **Directory browser** (navigate filesystem with drive switching)
-  - **Custom path** (paste any directory path)
-- Delete CLAUDE.md files with confirmation dialog
-- Keyboard shortcut: `Ctrl+S` to save
-- Registry view for all CLAUDE.md files
+### ARIS Research Pipeline
 
-### Settings
-- **Editable configuration** (model selection, theme, feature toggles)
-- **Cost alert settings** with threshold configuration
-- Direct integration with Claude Code settings.json
-- Model defaults and preference management
+| Feature | Description |
+|---------|-------------|
+| **6-Stage Workflow** | Literature → Validation → Design → Experiment → Review → Paper |
+| **Custom Pipeline** | Visual DAG editor with drag-and-drop skill nodes |
+| **4 Templates** | Idea Discovery, Auto Review, Paper Writing, Full Research Pipeline |
+| **Execution Dashboard** | Live logs, mini DAG, file browser, checkpoint approval |
+| **Auto Report** | Structured report with timeline on pipeline completion |
+| **Stage Sync** | Auto-updates stage status when skills complete |
 
-### MCP Server Management (Legacy)
-- View all configured MCP servers (global `settings.json` + per-project `.mcp.json`)
-- Server type, command, args, and environment display
-- Per-project grouping
-- *Note: Replaced by Toolbox in v0.8.0*
+### Agent Teams
 
-### General
-- **Notification system** with cost alerts and bell icon
-- **Dark mode** support (system preference)
-- **Keyboard shortcuts** (1-8 for page navigation)
-- Responsive layout with sidebar navigation
-- Cursor-pointer on all interactive elements
-- Auto-refreshing data from `~/.claude/` directory
+| Feature | Description |
+|---------|-------------|
+| **Visual Canvas** | React Flow team editor with drag-and-drop agent nodes |
+| **5 Presets** | Pair Programming, TDD Squad, Full Stack Team, Research & Analysis, etc. |
+| **Multi-Provider** | Each agent can use different model (Claude / GPT-5.4 / DeepSeek) |
+| **Execution** | Sequential / Parallel / Hierarchical workflows with live logs |
+| **Run History** | Browse past executions with per-agent status and logs |
 
-## Getting Started
+### Configuration
+
+| Feature | Description |
+|---------|-------------|
+| **Toolbox** | 5-tab hub: MCP servers, Skills, Hooks, Agents, Rules — with marketplace |
+| **API Keys** | Manage keys for 15+ providers with balance/model queries |
+| **CLAUDE.md Editor** | Split editor + preview, registry support |
+| **Settings** | Model selectors, bot wizards, permissions, language switch |
+| **Telegram/Feishu** | Bot integration for notifications and remote control |
+
+### Cross-cutting
+
+| Feature | Description |
+|---------|-------------|
+| **i18n** | Full English + Chinese support, one-click switch |
+| **Dark Mode** | System-aware, consistent across all pages |
+| **PWA** | Installable as desktop/mobile app |
+| **Responsive** | Mobile-optimized layouts |
+| **Keyboard Shortcuts** | 1-8 page navigation, Ctrl+K command palette |
+
+---
+
+## Screenshots
+
+<!-- Replace these with actual screenshots after capturing -->
+
+<details>
+<summary><strong>Click to expand screenshots</strong></summary>
+
+| Overview | Chat |
+|----------|------|
+| ![Overview](docs/screenshots/overview.png) | ![Chat](docs/screenshots/chat.png) |
+
+| Skill Tree (List) | Skill Tree (Graph) |
+|--------------------|-------------------|
+| ![Skill Tree List](docs/screenshots/skill-tree-list.png) | ![Skill Tree Graph](docs/screenshots/skill-tree-graph.png) |
+
+| ARIS Research | Agent Teams |
+|---------------|-------------|
+| ![ARIS](docs/screenshots/aris-pipeline.png) | ![Teams](docs/screenshots/agent-teams.png) |
+
+| Tokens | Toolbox |
+|--------|---------|
+| ![Tokens](docs/screenshots/tokens.png) | ![Toolbox](docs/screenshots/toolbox.png) |
+
+</details>
+
+---
+
+## Quick Start
 
 ### Prerequisites
-- Node.js 18+
-- Claude Code installed and configured (`~/.claude/` directory exists)
+
+- **Node.js 18+**
+- **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
+- Optional: **Codex CLI** — `npm install -g @openai/codex` (for dual-provider chat)
 
 ### Install & Run
 
@@ -114,7 +149,7 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open **http://localhost:3000**
 
 ### Build for Production
 
@@ -123,120 +158,108 @@ npm run build
 npm start
 ```
 
-## Project Structure
+### Claude Code Integration
+
+```bash
+# Open dashboard for current session
+claude "/dashboard"
+
+# Open dashboard for all sessions
+claude "/dashboard_all"
+```
+
+---
+
+## Architecture
 
 ```
 dashboard/
 ├── src/
-│   ├── app/                      # Next.js App Router pages
-│   │   ├── page.tsx              # Overview dashboard
-│   │   ├── team/                 # Team Board
-│   │   ├── sessions/             # Sessions grid & detail
-│   │   ├── tokens/               # Token usage & export
-│   │   ├── chat/                 # Chat conversation viewer
-│   │   ├── toolbox/              # Toolbox configuration hub
-│   │   ├── editor/               # CLAUDE.md editor
-│   │   ├── settings/             # Settings panel
-│   │   ├── mcp/                  # MCP server management (legacy)
-│   │   └── api/                  # API routes (19 endpoints)
-│   │       ├── teams/            # Team management
-│   │       ├── sessions/         # Session management
-│   │       ├── tokens/           # Token statistics & export
-│   │       ├── claudemd/         # CLAUDE.md CRUD & registry
-│   │       ├── toolbox/          # Toolbox data & CRUD
-│   │       ├── browse/           # Filesystem browser
-│   │       ├── settings/         # Settings GET/PUT
-│   │       └── processes/        # Process detection
-│   ├── components/               # Shared UI components
-│   │   ├── ui/                   # shadcn/ui primitives
-│   │   ├── team-board/           # Team-specific components
-│   │   ├── sessions/             # Session components (block, detail, list, analytics)
-│   │   ├── toolbox/              # Toolbox dialogs (rule, agent)
-│   │   ├── sidebar-nav.tsx       # Sidebar navigation
-│   │   ├── notification-bell.tsx # Notification system
-│   │   └── markdown-content.tsx  # Markdown renderer
-│   ├── hooks/                    # Custom React hooks
-│   │   ├── use-favorites.ts      # Favorites localStorage hook
-│   │   ├── use-notifications.ts  # Notifications hook
-│   │   └── use-keyboard-shortcuts.ts # Global keyboard shortcuts
-│   └── lib/                      # Core logic
-│       ├── claude-reader.ts      # Teams, tasks, messages + task cache + MCP
-│       ├── session-reader.ts     # Session JSONL + token export + model detection
-│       ├── claudemd.ts           # CLAUDE.md CRUD + Registry
-│       ├── toolbox-reader.ts     # Skills/Commands/Hooks/Agents/Rules reader
-│       ├── mcp-registry.ts       # 14 popular MCP servers registry
-│       ├── tools-registry.ts     # Skills/Agents/Rules template library
-│       ├── format-utils.ts       # Common formatting utilities
-│       ├── process-reader.ts     # Process detection
-│       └── types.ts              # Shared types
-├── public/                       # Static assets
-└── package.json
+│   ├── app/                    # Next.js 16 App Router
+│   │   ├── api/                # 30+ API routes
+│   │   ├── chat/               # Chat page
+│   │   ├── sessions/           # Sessions page
+│   │   ├── tokens/             # Token analytics
+│   │   ├── toolbox/            # Toolbox hub
+│   │   ├── editor/             # CLAUDE.md editor
+│   │   ├── settings/           # Settings
+│   │   ├── queue/              # Task queue
+│   │   └── plugins/[pluginId]/ # Dynamic plugin pages
+│   ├── plugins/                # Modular plugin system
+│   │   ├── skill-tree/         # Skill Tree (1.8K LOC)
+│   │   ├── aris-research/      # ARIS Research (9.6K LOC)
+│   │   ├── agent-teams/        # Agent Teams (3.5K LOC)
+│   │   └── api-management/     # API Key Management
+│   ├── components/             # Shared UI (shadcn/ui)
+│   ├── hooks/                  # Custom React hooks
+│   ├── lib/                    # Core logic
+│   │   ├── providers/          # Claude + Codex CLI adapters
+│   │   ├── execution/          # Shared executor (BaseExecutor, topoSort)
+│   │   ├── api-vault/          # Key store + provider checker
+│   │   └── *.ts                # Readers, formatters, utilities
+│   └── i18n/                   # Internationalization (en, zh-CN)
+├── messages/                   # i18n translation files
+└── public/                     # Static assets + PWA manifest
 ```
 
-## Tech Stack
+### Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Framework | Next.js 16 (App Router) |
-| Language | TypeScript |
-| Styling | Tailwind CSS v4 |
-| UI Components | shadcn/ui |
-| Charts | Recharts |
-| Markdown | react-markdown + remark-gfm |
-| Data Source | Local filesystem (`~/.claude/`) |
-| State | localStorage (favorites, notifications, view preferences) |
+| Framework | **Next.js 16** (App Router + Turbopack) |
+| Language | **TypeScript 5.x** |
+| Styling | **Tailwind CSS v4** |
+| UI | **shadcn/ui** |
+| Graphs | **React Flow** (Skill Tree, ARIS Canvas, Agent Teams) |
+| Charts | **Recharts** (Token analytics) |
+| Data | Local filesystem (`~/.claude/`, `~/.codex/`) |
+| i18n | **next-intl** (EN / 中文) |
+| State | localStorage + file-based persistence |
 
-## Roadmap
+### Supported Models
 
-### Phase 3: Dashboard Enhancement
-- [x] **Settings Panel** — View/edit Claude configuration ✅ v0.8.0
-- [x] **Running Process Detection** — Detect active Claude CLI processes ✅ v0.4.0
-- [x] **Terminal-style Session View** — Render sessions closer to terminal appearance ✅ v0.4.0
-- [x] **MCP Server Health Check** — Detect whether MCP servers are actually running/reachable ✅ v0.8.0
-- [x] **Notification System** — Cost alerts and updates ✅ v0.8.0
+| Provider | Models |
+|----------|--------|
+| **Claude** | claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5 |
+| **OpenAI (Codex)** | gpt-5.4, gpt-5.4-pro, gpt-5.4-mini, gpt-5.3-codex, codex-mini-latest |
+| **OpenAI (Reasoning)** | o3-pro, o3, o4-mini, o1, o1-mini |
+| **OpenAI (GPT)** | gpt-5.3, 5.2, 5, 4.1, 4.1-mini, 4.1-nano, 4o, 4o-mini |
+| **API Providers** | DeepSeek, SiliconFlow, Moonshot, Zhipu, OpenRouter, Groq, Together, Google, Mistral, ... |
 
-### Phase 4: Claude Code Command Integration
-- [x] **/dashboard command** — Open dashboard for current session only ✅ (scripts in `~/.claude/scripts/scc/`)
-- [x] **/dashboard_all command** — Open dashboard for all sessions ✅ (scripts in `~/.claude/scripts/scc/`)
+---
 
-### Phase 5: External Integrations
-- [ ] **Telegram Bot** — Mobile control & notifications
-- [ ] **Docker Integration** — Automated task execution in isolated containers
+## Version History
 
-### Phase 6: Quality & Polish
-- [ ] **Code Quality**: Split large files (toolbox 900+ lines), test coverage, code review
-- [ ] **UX Polish**: Responsive optimization, dark mode full coverage, unified loading states
-- [ ] **Mobile Remote Management**: Mobile project management and control
+| Version | Date | Highlights |
+|---------|------|------------|
+| **v4.4.0** | 2026-03-18 | Skill Tree (smart creator + auto-detect + config), ARIS report, Agent Teams refactor, Chat perf |
+| **v4.3.0** | 2026-03-17 | Skill Tree dual view (list + graph), 49 skills, 8 categories |
+| **v4.1.0** | 2026-03-17 | ARIS results, checkpoints, notifications, Agent Teams executor |
+| **v4.0.0** | 2026-03-17 | Agent Teams canvas, ARIS engine, workspace system |
+| **v3.1.0** | 2026-03-16 | Agent Teams plugin, ARIS Research plugin, Turbopack |
+| **v3.0.0** | 2026-03-16 | API Management, performance optimization, full i18n |
+| **v2.1.0** | 2026-02-24 | Settings refactor, Queue, Telegram/Feishu, testing |
+| **v2.0.0** | 2026-02-23 | Chat streaming, Codex integration, provider system |
+| **v1.0.0** | 2026-02-20 | Chat GPT-style, sessions, toolbox, notifications |
 
-### AI Toolbox (Auto-task Ecosystem)
+---
 
-> Independent modules with a unified task intake — AI auto-dispatches and executes.
+## Contributing
 
-#### Creative & Content Production
-- [ ] **Video Editing Service** — Receive footage + requirements, AI auto-edits/composes/subtitles
-- [ ] **Design Service** — Receive design briefs, AI generates posters/logos/UI mockups
-- [ ] **Video Info Extraction** — Extract metadata, transcripts, key frames
-- [ ] **Mobile Media Upload** — Send photos & videos from mobile, trigger pipelines
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Commit changes: `git commit -m "feat: add my feature"`
+4. Push: `git push origin feature/my-feature`
+5. Open a Pull Request
 
-#### Programming & Development
-- [ ] **Coding Service** — Receive requirements, AI auto-codes + tests + delivers
-- [ ] **Code Review Service** — Submit PR/snippets, AI generates review reports
-- [ ] **Bug Fix Service** — Describe issue + repo URL, AI locates and fixes
+---
 
-#### Financial Market Analysis
-- [ ] **Precious Metals** — Real-time gold & silver tracking, trend analysis
-- [ ] **Crypto** — Bitcoin and major crypto monitoring, alerts
-- [ ] **Stock Indices** — S&P 500, NASDAQ, CSI 300, HSI dashboards
+## License
 
-#### Multi-Platform Content Hub
-- [ ] **GitHub / Xiaohongshu / HF / Papers** — Manage, categorize, push notifications
-- [ ] **Smart Routing** — AI-powered content routing to relevant channels
+MIT
 
-#### Unified API Management Platform
-- [ ] **Usage Dashboard + Cost Analytics + Budget Alerts + Key Management**
+---
 
-### Backlog
-- [ ] Token usage charts / time series
-- [ ] Multi-user support
-- [ ] WebSocket-based live updates
-- [ ] i18n (English / Chinese)
+<p align="center">
+  Built with Claude Code + Super Claude Code
+</p>
