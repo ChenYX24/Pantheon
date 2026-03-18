@@ -29,31 +29,24 @@ import { LayoutGrid, Maximize2, Save, Play, RotateCcw } from "lucide-react";
 import type { AgentTeam, TeamMember } from "../types";
 import * as store from "../team-store";
 import { AgentNode, type AgentNodeData, type AgentNodeStatus } from "./agent-node";
-import { DecisionNode } from "./decision-node";
-import { AggregatorNode } from "./aggregator-node";
 import { MemberPalette } from "./member-palette";
 import { ExecutionPanel, type ExecutionNodeStatus } from "./execution-panel";
 import { TeamExecutor, type TeamExecutorOptions } from "../lib/team-executor";
 import type { ExecutionEvent } from "@/lib/execution";
 
 // ---- Node types (OUTSIDE component for React Flow perf) ----
+// NOTE: DecisionNode and AggregatorNode exist in ./decision-node.tsx and
+// ./aggregator-node.tsx but are not yet wired to execution logic, so they
+// are excluded from the active nodeTypes to avoid confusing users.
 const nodeTypes = {
   agent: AgentNode,
-  decision: DecisionNode,
-  aggregator: AggregatorNode,
 };
 
 // ---- Layout constants ----
 const AGENT_NODE_WIDTH = 260;
 const AGENT_NODE_HEIGHT = 120;
-const DECISION_NODE_SIZE = 120;
-const AGGREGATOR_NODE_SIZE = 100;
 
 // ---- Helpers ----
-function generateId(prefix = "n") {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-}
-
 function generateMemberId(): string {
   return `member-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -118,13 +111,7 @@ function autoLayoutNodes(nodes: Node[], edges: Edge[]): Node[] {
   g.setGraph({ rankdir: "TB", ranksep: 80, nodesep: 60 });
 
   for (const node of nodes) {
-    const w = node.type === "decision" ? DECISION_NODE_SIZE
-      : node.type === "aggregator" ? AGGREGATOR_NODE_SIZE
-      : AGENT_NODE_WIDTH;
-    const h = node.type === "decision" ? DECISION_NODE_SIZE
-      : node.type === "aggregator" ? AGGREGATOR_NODE_SIZE
-      : AGENT_NODE_HEIGHT;
-    g.setNode(node.id, { width: w, height: h });
+    g.setNode(node.id, { width: AGENT_NODE_WIDTH, height: AGENT_NODE_HEIGHT });
   }
   for (const edge of edges) {
     g.setEdge(edge.source, edge.target);
@@ -134,15 +121,9 @@ function autoLayoutNodes(nodes: Node[], edges: Edge[]): Node[] {
 
   return nodes.map((node) => {
     const pos = g.node(node.id);
-    const w = node.type === "decision" ? DECISION_NODE_SIZE
-      : node.type === "aggregator" ? AGGREGATOR_NODE_SIZE
-      : AGENT_NODE_WIDTH;
-    const h = node.type === "decision" ? DECISION_NODE_SIZE
-      : node.type === "aggregator" ? AGGREGATOR_NODE_SIZE
-      : AGENT_NODE_HEIGHT;
     return {
       ...node,
-      position: { x: pos.x - w / 2, y: pos.y - h / 2 },
+      position: { x: pos.x - AGENT_NODE_WIDTH / 2, y: pos.y - AGENT_NODE_HEIGHT / 2 },
     };
   });
 }
@@ -190,17 +171,27 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
   useEffect(() => {
     if (initialized) return;
 
-    const initialNodes = membersToNodes(
-      team.members,
-      (team as unknown as { canvas?: { memberPositions?: Record<string, { x: number; y: number }> } }).canvas?.memberPositions,
-      isZh,
-    );
-    const initialEdges = membersToEdges(team.members);
+    // Convert TeamMemberNode[] to Record for membersToNodes
+    const savedPositions: Record<string, { x: number; y: number }> | undefined =
+      team.canvas?.memberPositions && team.canvas.memberPositions.length > 0
+        ? Object.fromEntries(
+            team.canvas.memberPositions.map((n) => [n.memberId, n.position])
+          )
+        : undefined;
 
-    // Check if we have saved positions
-    const hasPositions = (team as unknown as { canvas?: { memberPositions?: Record<string, { x: number; y: number }> } }).canvas?.memberPositions;
+    const initialNodes = membersToNodes(team.members, savedPositions, isZh);
 
-    if (hasPositions && Object.keys(hasPositions).length > 0) {
+    // Restore saved edges or generate from member relationships
+    const initialEdges = team.canvas?.edges && team.canvas.edges.length > 0
+      ? team.canvas.edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          style: { strokeWidth: 2 },
+        }))
+      : membersToEdges(team.members);
+
+    if (savedPositions && Object.keys(savedPositions).length > 0) {
       setNodes(initialNodes);
       setEdges(initialEdges);
     } else {
@@ -247,27 +238,8 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
 
     const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
 
-    // Decision node
-    if (tpl.role === "decision" || tpl.category === "utilities" && tpl.id === "tpl-decision") {
-      setNodes((nds) => [...nds, {
-        id: generateId("dec"),
-        type: "decision",
-        position,
-        data: { condition: isZh ? "条件?" : "Condition?", isZh },
-      }]);
-      return;
-    }
-
-    // Aggregator node
-    if (tpl.role === "aggregator" || tpl.category === "utilities" && tpl.id === "tpl-aggregator") {
-      setNodes((nds) => [...nds, {
-        id: generateId("agg"),
-        type: "aggregator",
-        position,
-        data: { label: isZh ? "合并" : "Merge", inputCount: 0, isZh },
-      }]);
-      return;
-    }
+    // Skip utility nodes (decision/aggregator) — not yet wired to execution
+    if (tpl.category === "utilities") return;
 
     // Agent node
     const memberId = generateMemberId();
@@ -326,17 +298,25 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
     const updatedTeam: AgentTeam = {
       ...team,
       members: updatedMembers,
+      canvas: {
+        memberPositions: Object.entries(positions).map(([memberId, pos]) => ({
+          memberId,
+          position: pos,
+        })),
+        edges: edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          type: (e.data?.type as "data" | "control" | "review") ?? "data",
+          label: e.label as string | undefined,
+        })),
+      },
       updated_at: new Date().toISOString(),
-    };
-
-    // Attach canvas data (positions)
-    (updatedTeam as unknown as { canvas: { memberPositions: Record<string, { x: number; y: number }> } }).canvas = {
-      memberPositions: positions,
     };
 
     store.updateTeam(team.id, updatedTeam);
     onTeamUpdate(updatedTeam);
-  }, [nodes, team, onTeamUpdate]);
+  }, [nodes, edges, team, onTeamUpdate]);
 
   // ---- Execution ----
   const handleRunWithPrompt = useCallback((prompt: string) => {
@@ -556,8 +536,6 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
                 if (s === "running") return "#f59e0b";
                 if (s === "error") return "#ef4444";
                 if (s === "queued") return "#60a5fa";
-                if (n.type === "decision") return "#f59e0b";
-                if (n.type === "aggregator") return "#818cf8";
                 return "#a1a1aa";
               }}
             />

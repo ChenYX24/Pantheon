@@ -29,6 +29,27 @@ const CATEGORY_OUTPUT_DESCRIPTION: Record<SkillCategory, string> = {
   utility: "utility outputs and logs in agent-docs/",
 };
 
+/**
+ * Escape a string for safe use as a shell argument.
+ * Wraps in single quotes and escapes any embedded single quotes
+ * using the '\'' idiom (end quote, escaped quote, start quote).
+ * Handles empty strings, newlines, and all shell-special characters
+ * ($, `, ", \, !, etc.).
+ */
+export function shellEscape(value: string): string {
+  // Empty string must be represented as ''
+  if (value.length === 0) return "''";
+
+  // If the value contains only safe characters, return as-is
+  if (/^[a-zA-Z0-9._\-/:=@,]+$/.test(value)) {
+    return value;
+  }
+
+  // Wrap in single quotes; escape embedded single quotes with '\''
+  const escaped = value.replace(/'/g, "'\\''");
+  return `'${escaped}'`;
+}
+
 /** Build the command string from skill + param values */
 export function buildCommand(skill: ArisSkill, values: Record<string, string>): string {
   const params = skill.params ?? [];
@@ -37,11 +58,7 @@ export function buildCommand(skill: ArisSkill, values: Record<string, string>): 
   for (const param of params) {
     const val = values[param.name] || param.default;
     if (!val) continue;
-    if (val.includes(" ") || val.includes(",")) {
-      parts.push(`"${val}"`);
-    } else {
-      parts.push(val);
-    }
+    parts.push(shellEscape(val));
   }
 
   return parts.join(" ");

@@ -19,9 +19,11 @@ import {
   ChevronRight,
   ExternalLink,
   Terminal,
+  ClipboardList,
 } from "lucide-react";
 import type { Pipeline, PipelineNode, PipelineEdge, NodeStatus } from "../types";
 import { ARIS_SKILLS } from "../skill-data";
+import { ExecutionReport } from "./execution-report";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -597,6 +599,25 @@ export function ExecutionDashboard({
     [pipeline.nodes, pipeline.edges]
   );
 
+  // Detect pipeline completion for auto-switching to report tab
+  const isPipelineComplete = useMemo(
+    () =>
+      pipeline.nodes.length > 0 &&
+      pipeline.nodes.every(
+        (n) => n.status === "done" || n.status === "error" || n.status === "skipped"
+      ),
+    [pipeline.nodes]
+  );
+
+  // Auto-switch to report tab when pipeline completes
+  const hasAutoSwitched = useRef(false);
+  useEffect(() => {
+    if (isPipelineComplete && !hasAutoSwitched.current) {
+      hasAutoSwitched.current = true;
+      setActiveTab("report");
+    }
+  }, [isPipelineComplete]);
+
   // Elapsed timer
   useEffect(() => {
     setElapsed(Date.now() - startTime);
@@ -786,6 +807,17 @@ export function ExecutionDashboard({
                 <FolderOpen className="h-3 w-3" />
                 {isZh ? "输出" : "Outputs"}
               </TabsTrigger>
+              <TabsTrigger
+                value="report"
+                className="text-xs h-7 px-3 gap-1"
+                disabled={!isPipelineComplete}
+              >
+                <ClipboardList className="h-3 w-3" />
+                {isZh ? "报告" : "Report"}
+                {isPipelineComplete && (
+                  <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                )}
+              </TabsTrigger>
             </TabsList>
 
             {/* Copy logs button (only in logs tab) */}
@@ -830,6 +862,17 @@ export function ExecutionDashboard({
               node={selectedNode}
               workspacePath={workspacePath}
               isZh={isZh}
+            />
+          </TabsContent>
+
+          {/* Report tab content */}
+          <TabsContent value="report" className="flex-1 overflow-hidden m-0">
+            <ExecutionReport
+              pipeline={pipeline}
+              isZh={isZh}
+              logs={logs}
+              workspacePath={workspacePath}
+              startTime={startTime}
             />
           </TabsContent>
         </Tabs>

@@ -40,7 +40,8 @@ async function fetchKey<T>(key: string): Promise<T | null> {
     if (!res.ok) return null;
     const envelope = await res.json();
     return envelope.data ?? null;
-  } catch {
+  } catch (err) {
+    console.error(`[TeamStore] Failed to fetch key "${key}":`, err);
     return null;
   }
 }
@@ -52,8 +53,8 @@ async function putKey(key: string, data: unknown): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key, data }),
     });
-  } catch {
-    // silent fail — caller can retry
+  } catch (err) {
+    console.error(`[TeamStore] Failed to save key "${key}":`, err);
   }
 }
 

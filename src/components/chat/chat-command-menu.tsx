@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useMemo } from "react";
 import { Terminal, Zap, Hash, Bot } from "lucide-react";
 import type { ChatCommand } from "@/lib/chat-commands";
 import { filterCommands, groupByCategory, CATEGORY_LABELS } from "@/lib/chat-commands";
@@ -30,12 +30,15 @@ const CATEGORY_BADGE_COLORS: Record<string, string> = {
 export const ChatCommandMenu = memo(function ChatCommandMenu({ input, commands, selectedIndex, onSelect }: ChatCommandMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const filtered = filterCommands(commands, input);
-  const groups = groupByCategory(filtered);
+  const filtered = useMemo(() => filterCommands(commands, input), [commands, input]);
+  const groups = useMemo(() => groupByCategory(filtered), [filtered]);
 
   // Build flat list for index mapping
-  const flatList: ChatCommand[] = [];
-  for (const [, cmds] of groups) flatList.push(...cmds);
+  const flatList = useMemo(() => {
+    const list: ChatCommand[] = [];
+    for (const [, cmds] of groups) list.push(...cmds);
+    return list;
+  }, [groups]);
 
   // Scroll selected item into view
   useEffect(() => {

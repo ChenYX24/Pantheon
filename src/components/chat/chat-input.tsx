@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useEffect, useCallback } from "react";
+import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Send, X, FileUp } from "lucide-react";
 import { ChatCommandMenu } from "@/components/chat/chat-command-menu";
@@ -92,6 +92,12 @@ export function ChatInput({
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [chatInput, onInputChange]);
 
+  // Pre-compute flat filtered commands — avoids recalculating on every keystroke in handleKeyDown
+  const flatFiltered = useMemo(
+    () => (showCommandMenu ? getFlatFilteredCommands(allCommands, chatInput) : []),
+    [showCommandMenu, allCommands, chatInput]
+  );
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     // ESC during sending -> cancel takes priority
     if (e.key === "Escape" && chatSending) {
@@ -101,22 +107,20 @@ export function ChatInput({
     }
 
     if (showCommandMenu) {
-      const flat = getFlatFilteredCommands(allCommands, chatInput);
-
-      if (e.key === "ArrowUp" && flat.length > 0) {
+      if (e.key === "ArrowUp" && flatFiltered.length > 0) {
         e.preventDefault();
-        onCmdMenuIndexChange(cmdMenuIndex <= 0 ? flat.length - 1 : cmdMenuIndex - 1);
+        onCmdMenuIndexChange(cmdMenuIndex <= 0 ? flatFiltered.length - 1 : cmdMenuIndex - 1);
         return;
       }
-      if (e.key === "ArrowDown" && flat.length > 0) {
+      if (e.key === "ArrowDown" && flatFiltered.length > 0) {
         e.preventDefault();
-        onCmdMenuIndexChange(cmdMenuIndex >= flat.length - 1 ? 0 : cmdMenuIndex + 1);
+        onCmdMenuIndexChange(cmdMenuIndex >= flatFiltered.length - 1 ? 0 : cmdMenuIndex + 1);
         return;
       }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        if (flat.length > 0 && cmdMenuIndex >= 0 && cmdMenuIndex < flat.length) {
-          onCommandSelect(flat[cmdMenuIndex]);
+        if (flatFiltered.length > 0 && cmdMenuIndex >= 0 && cmdMenuIndex < flatFiltered.length) {
+          onCommandSelect(flatFiltered[cmdMenuIndex]);
         }
         return;
       }
@@ -131,7 +135,7 @@ export function ChatInput({
       e.preventDefault();
       onSend();
     }
-  }, [chatSending, onCancel, showCommandMenu, allCommands, chatInput, cmdMenuIndex, onCmdMenuIndexChange, onCmdMenuDismiss, onCommandSelect, onSend]);
+  }, [chatSending, onCancel, showCommandMenu, flatFiltered, cmdMenuIndex, onCmdMenuIndexChange, onCmdMenuDismiss, onCommandSelect, onSend]);
 
   return (
     <div

@@ -176,7 +176,13 @@ export class TeamExecutor extends BaseExecutor<AgentNode, AgentEdge> {
     });
 
     // Persist run state
-    await saveTeamRun(this.runRecord).catch(() => {});
+    await saveTeamRun(this.runRecord).catch((err) => {
+      console.error("[TeamExecutor] Failed to persist run state:", err);
+      this.emit({
+        type: "log",
+        message: `Warning: failed to save run state — ${err instanceof Error ? err.message : String(err)}`,
+      });
+    });
   }
 
   /** Build context string from upstream agent outputs */
@@ -272,13 +278,22 @@ export class TeamExecutor extends BaseExecutor<AgentNode, AgentEdge> {
     }
   }
 
-  /** Parse SSE response and extract the complete text output */
+  /** Parse SSE response and extract the complete text output.
+   *
+   * The stream may contain incremental "assistant" chunks and/or a final
+   * "result" event with the complete response. Strategy:
+   * - Accumulate all "assistant" chunks.
+   * - If a "result" event arrives with content, treat it as the authoritative
+   *   complete response (it supersedes the accumulated chunks).
+   * - If no "result" event is received, fall back to the accumulated chunks.
+   */
   private async parseSSEResponse(res: Response): Promise<string> {
     const reader = res.body?.getReader();
     if (!reader) return "(no response)";
 
     const decoder = new TextDecoder();
-    let output = "";
+    let assistantChunks = "";
+    let resultContent: string | null = null;
     let buffer = "";
 
     try {
@@ -298,10 +313,11 @@ export class TeamExecutor extends BaseExecutor<AgentNode, AgentEdge> {
           try {
             const event = JSON.parse(jsonStr);
             if (event.type === "assistant" && event.content) {
-              output += event.content;
+              assistantChunks += event.content;
             }
             if (event.type === "result" && event.content) {
-              output = event.content;
+              // The result event carries the complete final response
+              resultContent = event.content;
             }
           } catch {
             // Skip malformed JSON
@@ -312,6 +328,8 @@ export class TeamExecutor extends BaseExecutor<AgentNode, AgentEdge> {
       reader.releaseLock();
     }
 
+    // Prefer the result event (complete response) over accumulated chunks
+    const output = resultContent ?? assistantChunks;
     return output || "(empty response)";
   }
 
@@ -334,7 +352,9 @@ export class TeamExecutor extends BaseExecutor<AgentNode, AgentEdge> {
 
     this.runRecord.completedAt = new Date().toISOString();
     this.runRecord.totalCost = this.calculateCost();
-    await saveTeamRun(this.runRecord).catch(() => {});
+    await saveTeamRun(this.runRecord).catch((err) => {
+      console.error("[TeamExecutor] Failed to persist final run record:", err);
+    });
 
     return this.runRecord;
   }

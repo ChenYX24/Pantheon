@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
   Users, Copy, Trash2, Edit3, ChevronDown, ChevronUp,
   Play, Castle, FlaskConical, Layers, Brain, GitBranch,
-  ArrowRight, ArrowDownRight, PencilRuler,
+  ArrowRight, ArrowDownRight, PencilRuler, History,
 } from "lucide-react";
 import type { AgentTeam, TeamMember } from "../types";
 
@@ -66,9 +66,10 @@ interface TeamCardProps {
   onDelete: () => void;
   onRun?: () => void;
   onOpenCanvas?: () => void;
+  onOpenHistory?: () => void;
 }
 
-export function TeamCard({ team, onEdit, onClone, onDelete, onRun, onOpenCanvas }: TeamCardProps) {
+export function TeamCard({ team, onEdit, onClone, onDelete, onRun, onOpenCanvas, onOpenHistory }: TeamCardProps) {
   const [expanded, setExpanded] = useState(false);
   const Icon = getTeamIcon(team.icon);
   const wf = WORKFLOW_LABELS[team.workflow] || WORKFLOW_LABELS.sequential;
@@ -124,6 +125,11 @@ export function TeamCard({ team, onEdit, onClone, onDelete, onRun, onOpenCanvas 
             {onOpenCanvas && (
               <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-indigo-600" onClick={onOpenCanvas} title="Visual Editor">
                 <PencilRuler className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {onOpenHistory && (
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-blue-600" onClick={onOpenHistory} title="History">
+                <History className="h-3.5 w-3.5" />
               </Button>
             )}
             {onRun && (

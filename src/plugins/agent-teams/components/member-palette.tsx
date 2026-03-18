@@ -135,29 +135,9 @@ const MEMBER_TEMPLATES: MemberTemplate[] = [
     icon: <Globe className="h-3.5 w-3.5" />,
     category: "models",
   },
-  // Utilities
-  {
-    id: "tpl-decision",
-    name: "Decision Gate",
-    nameZh: "决策节点",
-    role: "decision",
-    roleZh: "决策",
-    provider: "none",
-    model: "none",
-    icon: <MessageSquare className="h-3.5 w-3.5" />,
-    category: "utilities",
-  },
-  {
-    id: "tpl-aggregator",
-    name: "Aggregator",
-    nameZh: "合并节点",
-    role: "aggregator",
-    roleZh: "合并",
-    provider: "none",
-    model: "none",
-    icon: <Wrench className="h-3.5 w-3.5" />,
-    category: "utilities",
-  },
+  // Utilities — Decision Gate and Aggregator are defined in their own
+  // component files but are not yet connected to execution logic, so they
+  // are hidden from the palette to avoid user confusion.
 ];
 
 const CATEGORY_META: Record<string, { label: string; labelZh: string }> = {

@@ -84,11 +84,27 @@ export async function addCustomSkill(skill: Omit<CustomSkill, "isCustom" | "crea
   return newState;
 }
 
+export async function updateCustomSkill(
+  skillId: string,
+  updates: Partial<Omit<CustomSkill, "isCustom" | "createdAt" | "id">>
+): Promise<SkillTreeState> {
+  const state = await getSkillTreeState();
+  const newState = {
+    ...state,
+    customSkills: state.customSkills.map((s) =>
+      s.id === skillId ? { ...s, ...updates } : s
+    ),
+  };
+  await saveSkillTreeState(newState);
+  return newState;
+}
+
 export async function removeCustomSkill(skillId: string): Promise<SkillTreeState> {
   const state = await getSkillTreeState();
   const newState = {
     ...state,
     customSkills: state.customSkills.filter((s) => s.id !== skillId),
+    overrides: state.overrides.filter((o) => o.skillId !== skillId),
   };
   await saveSkillTreeState(newState);
   return newState;

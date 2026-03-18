@@ -38,12 +38,18 @@ function MemberEditor({
   onUpdate,
   onRemove,
   isOnly,
+  nameError,
+  promptError,
 }: {
   member: TeamMember;
   apiKeys: ApiKeyOption[];
   onUpdate: (updates: Partial<TeamMember>) => void;
   onRemove: () => void;
   isOnly: boolean;
+  /** Inline validation error for the name field */
+  nameError?: string;
+  /** Inline validation error for the systemPrompt field */
+  promptError?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -61,12 +67,17 @@ function MemberEditor({
       {/* Header row */}
       <div className="flex items-center gap-2">
         <GripVertical className="h-4 w-4 text-muted-foreground flex-shrink-0 cursor-grab" />
-        <Input
-          value={member.name}
-          onChange={(e) => onUpdate({ name: e.target.value })}
-          className="h-8 text-sm font-medium flex-1"
-          placeholder="Member name"
-        />
+        <div className="flex-1 min-w-0">
+          <Input
+            value={member.name}
+            onChange={(e) => onUpdate({ name: e.target.value })}
+            className={`h-8 text-sm font-medium ${nameError ? "border-destructive" : ""}`}
+            placeholder="Member name"
+          />
+          {nameError && (
+            <p className="text-[10px] text-destructive mt-0.5">{nameError}</p>
+          )}
+        </div>
         <Select value={member.provider} onValueChange={(v) => onUpdate({ provider: v as MemberProvider })}>
           <SelectTrigger className="h-8 w-[110px] text-xs">
             <SelectValue />
@@ -180,9 +191,12 @@ function MemberEditor({
             <textarea
               value={member.systemPrompt}
               onChange={(e) => onUpdate({ systemPrompt: e.target.value })}
-              className="w-full text-xs border rounded-md p-2 bg-background min-h-[80px] focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+              className={`w-full text-xs border rounded-md p-2 bg-background min-h-[80px] focus:outline-none focus:ring-1 focus:ring-ring resize-y ${promptError ? "border-destructive" : ""}`}
               placeholder="Instructions for this agent..."
             />
+            {promptError && (
+              <p className="text-[10px] text-destructive">{promptError}</p>
+            )}
           </div>
         </div>
       )}
@@ -228,7 +242,9 @@ export function TeamEditor({ open, onOpenChange, team, onSave, saving }: TeamEdi
           );
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("[TeamEditor] Failed to load API keys:", err);
+      });
   }, [open]);
 
   // Reset form when team changes
@@ -289,7 +305,40 @@ export function TeamEditor({ open, onOpenChange, team, onSave, saving }: TeamEdi
     setMembers((prev) => prev.filter((m) => m.id !== id));
   }, []);
 
+  // ---- Validation ----
+  const memberErrors = useMemo(() => {
+    const errors: Record<string, { name?: string; prompt?: string }> = {};
+    const nameCount: Record<string, number> = {};
+
+    // Count name occurrences for duplicate detection
+    for (const m of members) {
+      const trimmed = m.name.trim().toLowerCase();
+      if (trimmed) {
+        nameCount[trimmed] = (nameCount[trimmed] ?? 0) + 1;
+      }
+    }
+
+    for (const m of members) {
+      const e: { name?: string; prompt?: string } = {};
+      if (!m.name.trim()) {
+        e.name = "Name is required";
+      } else if (nameCount[m.name.trim().toLowerCase()] > 1) {
+        e.name = "Duplicate member name";
+      }
+      if (!m.systemPrompt.trim()) {
+        e.prompt = "System prompt is required";
+      }
+      if (e.name || e.prompt) {
+        errors[m.id] = e;
+      }
+    }
+    return errors;
+  }, [members]);
+
+  const hasMemberErrors = Object.keys(memberErrors).length > 0;
+
   const handleSubmit = () => {
+    if (hasMemberErrors) return;
     onSave({
       name,
       description,
@@ -301,7 +350,7 @@ export function TeamEditor({ open, onOpenChange, team, onSave, saving }: TeamEdi
     });
   };
 
-  const isValid = name.trim() && members.length > 0;
+  const isValid = name.trim() && members.length > 0 && !hasMemberErrors;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -395,6 +444,8 @@ export function TeamEditor({ open, onOpenChange, team, onSave, saving }: TeamEdi
                   onUpdate={(updates) => handleUpdateMember(member.id, updates)}
                   onRemove={() => handleRemoveMember(member.id)}
                   isOnly={members.length <= 1}
+                  nameError={memberErrors[member.id]?.name}
+                  promptError={memberErrors[member.id]?.prompt}
                 />
               ))}
             </div>

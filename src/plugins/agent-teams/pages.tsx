@@ -21,16 +21,17 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Users, Plus, Search, RefreshCw, Trash2, Loader2,
-  LayoutGrid, List, Castle, FlaskConical, Layers, Brain,
-  GitBranch, PencilRuler, ArrowLeft,
+  Users, Plus, Search, Trash2, Loader2,
+  Brain, GitBranch, Layers, PencilRuler, ArrowLeft, History,
 } from "lucide-react";
+import { useTranslations, useLocale } from "next-intl";
 import { useToast } from "@/components/toast";
-import type { AgentTeam, TeamPreset, WorkflowMode } from "./types";
+import type { AgentTeam, TeamPreset } from "./types";
 import { TEAM_PRESETS } from "./team-data";
 import { TeamCard } from "./components/team-card";
 import { TeamEditor } from "./components/team-editor";
 import { PresetGallery } from "./components/preset-gallery";
+import { RunsPanel } from "./components/runs-panel";
 import * as store from "./team-store";
 
 // Lazy-load canvas for Turbopack compatibility
@@ -42,9 +43,12 @@ function generateMemberId(): string {
   return `member-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-type ViewTab = "teams" | "presets" | "canvas";
+type ViewTab = "teams" | "presets" | "canvas" | "history";
 
 export function AgentTeamsPage() {
+  const t = useTranslations("agentTeams");
+  const locale = useLocale();
+  const isZh = locale === "zh-CN";
   const { toast } = useToast();
   const [teams, setTeams] = useState<AgentTeam[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,6 +58,9 @@ export function AgentTeamsPage() {
 
   // Canvas state
   const [canvasTeam, setCanvasTeam] = useState<AgentTeam | null>(null);
+
+  // History state — which team to show runs for
+  const [historyTeam, setHistoryTeam] = useState<AgentTeam | null>(null);
 
   // Editor state
   const [editorOpen, setEditorOpen] = useState(false);
@@ -94,15 +101,9 @@ export function AgentTeamsPage() {
   const stats = useMemo(() => ({
     total: teams.length,
     totalMembers: teams.reduce((sum, t) => sum + t.members.length, 0),
-    workflows: {
-      sequential: teams.filter((t) => t.workflow === "sequential").length,
-      parallel: teams.filter((t) => t.workflow === "parallel").length,
-      hierarchical: teams.filter((t) => t.workflow === "hierarchical").length,
-    },
     providers: {
       claude: teams.reduce((sum, t) => sum + t.members.filter((m) => m.provider === "claude").length, 0),
       codex: teams.reduce((sum, t) => sum + t.members.filter((m) => m.provider === "codex").length, 0),
-      api: teams.reduce((sum, t) => sum + t.members.filter((m) => m.provider === "api").length, 0),
     },
   }), [teams]);
 
@@ -122,11 +123,21 @@ export function AgentTeamsPage() {
     setTab("canvas");
   }, []);
 
+  const handleOpenHistory = useCallback((team: AgentTeam) => {
+    setHistoryTeam(team);
+    setTab("history");
+  }, []);
+
   const handleCanvasBack = useCallback(() => {
     setTab("teams");
     setCanvasTeam(null);
     loadTeams(); // Refresh in case canvas saved changes
   }, [loadTeams]);
+
+  const handleHistoryBack = useCallback(() => {
+    setTab("teams");
+    setHistoryTeam(null);
+  }, []);
 
   const handleCanvasTeamUpdate = useCallback((updatedTeam: AgentTeam) => {
     setCanvasTeam(updatedTeam);
@@ -137,36 +148,36 @@ export function AgentTeamsPage() {
     try {
       if (editingTeam) {
         store.updateTeam(editingTeam.id, data);
-        toast("Team updated", "success");
+        toast(t("teamUpdated"), "success");
       } else {
         store.createTeam(data);
-        toast("Team created", "success");
+        toast(t("teamCreated"), "success");
       }
       loadTeams();
       setEditorOpen(false);
-    } catch (err) {
-      toast("Failed to save team", "error");
+    } catch {
+      toast(t("saveFailed"), "error");
     }
     setSaving(false);
-  }, [editingTeam, loadTeams, toast]);
+  }, [editingTeam, loadTeams, toast, t]);
 
   const handleClone = useCallback((team: AgentTeam) => {
     const cloned = store.cloneTeam(team.id, `${team.name} (Copy)`);
     if (cloned) {
-      toast(`Cloned "${team.name}"`, "success");
+      toast(t("teamCloned", { name: team.name }), "success");
       loadTeams();
     }
-  }, [loadTeams, toast]);
+  }, [loadTeams, toast, t]);
 
   const handleDelete = useCallback(() => {
     if (!deleteTarget) return;
     setDeleting(true);
     store.deleteTeam(deleteTarget.id);
-    toast(`Deleted "${deleteTarget.name}"`, "success");
+    toast(t("teamDeleted", { name: deleteTarget.name }), "success");
     setDeleteTarget(null);
     setDeleting(false);
     loadTeams();
-  }, [deleteTarget, loadTeams, toast]);
+  }, [deleteTarget, loadTeams, toast, t]);
 
   const handleUsePreset = useCallback((preset: TeamPreset) => {
     store.createTeam({
@@ -174,7 +185,7 @@ export function AgentTeamsPage() {
       description: preset.description,
       icon: preset.icon,
       workflow: preset.workflow,
-      members: preset.members.map((m, i) => ({
+      members: preset.members.map((m) => ({
         ...m,
         id: generateMemberId(),
       })),
@@ -182,10 +193,10 @@ export function AgentTeamsPage() {
       isPreset: true,
       presetId: preset.id,
     });
-    toast(`Created team from "${preset.name}" template`, "success");
+    toast(t("createdFromPreset", { name: preset.name }), "success");
     loadTeams();
     setTab("teams");
-  }, [loadTeams, toast]);
+  }, [loadTeams, toast, t]);
 
   // Loading skeleton
   if (loading) {
@@ -193,7 +204,7 @@ export function AgentTeamsPage() {
       <div className="space-y-6">
         <div className="flex items-center gap-2">
           <Users className="h-6 w-6" />
-          <h1 className="text-2xl font-bold">Agent Teams</h1>
+          <h1 className="text-2xl font-bold">{t("title")}</h1>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[1, 2, 3, 4].map((i) => (
@@ -217,7 +228,7 @@ export function AgentTeamsPage() {
             onClick={handleCanvasBack}
           >
             <ArrowLeft className="h-3.5 w-3.5 mr-1" />
-            Back to Teams
+            {t("canvas.backToTeams")}
           </Button>
         </div>
 
@@ -228,7 +239,9 @@ export function AgentTeamsPage() {
               <div className="flex items-center justify-center h-full bg-background">
                 <div className="flex flex-col items-center gap-3">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">Loading Visual Editor...</span>
+                  <span className="text-sm text-muted-foreground">
+                    {isZh ? "加载可视化编辑器..." : "Loading Visual Editor..."}
+                  </span>
                 </div>
               </div>
             }
@@ -236,10 +249,35 @@ export function AgentTeamsPage() {
             <TeamCanvas
               team={canvasTeam}
               onTeamUpdate={handleCanvasTeamUpdate}
-              locale="en"
+              locale={locale}
             />
           </Suspense>
         </div>
+      </div>
+    );
+  }
+
+  // History view
+  if (tab === "history" && historyTeam) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs px-2"
+            onClick={handleHistoryBack}
+          >
+            <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+            {t("canvas.backToTeams")}
+          </Button>
+          <div className="w-px h-5 bg-border" />
+          <History className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">
+            {t("runs.title")} — {historyTeam.name}
+          </span>
+        </div>
+        <RunsPanel teamId={historyTeam.id} isZh={isZh} />
       </div>
     );
   }
@@ -251,16 +289,16 @@ export function AgentTeamsPage() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Users className="h-6 w-6" />
-            Agent Teams
+            {t("title")}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Create multi-agent teams with different models and providers for each member.
+            {t("description")}
           </p>
         </div>
         <div className="flex gap-2">
           <Button size="sm" onClick={handleCreateTeam}>
             <Plus className="h-4 w-4 mr-1" />
-            <span className="hidden sm:inline">New Team</span>
+            <span className="hidden sm:inline">{t("newTeam")}</span>
           </Button>
         </div>
       </div>
@@ -268,10 +306,10 @@ export function AgentTeamsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Teams", value: stats.total.toString(), icon: Users, color: "text-blue-500" },
-          { label: "Members", value: stats.totalMembers.toString(), icon: GitBranch, color: "text-purple-500" },
-          { label: "Claude", value: stats.providers.claude.toString(), icon: Brain, color: "text-orange-500" },
-          { label: "Codex", value: stats.providers.codex.toString(), icon: Layers, color: "text-green-500" },
+          { label: t("stats.teams"), value: stats.total.toString(), icon: Users, color: "text-blue-500" },
+          { label: t("stats.members"), value: stats.totalMembers.toString(), icon: GitBranch, color: "text-purple-500" },
+          { label: t("stats.claude"), value: stats.providers.claude.toString(), icon: Brain, color: "text-orange-500" },
+          { label: t("stats.codex"), value: stats.providers.codex.toString(), icon: Layers, color: "text-green-500" },
         ].map((stat) => (
           <div key={stat.label} className="flex items-center gap-3 rounded-lg border p-3 bg-card">
             <stat.icon className={`h-4 w-4 ${stat.color}`} />
@@ -290,13 +328,13 @@ export function AgentTeamsPage() {
             className={`px-3 py-1.5 text-xs rounded-md transition-colors ${tab === "teams" ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTab("teams")}
           >
-            My Teams ({teams.length})
+            {t("myTeams")} ({teams.length})
           </button>
           <button
             className={`px-3 py-1.5 text-xs rounded-md transition-colors ${tab === "presets" ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTab("presets")}
           >
-            Presets ({TEAM_PRESETS.length})
+            {t("presets")} ({TEAM_PRESETS.length})
           </button>
         </div>
 
@@ -305,7 +343,7 @@ export function AgentTeamsPage() {
             <div className="relative flex-1 max-w-xs">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search teams..."
+                placeholder={t("search")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9 h-8 text-sm"
@@ -316,10 +354,10 @@ export function AgentTeamsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All workflows</SelectItem>
-                <SelectItem value="sequential">Sequential</SelectItem>
-                <SelectItem value="parallel">Parallel</SelectItem>
-                <SelectItem value="hierarchical">Hierarchical</SelectItem>
+                <SelectItem value="all">{t("allWorkflows")}</SelectItem>
+                <SelectItem value="sequential">{t("sequential")}</SelectItem>
+                <SelectItem value="parallel">{t("parallel")}</SelectItem>
+                <SelectItem value="hierarchical">{t("hierarchical")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -333,25 +371,24 @@ export function AgentTeamsPage() {
         <Card>
           <CardHeader className="items-center py-12">
             <Users className="h-12 w-12 text-muted-foreground mb-4" />
-            <CardTitle>No Agent Teams Yet</CardTitle>
+            <CardTitle>{t("noTeams")}</CardTitle>
             <CardDescription className="text-center max-w-md">
-              Create custom agent teams where each member uses a different AI model.
-              Start from a preset template or build your own.
+              {t("noTeamsDesc")}
             </CardDescription>
             <div className="flex gap-2 mt-4">
               <Button onClick={handleCreateTeam}>
                 <Plus className="h-4 w-4 mr-1" />
-                Create Team
+                {t("createTeam")}
               </Button>
               <Button variant="outline" onClick={() => setTab("presets")}>
-                Browse Presets
+                {t("browsePresets")}
               </Button>
             </div>
           </CardHeader>
         </Card>
       ) : filteredTeams.length === 0 ? (
         <div className="text-center py-8 text-muted-foreground">
-          No teams match your search.
+          {t("noMatch")}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -363,6 +400,7 @@ export function AgentTeamsPage() {
               onClone={() => handleClone(team)}
               onDelete={() => setDeleteTarget(team)}
               onOpenCanvas={() => handleOpenCanvas(team)}
+              onOpenHistory={() => handleOpenHistory(team)}
             />
           ))}
         </div>
@@ -381,16 +419,16 @@ export function AgentTeamsPage() {
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete Team</DialogTitle>
+            <DialogTitle>{t("deleteTeam")}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete &ldquo;{deleteTarget?.name}&rdquo;? This action cannot be undone.
+              {t("deleteConfirm", { name: deleteTarget?.name ?? "" })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>{t("cancel")}</Button>
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
               {deleting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-              Delete
+              {t("delete")}
             </Button>
           </DialogFooter>
         </DialogContent>
