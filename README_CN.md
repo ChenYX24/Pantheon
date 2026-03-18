@@ -204,11 +204,9 @@ dashboard/
 
 | 提供者 | 模型 |
 |--------|------|
-| **Claude** | claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5 |
-| **OpenAI（旗舰）** | gpt-5.4, gpt-5.4-pro, gpt-5.4-mini, gpt-5.3-codex, codex-mini-latest |
-| **OpenAI（推理）** | o3-pro, o3, o4-mini, o1, o1-mini |
-| **OpenAI（GPT）** | gpt-5.3, 5.2, 5, 4.1, 4.1-mini, 4.1-nano, 4o, 4o-mini |
-| **API 服务商** | DeepSeek、硅基流动、Moonshot、智谱、OpenRouter、Groq、Together、Google、Mistral 等 |
+| **Anthropic** | Claude Opus 4.6、Sonnet 4.6、Haiku 4.5 |
+| **OpenAI** | GPT-5.4 系列、o3/o4 推理系列、GPT-4.1 系列、codex-mini |
+| **API 服务商** | DeepSeek、硅基流动、Moonshot、智谱、OpenRouter、Groq、Google、Mistral 等 |
 
 ---
 
@@ -233,6 +231,29 @@ dashboard/
 3. 提交更改：`git commit -m "feat: 添加新功能"`
 4. 推送：`git push origin feature/my-feature`
 5. 发起 Pull Request
+
+---
+
+## 路线图
+
+### v4.5 — 打磨与稳定性
+- [ ] 会话详情查看器 — 从 JSONL 解析结构化工具调用和文件变更
+- [ ] 技能树：子技能展开（深入技能内部能力点）
+- [ ] 技能树：禁用时真正移除对应 skill/MCP
+- [ ] ARIS：节点右键菜单、智能参数推断
+- [ ] Agent 团队：画布撤销/重做、团队导入导出
+
+### v5.0 — 智能层
+- [ ] 每日情报简报（GitHub Trending + HF Papers + RSS + AI 摘要）
+- [ ] Telegram / 飞书推送简报通知
+- [ ] 智能任务路由 — AI 自动分派任务给最佳 Agent
+- [ ] 多平台 Bot（微信 / Discord）
+
+### v6.0 — 自主劳动力
+- [ ] 任务市场 MVP — 接入外部任务源
+- [ ] 自动评估 & 投标自由职业任务
+- [ ] 沙箱执行环境
+- [ ] 收益仪表盘 & 交付追踪
 
 ---
 

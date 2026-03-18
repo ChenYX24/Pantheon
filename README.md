@@ -220,11 +220,9 @@ dashboard/
 
 | Provider | Models |
 |----------|--------|
-| **Claude** | claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5 |
-| **OpenAI (Codex)** | gpt-5.4, gpt-5.4-pro, gpt-5.4-mini, gpt-5.3-codex, codex-mini-latest |
-| **OpenAI (Reasoning)** | o3-pro, o3, o4-mini, o1, o1-mini |
-| **OpenAI (GPT)** | gpt-5.3, 5.2, 5, 4.1, 4.1-mini, 4.1-nano, 4o, 4o-mini |
-| **API Providers** | DeepSeek, SiliconFlow, Moonshot, Zhipu, OpenRouter, Groq, Together, Google, Mistral, ... |
+| **Anthropic** | Claude Opus 4.6, Sonnet 4.6, Haiku 4.5 |
+| **OpenAI** | GPT-5.4 family, o3/o4 reasoning, GPT-4.1 family, codex-mini |
+| **API Providers** | DeepSeek, SiliconFlow, Moonshot, Zhipu, OpenRouter, Groq, Google, Mistral, ... |
 
 ---
 
@@ -251,6 +249,29 @@ dashboard/
 3. Commit changes: `git commit -m "feat: add my feature"`
 4. Push: `git push origin feature/my-feature`
 5. Open a Pull Request
+
+---
+
+## Roadmap
+
+### v4.5 — Polish & Reliability
+- [ ] Session detail viewer — structured tool calls & file changes from JSONL
+- [ ] Skill Tree: sub-skill expansion (drill into skill internals)
+- [ ] Skill Tree: disable actually removes skill/MCP from system
+- [ ] ARIS: node right-click menu, smart parameter inference
+- [ ] Agent Teams: undo/redo in canvas, team export/import
+
+### v5.0 — Intelligence Layer
+- [ ] Daily intelligence briefing (GitHub Trending + HF Papers + RSS + AI summary)
+- [ ] Telegram/Feishu push notifications for briefings
+- [ ] Smart task routing — AI auto-dispatches tasks to best agent
+- [ ] Multi-platform bot (WeChat / Discord)
+
+### v6.0 — Autonomous Workforce
+- [ ] Task marketplace MVP — accept tasks from external sources
+- [ ] Auto-evaluate & bid on freelance tasks
+- [ ] Sandboxed execution environment
+- [ ] Revenue dashboard & delivery tracking
 
 ---
 
