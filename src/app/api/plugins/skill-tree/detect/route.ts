@@ -3,6 +3,8 @@ import { exec } from "child_process";
 
 interface DetectRequest {
   command: string;
+  /** Variable substitutions for ${key} in command */
+  params?: Record<string, string>;
 }
 
 interface DetectResponse {
@@ -40,7 +42,17 @@ function decodeOutput(buf: Buffer): string {
 export async function POST(req: NextRequest): Promise<NextResponse<DetectResponse>> {
   try {
     const body = (await req.json()) as DetectRequest;
-    const { command } = body;
+    const { command: rawCommand, params } = body;
+
+    // Substitute ${key} variables from params
+    let command = rawCommand;
+    if (params && typeof params === "object") {
+      for (const [key, val] of Object.entries(params)) {
+        if (typeof val === "string") {
+          command = command.replace(new RegExp(`\\$\\{${key}\\}`, "g"), val);
+        }
+      }
+    }
 
     if (!command || typeof command !== "string") {
       return NextResponse.json(

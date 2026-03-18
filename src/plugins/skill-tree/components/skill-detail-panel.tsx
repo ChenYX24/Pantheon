@@ -16,17 +16,21 @@ import {
 } from "lucide-react";
 import type { SkillTreeNode, SkillStatus, SkillCategory } from "../types";
 import { CATEGORIES } from "../skill-tree-data";
+import { SkillConfigPanel } from "./skill-config-panel";
 
 // ---------------------------------------------------------------------------
 // Detect helper (shared with pages.tsx)
 // ---------------------------------------------------------------------------
 
-async function runDetect(command: string): Promise<{ success: boolean; output: string }> {
+async function runDetect(
+  command: string,
+  params?: Record<string, string>
+): Promise<{ success: boolean; output: string }> {
   try {
     const res = await fetch("/api/plugins/skill-tree/detect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command }),
+      body: JSON.stringify({ command, params }),
     });
     return await res.json();
   } catch {
@@ -112,7 +116,10 @@ export function SkillDetailPanel({
     if (!skill.detectCommand) return;
     setDetecting(true);
     setDetectResult(null);
-    const result = await runDetect(skill.detectCommand);
+    // Load skill config params for ${variable} substitution
+    const { getSkillConfig } = await import("../skill-tree-store");
+    const config = await getSkillConfig(skill.id);
+    const result = await runDetect(skill.detectCommand, config.params);
     setDetectResult(result);
     setDetecting(false);
     if (result.success) {
@@ -200,6 +207,15 @@ export function SkillDetailPanel({
             )}
           </div>
         </div>
+
+        {/* Skill config fields */}
+        {skill.configFields && skill.configFields.length > 0 && (
+          <SkillConfigPanel
+            skillId={skill.id}
+            fields={skill.configFields}
+            isZh={isZh}
+          />
+        )}
 
         {/* Detect button */}
         {skill.detectCommand && (

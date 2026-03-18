@@ -66,6 +66,23 @@ export interface SkillTreeNode {
   detectHint?: string;
   /** Related SCC page route */
   pageRoute?: string;
+  /** Configurable parameters for this skill (shown in detail panel) */
+  configFields?: SkillConfigField[];
+}
+
+/** A configurable parameter field for a skill */
+export interface SkillConfigField {
+  key: string;
+  label: string;
+  labelZh: string;
+  type: "text" | "select" | "number";
+  placeholder?: string;
+  /** For select type: predefined options */
+  options?: { value: string; label: string; labelZh: string }[];
+  /** Allow custom value even with select options */
+  allowCustom?: boolean;
+  /** Default value */
+  defaultValue?: string;
 }
 
 /** User-level overrides for skill status */
@@ -85,6 +102,12 @@ export interface CustomSkill extends SkillTreeNode {
   createdAt: string;
 }
 
+/** Per-skill user configuration (e.g., SSH server for experiment-runner) */
+export interface SkillConfig {
+  /** Key-value pairs for skill-specific settings */
+  params: Record<string, string>;
+}
+
 /** Persisted skill tree state */
 export interface SkillTreeState {
   overrides: SkillStatusOverride[];
@@ -93,6 +116,8 @@ export interface SkillTreeState {
   positions?: Record<string, { x: number; y: number }>;
   /** Collapsed categories */
   collapsedCategories?: string[];
+  /** Per-skill user config (skillId -> config) */
+  skillConfigs?: Record<string, SkillConfig>;
 }
 
 /** Category metadata for display */

@@ -2,7 +2,7 @@
  * Skill Tree Store — persistence via SCC store API
  */
 
-import type { SkillTreeState, SkillStatusOverride, CustomSkill, SkillStatus } from "./types";
+import type { SkillTreeState, SkillStatusOverride, CustomSkill, SkillStatus, SkillConfig } from "./types";
 
 const API = "/api/plugins/skill-tree/store";
 
@@ -113,4 +113,22 @@ export async function removeCustomSkill(skillId: string): Promise<SkillTreeState
 export async function savePositions(positions: Record<string, { x: number; y: number }>): Promise<void> {
   const state = await getSkillTreeState();
   await saveSkillTreeState({ ...state, positions });
+}
+
+export async function getSkillConfig(skillId: string): Promise<SkillConfig> {
+  const state = await getSkillTreeState();
+  return state.skillConfigs?.[skillId] ?? { params: {} };
+}
+
+export async function saveSkillConfig(skillId: string, config: SkillConfig): Promise<SkillTreeState> {
+  const state = await getSkillTreeState();
+  const newState = {
+    ...state,
+    skillConfigs: {
+      ...state.skillConfigs,
+      [skillId]: config,
+    },
+  };
+  await saveSkillTreeState(newState);
+  return newState;
 }
