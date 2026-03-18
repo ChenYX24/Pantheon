@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" alt="Super Claude Code" width="120" />
+  <img src="docs/logo.svg" alt="Super Claude Code" width="128" />
 </p>
 
 <h1 align="center">Super Claude Code</h1>
