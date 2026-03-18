@@ -48,6 +48,8 @@ interface SkillDetailPanelProps {
   allSkills: SkillTreeNode[];
   statusMap: Map<string, SkillStatus>;
   onStatusChange: (skillId: string, status: SkillStatus) => void;
+  /** Bypass dependency check (used by detect/verify) */
+  onForceStatusChange?: (skillId: string, status: SkillStatus) => void;
   onClose: () => void;
   onNavigate?: (route: string) => void;
   isZh: boolean;
@@ -91,6 +93,7 @@ export function SkillDetailPanel({
   allSkills,
   statusMap,
   onStatusChange,
+  onForceStatusChange,
   onClose,
   onNavigate,
   isZh,
@@ -132,9 +135,10 @@ export function SkillDetailPanel({
     setDetectResult(result);
     setDetecting(false);
     if (result.success) {
-      onStatusChange(skill.id, "active");
+      // ST-3: Detect bypasses dependency check — verified skills can force-activate
+      (onForceStatusChange ?? onStatusChange)(skill.id, "active");
     }
-  }, [skill, onStatusChange]);
+  }, [skill, onStatusChange, onForceStatusChange]);
 
   return (
     <div className="w-[300px] border-l bg-background/95 backdrop-blur-sm flex flex-col h-full overflow-hidden">

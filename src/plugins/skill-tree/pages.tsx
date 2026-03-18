@@ -284,6 +284,7 @@ function DetailPanel({
   isZh,
   onClose,
   onStatusChange,
+  onForceStatusChange,
   onNavigate,
   isCustom,
   onEdit,
@@ -298,6 +299,8 @@ function DetailPanel({
   isZh: boolean;
   onClose: () => void;
   onStatusChange: (id: string, s: SkillStatus) => void;
+  /** Bypass dependency check (used by detect/verify) */
+  onForceStatusChange: (id: string, s: SkillStatus) => void;
   onNavigate: (route: string) => void;
   isCustom: boolean;
   onEdit: () => void;
@@ -343,11 +346,12 @@ function DetailPanel({
     setDetecting(false);
     if (result.success) {
       toast(t("detect.success"), "success");
-      onStatusChange(skill.id, "active");
+      // ST-3: Detect bypasses dependency check — verified skills can force-activate
+      onForceStatusChange(skill.id, "active");
     } else {
       toast(t("detect.failed"), "error");
     }
-  }, [skill, onStatusChange, toast, t]);
+  }, [skill, onForceStatusChange, toast, t]);
 
   return (
     <div className="w-[340px] border-l bg-background flex flex-col h-full overflow-hidden shrink-0">
@@ -826,6 +830,15 @@ export function SkillTreePage() {
     [allSkills, statusMap, isZh, toast, t]
   );
 
+  // ST-3: Force status change (bypasses dep check) — used by detect/verify
+  const handleForceStatusChange = useCallback(
+    async (skillId: string, status: SkillStatus) => {
+      const newState = await setSkillStatus(skillId, status);
+      setTreeState(newState);
+    },
+    []
+  );
+
   const toggleCat = useCallback((catId: string) => {
     setCollapsedCats((prev) => {
       const next = new Set(prev);
@@ -1142,6 +1155,7 @@ export function SkillTreePage() {
                 isZh={isZh}
                 onClose={() => setSelectedId(null)}
                 onStatusChange={handleStatusChange}
+                onForceStatusChange={handleForceStatusChange}
                 onNavigate={(route) => router.push(route)}
                 isCustom={customSkillIds.has(selectedSkill.id)}
                 onEdit={() => {

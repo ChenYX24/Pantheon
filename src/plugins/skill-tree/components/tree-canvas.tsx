@@ -311,6 +311,12 @@ function TreeCanvasInner({ locale }: { locale: string }) {
     setTreeState(newState);
   }, [allSkills, statusMap]);
 
+  // ST-3: Force status change (bypasses dep check) — used by detect/verify
+  const handleForceStatusChange = useCallback(async (skillId: string, status: SkillStatus) => {
+    const newState = await setSkillStatus(skillId, status);
+    setTreeState(newState);
+  }, []);
+
   const selectedSkill = useMemo(
     () => allSkills.find((s) => s.id === selectedSkillId) ?? null,
     [allSkills, selectedSkillId]
@@ -411,6 +417,7 @@ function TreeCanvasInner({ locale }: { locale: string }) {
             allSkills={allSkills}
             statusMap={statusMap}
             onStatusChange={handleStatusChange}
+            onForceStatusChange={handleForceStatusChange}
             onClose={() => setSelectedSkillId(null)}
             isZh={isZh}
           />
