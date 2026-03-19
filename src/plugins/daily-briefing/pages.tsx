@@ -24,6 +24,7 @@ import {
   TrendingUp,
   Plug,
   Send,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -377,6 +378,25 @@ export function DailyBriefingPage() {
               </Badge>
             );
           })}
+          {briefing?.tokenUsage && briefing.tokenUsage.total > 0 && (
+            <span className="relative group">
+              <Badge variant="outline" className="text-xs gap-1 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-700">
+                <Zap className="h-3 w-3" />
+                AI: ~{briefing.tokenUsage.total >= 1000
+                  ? `${(briefing.tokenUsage.total / 1000).toFixed(1)}K`
+                  : briefing.tokenUsage.total} tokens
+              </Badge>
+              <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 text-[11px] bg-popover text-popover-foreground border rounded-md shadow-md opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                {isZh ? "摘要" : "Summary"}: {briefing.tokenUsage.summary >= 1000
+                  ? `${(briefing.tokenUsage.summary / 1000).toFixed(1)}K`
+                  : briefing.tokenUsage.summary}
+                {" | "}
+                {isZh ? "分类" : "Classification"}: {briefing.tokenUsage.classification >= 1000
+                  ? `${(briefing.tokenUsage.classification / 1000).toFixed(1)}K`
+                  : briefing.tokenUsage.classification}
+              </span>
+            </span>
+          )}
         </div>
       )}
 
@@ -524,11 +544,9 @@ export function DailyBriefingPage() {
         </div>
       )}
 
-      {/* AI Summary (global or per-need) — collapsible */}
+      {/* AI Summary (global or per-need) — click-anywhere collapsible */}
       {activeSummary && (() => {
         const lines = activeSummary.split("\n").filter((l) => l.trim());
-        const previewLines = lines.slice(0, 2);
-        const hasMoreLines = lines.length > 2;
 
         const renderLine = (line: string, i: number) => (
           <p
@@ -552,12 +570,15 @@ export function DailyBriefingPage() {
         );
 
         return (
-          <div className="rounded-lg border bg-gradient-to-br from-primary/5 to-primary/10 p-5">
-            <button
-              type="button"
-              className="flex items-center justify-between w-full cursor-pointer"
-              onClick={() => setSummaryExpanded((p) => !p)}
-            >
+          <div
+            className="rounded-lg border bg-gradient-to-br from-primary/5 to-primary/10 p-5 cursor-pointer select-none"
+            onClick={() => setSummaryExpanded((p) => !p)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSummaryExpanded((p) => !p); } }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
                 <h3 className="text-sm font-semibold">
@@ -576,35 +597,22 @@ export function DailyBriefingPage() {
                   className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${summaryExpanded ? "rotate-180" : ""}`}
                 />
               </div>
-            </button>
+            </div>
 
-            {/* Preview (always visible when collapsed) */}
-            {!summaryExpanded && (
-              <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed mt-3">
-                {previewLines.map(renderLine)}
-                {hasMoreLines && (
-                  <button
-                    type="button"
-                    className="text-xs text-primary hover:underline mt-1"
-                    onClick={(e) => { e.stopPropagation(); setSummaryExpanded(true); }}
-                  >
-                    {isZh ? "展开更多..." : "Show more..."}
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Full content (with smooth transition) */}
-            <div
-              className="overflow-hidden transition-all duration-300 ease-in-out"
-              style={{
-                maxHeight: summaryExpanded ? "2000px" : "0px",
-                opacity: summaryExpanded ? 1 : 0,
-              }}
-            >
-              <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed mt-3">
+            {/* Content area with collapse animation */}
+            <div className="relative mt-3">
+              <div
+                className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed overflow-hidden transition-all duration-300 ease-in-out"
+                style={{
+                  maxHeight: summaryExpanded ? "2000px" : "4.5em",
+                }}
+              >
                 {lines.map(renderLine)}
               </div>
+              {/* Gradient fade overlay when collapsed */}
+              {!summaryExpanded && lines.length > 3 && (
+                <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-primary/10 to-transparent pointer-events-none" />
+              )}
             </div>
           </div>
         );

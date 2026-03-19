@@ -413,17 +413,18 @@ export async function POST(req: NextRequest) {
       .filter(([, items]) => items.length >= 3)
       .map(([needId]) => needId);
 
-    const summaryPromises: Promise<{ key: string; summary: string }>[] = [
-      generateSummary(mergedItems, summaryLang).then((s) => ({
+    const summaryPromises: Promise<{ key: string; text: string; tokens: number }>[] = [
+      generateSummary(mergedItems, summaryLang).then((r) => ({
         key: "__global__",
-        summary: s,
+        text: r.text,
+        tokens: r.tokens,
       })),
       ...needIdsForSummary.map((nid) =>
         generateNeedSummary(
           needNameMap.get(nid) ?? nid,
           itemsByNeed.get(nid) ?? [],
           summaryLang,
-        ).then((s) => ({ key: nid, summary: s })),
+        ).then((r) => ({ key: nid, text: r.text, tokens: r.tokens })),
       ),
     ];
 
@@ -431,16 +432,24 @@ export async function POST(req: NextRequest) {
 
     let globalSummary = "";
     const perNeedSummaries: Record<string, string> = {};
+    let summaryTokens = 0;
 
     for (const result of summaryResults) {
-      if (result.status === "fulfilled" && result.value.summary) {
+      if (result.status === "fulfilled" && result.value.text) {
+        summaryTokens += result.value.tokens;
         if (result.value.key === "__global__") {
-          globalSummary = result.value.summary;
+          globalSummary = result.value.text;
         } else {
-          perNeedSummaries[result.value.key] = result.value.summary;
+          perNeedSummaries[result.value.key] = result.value.text;
         }
       }
     }
+
+    const tokenUsage: TokenUsage = {
+      summary: summaryTokens,
+      classification: classificationTokens,
+      total: summaryTokens + classificationTokens,
+    };
 
     const briefing: DailyBriefing = {
       date,
@@ -454,6 +463,7 @@ export async function POST(req: NextRequest) {
       summaryGeneratedAt: globalSummary
         ? new Date().toISOString()
         : undefined,
+      tokenUsage: tokenUsage.total > 0 ? tokenUsage : undefined,
       stats: {
         total: mergedItems.length,
         byNeed,
