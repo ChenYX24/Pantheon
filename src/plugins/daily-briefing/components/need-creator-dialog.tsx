@@ -8,6 +8,14 @@ import {
   Play,
   Plus,
   Trash2,
+  Github,
+  BookOpen,
+  Rss,
+  FileText,
+  Search,
+  Youtube,
+  TrendingUp,
+  Plug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +28,48 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import type { SearchStrategy, SourceConfig } from "../types";
+import type { SearchStrategy, SourceConfig, SourceType } from "../types";
+
+/** Available source types with their display metadata */
+const SOURCE_TYPE_OPTIONS: {
+  type: SourceType;
+  label: string;
+  labelZh: string;
+  icon: typeof Github;
+}[] = [
+  { type: "github", label: "GitHub", labelZh: "GitHub", icon: Github },
+  { type: "huggingface", label: "HuggingFace", labelZh: "HuggingFace", icon: BookOpen },
+  { type: "arxiv", label: "arXiv", labelZh: "arXiv", icon: FileText },
+  { type: "rss", label: "RSS", labelZh: "RSS", icon: Rss },
+  { type: "rsshub", label: "RSSHub", labelZh: "RSSHub", icon: Rss },
+  { type: "youtube", label: "YouTube", labelZh: "YouTube", icon: Youtube },
+  { type: "finance", label: "Finance", labelZh: "财经", icon: TrendingUp },
+  { type: "web-search", label: "Web Search", labelZh: "网页搜索", icon: Search },
+  { type: "custom-api", label: "Custom API", labelZh: "自定义API", icon: Plug },
+];
+
+/** Config field definitions per source type */
+const SOURCE_CONFIG_FIELDS: Record<
+  string,
+  { key: string; label: string; labelZh: string; placeholder: string; optional?: boolean }[]
+> = {
+  rsshub: [
+    { key: "route", label: "Route", labelZh: "路由", placeholder: "/bilibili/hot/0/3" },
+    { key: "baseUrl", label: "Base URL", labelZh: "Base URL", placeholder: "https://rsshub.app", optional: true },
+  ],
+  youtube: [
+    { key: "channelId", label: "Channel ID or Playlist ID", labelZh: "频道ID 或 播放列表ID", placeholder: "UCxxxxxx or PLxxxxxx" },
+  ],
+  finance: [
+    { key: "symbols", label: "Stock Symbols", labelZh: "股票代码", placeholder: "AAPL,TSLA,NVDA" },
+    { key: "apiToken", label: "Finnhub API Token", labelZh: "Finnhub API Token", placeholder: "Your Finnhub token", optional: true },
+  ],
+  "custom-api": [
+    { key: "url", label: "URL", labelZh: "URL", placeholder: "https://api.example.com/feed" },
+    { key: "itemsPath", label: "Items Path", labelZh: "数据路径", placeholder: "data.items" },
+    { key: "fieldMapping", label: "Field Mapping (JSON)", labelZh: "字段映射 (JSON)", placeholder: '{"title":"name","url":"link"}', optional: true },
+  ],
+};
 
 interface NeedCreatorDialogProps {
   open: boolean;
@@ -157,6 +206,33 @@ export function NeedCreatorDialog({
     [strategy],
   );
 
+  const handleUpdateSourceType = useCallback(
+    (idx: number, newType: SourceType) => {
+      if (!strategy) return;
+      const option = SOURCE_TYPE_OPTIONS.find((o) => o.type === newType);
+      const updated = strategy.sources.map((src, i) =>
+        i === idx
+          ? { ...src, type: newType, name: option?.label ?? newType, config: {} }
+          : src,
+      );
+      setStrategy({ ...strategy, sources: updated });
+    },
+    [strategy],
+  );
+
+  const handleUpdateSourceConfig = useCallback(
+    (idx: number, key: string, value: string) => {
+      if (!strategy) return;
+      const updated = strategy.sources.map((src, i) =>
+        i === idx
+          ? { ...src, config: { ...src.config, [key]: value } }
+          : src,
+      );
+      setStrategy({ ...strategy, sources: updated });
+    },
+    [strategy],
+  );
+
   const handleUpdateKeywords = useCallback(
     (value: string) => {
       if (!strategy) return;
@@ -276,29 +352,68 @@ export function NeedCreatorDialog({
                     {isZh ? "添加" : "Add"}
                   </Button>
                 </div>
-                <div className="space-y-1.5 mt-1">
-                  {strategy.sources.map((src, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center gap-2 text-xs"
-                    >
-                      <Badge variant="outline" className="text-[10px]">
-                        {src.type}
-                      </Badge>
-                      <span className="flex-1 truncate">{src.name}</span>
-                      <span className="text-muted-foreground">
-                        P{src.priority}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleRemoveSource(idx)}
+                <div className="space-y-2 mt-1">
+                  {strategy.sources.map((src, idx) => {
+                    const configFields = SOURCE_CONFIG_FIELDS[src.type];
+                    return (
+                      <div
+                        key={idx}
+                        className="rounded border p-2 space-y-1.5"
                       >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))}
+                        <div className="flex items-center gap-2 text-xs">
+                          <select
+                            className="h-6 rounded border bg-background px-1 text-[11px]"
+                            value={src.type}
+                            onChange={(e) =>
+                              handleUpdateSourceType(idx, e.target.value as SourceType)
+                            }
+                          >
+                            {SOURCE_TYPE_OPTIONS.map((opt) => (
+                              <option key={opt.type} value={opt.type}>
+                                {isZh ? opt.labelZh : opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="flex-1 truncate text-muted-foreground">
+                            {src.name}
+                          </span>
+                          <span className="text-muted-foreground">
+                            P{src.priority}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => handleRemoveSource(idx)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        {configFields && configFields.length > 0 && (
+                          <div className="space-y-1 pl-1">
+                            {configFields.map((field) => (
+                              <div key={field.key} className="flex items-center gap-1.5">
+                                <label className="text-[10px] text-muted-foreground w-20 shrink-0 truncate">
+                                  {isZh ? field.labelZh : field.label}
+                                  {field.optional && (
+                                    <span className="text-muted-foreground/50"> *</span>
+                                  )}
+                                </label>
+                                <Input
+                                  className="h-6 text-[11px] flex-1"
+                                  placeholder={field.placeholder}
+                                  value={src.config[field.key] ?? ""}
+                                  onChange={(e) =>
+                                    handleUpdateSourceConfig(idx, field.key, e.target.value)
+                                  }
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

@@ -35,10 +35,14 @@ export const plugin: PluginModule = {
   },
 
   onLoad: async () => {
-    console.log("[Plugin] API Management loaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] API Management loaded");
+    }
   },
 
   onUnload: async () => {
-    console.log("[Plugin] API Management unloaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] API Management unloaded");
+    }
   },
 };

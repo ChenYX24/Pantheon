@@ -10,14 +10,53 @@ export const maxDuration = 300;
 
 const VALID_PERMISSION_MODES = ["default", "trust", "acceptEdits", "readOnly", "plan"] as const;
 
+/** Maximum allowed request body size (1 MB) */
+const MAX_CHAT_BODY_SIZE = 1 * 1024 * 1024;
+
+/** Maximum message length (100K characters, ~25K tokens) */
+const MAX_MESSAGE_LENGTH = 100_000;
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // Validate content-length before parsing
+    const contentLength = req.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > MAX_CHAT_BODY_SIZE) {
+      return new Response(
+        JSON.stringify({ error: "Request body too large (max 1 MB)" }),
+        { status: 413, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON in request body" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return new Response(
+        JSON.stringify({ error: "Request body must be a JSON object" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const { message, sessionId, cwd, permissionMode, allowedTools, provider: providerName, model } = body;
 
     if (!message || typeof message !== "string" || !message.trim()) {
       return new Response(
         JSON.stringify({ error: "Message is required" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    if (message.length > MAX_MESSAGE_LENGTH) {
+      return new Response(
+        JSON.stringify({ error: `Message too long (${message.length} chars). Maximum is ${MAX_MESSAGE_LENGTH}.` }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
@@ -75,7 +114,9 @@ export async function POST(req: NextRequest) {
       model: model || undefined,
     });
 
-    console.log(`[Chat API] Provider: ${provider.displayName} | Spawning: ${binary} ${args.join(" ")}${stdinPrompt ? " (prompt via stdin)" : ""}`);
+    if (process.env.NODE_ENV === "development") {
+      console.log(`[Chat API] Provider: ${provider.displayName} | Spawning: ${binary} ${args.join(" ")}${stdinPrompt ? " (prompt via stdin)" : ""}`);
+    }
 
     const child = spawn(binary, args, {
       cwd: cwd || undefined,
@@ -156,7 +197,9 @@ export async function POST(req: NextRequest) {
         });
 
         child.on("close", (code) => {
-          console.log(`[Chat API] ${provider.displayName} exited with code ${code}`);
+          if (process.env.NODE_ENV === "development") {
+            console.log(`[Chat API] ${provider.displayName} exited with code ${code}`);
+          }
           // Flush remaining buffer
           if (buffer.trim()) {
             const event = provider.parseEvent(buffer.trim());

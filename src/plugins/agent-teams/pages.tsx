@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,8 +20,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Users, Plus, Search, Trash2, Loader2,
-  Brain, GitBranch, Layers, PencilRuler, ArrowLeft, History,
+  Users, Plus, Search, Loader2,
+  Brain, GitBranch, Layers, ArrowLeft, History,
 } from "lucide-react";
 import { useTranslations, useLocale } from "next-intl";
 import { useToast } from "@/components/toast";
@@ -71,10 +70,16 @@ export function AgentTeamsPage() {
   const [deleteTarget, setDeleteTarget] = useState<AgentTeam | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const loadTeams = useCallback(() => {
-    setTeams(store.getTeams());
-    setLoading(false);
-  }, []);
+  const loadTeams = useCallback(async () => {
+    try {
+      const data = await store.getTeamsAsync();
+      setTeams(data);
+    } catch {
+      toast(t("loadFailed") ?? "Failed to load teams", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast, t]);
 
   useEffect(() => {
     loadTeams();
@@ -128,10 +133,10 @@ export function AgentTeamsPage() {
     setTab("history");
   }, []);
 
-  const handleCanvasBack = useCallback(() => {
+  const handleCanvasBack = useCallback(async () => {
     setTab("teams");
     setCanvasTeam(null);
-    loadTeams(); // Refresh in case canvas saved changes
+    await loadTeams(); // Refresh in case canvas saved changes
   }, [loadTeams]);
 
   const handleHistoryBack = useCallback(() => {
@@ -143,59 +148,73 @@ export function AgentTeamsPage() {
     setCanvasTeam(updatedTeam);
   }, []);
 
-  const handleSave = useCallback((data: Omit<AgentTeam, "id" | "created_at" | "updated_at">) => {
+  const handleSave = useCallback(async (data: Omit<AgentTeam, "id" | "created_at" | "updated_at">) => {
     setSaving(true);
     try {
       if (editingTeam) {
-        store.updateTeam(editingTeam.id, data);
+        await store.updateTeamAsync(editingTeam.id, data);
         toast(t("teamUpdated"), "success");
       } else {
-        store.createTeam(data);
+        await store.createTeamAsync(data);
         toast(t("teamCreated"), "success");
       }
-      loadTeams();
+      await loadTeams();
       setEditorOpen(false);
     } catch {
       toast(t("saveFailed"), "error");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   }, [editingTeam, loadTeams, toast, t]);
 
-  const handleClone = useCallback((team: AgentTeam) => {
-    const cloned = store.cloneTeam(team.id, `${team.name} (Copy)`);
-    if (cloned) {
-      toast(t("teamCloned", { name: team.name }), "success");
-      loadTeams();
+  const handleClone = useCallback(async (team: AgentTeam) => {
+    try {
+      const cloned = await store.cloneTeamAsync(team.id, `${team.name} (Copy)`);
+      if (cloned) {
+        toast(t("teamCloned", { name: team.name }), "success");
+        await loadTeams();
+      }
+    } catch {
+      toast(t("saveFailed") ?? "Failed to clone team", "error");
     }
   }, [loadTeams, toast, t]);
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback(async () => {
     if (!deleteTarget) return;
     setDeleting(true);
-    store.deleteTeam(deleteTarget.id);
-    toast(t("teamDeleted", { name: deleteTarget.name }), "success");
-    setDeleteTarget(null);
-    setDeleting(false);
-    loadTeams();
+    try {
+      await store.deleteTeamAsync(deleteTarget.id);
+      toast(t("teamDeleted", { name: deleteTarget.name }), "success");
+      setDeleteTarget(null);
+      await loadTeams();
+    } catch {
+      toast(t("saveFailed") ?? "Failed to delete team", "error");
+    } finally {
+      setDeleting(false);
+    }
   }, [deleteTarget, loadTeams, toast, t]);
 
-  const handleUsePreset = useCallback((preset: TeamPreset) => {
-    store.createTeam({
-      name: preset.name,
-      description: preset.description,
-      icon: preset.icon,
-      workflow: preset.workflow,
-      members: preset.members.map((m) => ({
-        ...m,
-        id: generateMemberId(),
-      })),
-      tags: preset.tags,
-      isPreset: true,
-      presetId: preset.id,
-    });
-    toast(t("createdFromPreset", { name: preset.name }), "success");
-    loadTeams();
-    setTab("teams");
+  const handleUsePreset = useCallback(async (preset: TeamPreset) => {
+    try {
+      await store.createTeamAsync({
+        name: preset.name,
+        description: preset.description,
+        icon: preset.icon,
+        workflow: preset.workflow,
+        members: preset.members.map((m) => ({
+          ...m,
+          id: generateMemberId(),
+        })),
+        tags: preset.tags,
+        isPreset: true,
+        presetId: preset.id,
+      });
+      toast(t("createdFromPreset", { name: preset.name }), "success");
+      await loadTeams();
+      setTab("teams");
+    } catch {
+      toast(t("saveFailed") ?? "Failed to create from preset", "error");
+    }
   }, [loadTeams, toast, t]);
 
   // Loading skeleton

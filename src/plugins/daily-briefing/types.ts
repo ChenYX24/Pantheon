@@ -41,6 +41,9 @@ export type SourceType =
   | "arxiv"
   | "huggingface"
   | "rss"
+  | "rsshub"
+  | "youtube"
+  | "finance"
   | "web-search"
   | "custom-api";
 
@@ -71,14 +74,32 @@ export interface BriefingItem {
   isFavorite: boolean;
   stars?: number;             // GitHub stars
   language?: string;          // GitHub language
+  thumbnail?: string;         // Image URL for visual preview
+  demoUrl?: string;           // Demo/space/project page URL
+  githubUrl?: string;         // GitHub repo URL
+  upvotes?: number;           // Community upvotes (HF)
+  aiKeywords?: string[];      // AI-generated keywords
 }
 
 /** A day's briefing aggregate */
 export interface DailyBriefing {
   date: string;               // YYYY-MM-DD
   items: BriefingItem[];
-  summary?: string;           // AI-generated summary
+  summary?: string;           // AI-generated global summary
+  summaries?: Record<string, string>;  // Per-need AI summaries (keyed by needId)
+  summaryLanguage?: "zh" | "en";  // Language of the generated summary
+  summaryGeneratedAt?: string;     // When the summary was generated
   stats: BriefingStats;
+}
+
+/** User configuration for briefing behavior */
+export interface BriefingUserConfig {
+  summaryLanguage: "zh" | "en";  // Preferred summary language
+  sources?: Record<string, boolean>;
+  github?: { language: string; timeRange: string };
+  arxiv?: { categories: string[] };
+  rssFeeds?: { name: string; url: string }[];
+  display?: { maxItemsPerSource: number; autoRefreshInterval: string };
 }
 
 export interface BriefingStats {
@@ -117,4 +138,28 @@ export interface FeedbackRequest {
 
 export interface StrategyRequest {
   description: string;
+}
+
+// ---- Push Notifications ----
+
+export interface PushConfig {
+  enabled: boolean;
+  channels: PushChannel[];
+  format: "summary-only" | "summary-and-items" | "items-only";
+  maxItems: number;
+  includeLinks: boolean;
+}
+
+export interface PushChannel {
+  platform: "telegram" | "feishu";
+  chatId: string;
+  enabled: boolean;
+  label?: string;
+}
+
+export interface PushResult {
+  platform: string;
+  chatId: string;
+  success: boolean;
+  error?: string;
 }

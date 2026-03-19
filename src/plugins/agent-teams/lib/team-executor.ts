@@ -15,13 +15,10 @@ import type {
   TeamMember,
   TeamRun,
   TeamNodeStatus,
-  TeamEdge,
 } from "../types";
 import { saveTeamRun } from "../team-store";
 import {
   BaseExecutor,
-  topoSort,
-  type ExecutionEvent,
   type ExecutionListener,
   type BaseExecutorOptions,
 } from "@/lib/execution";
@@ -259,14 +256,51 @@ export class TeamExecutor extends BaseExecutor<AgentNode, AgentEdge> {
         body.apiKeyId = member.apiKeyId;
       }
 
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      // Create an AbortController so execution can be cleanly cancelled
+      const controller = new AbortController();
+      const onAbortCheck = () => {
+        if (this.aborted) controller.abort();
+      };
+      // Check immediately and poll periodically during the fetch
+      onAbortCheck();
+      const abortInterval = setInterval(onAbortCheck, 500);
+
+      let res: Response;
+      try {
+        res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } finally {
+        clearInterval(abortInterval);
+      }
 
       if (!res.ok) {
-        throw new Error(`Chat API error: ${res.status}`);
+        // Provide user-friendly messages for common HTTP errors
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(
+            `Authentication failed (${res.status}). The API key for agent "${member.name}" is missing or invalid. ` +
+            `Please check the key configuration in API Management.`
+          );
+        }
+        if (res.status === 429) {
+          const retryAfter = res.headers.get("Retry-After");
+          const waitMsg = retryAfter ? ` Retry after ${retryAfter}s.` : " Please wait a moment and try again.";
+          throw new Error(
+            `Rate limit exceeded (429) for agent "${member.name}" using model ${member.model}.${waitMsg}`
+          );
+        }
+        // Try to extract error body for other status codes
+        let detail = "";
+        try {
+          const errBody = await res.json();
+          detail = errBody?.error ?? "";
+        } catch { /* ignore parse failure */ }
+        throw new Error(
+          `Chat API error ${res.status}${detail ? `: ${detail}` : ""}`
+        );
       }
 
       // Parse SSE stream to extract final output
@@ -279,6 +313,9 @@ export class TeamExecutor extends BaseExecutor<AgentNode, AgentEdge> {
         model: member.model,
       };
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error(`Agent ${member.name} was cancelled.`);
+      }
       throw new Error(
         `Agent ${member.name} failed: ${err instanceof Error ? err.message : String(err)}`
       );
@@ -302,6 +339,7 @@ export class TeamExecutor extends BaseExecutor<AgentNode, AgentEdge> {
     let assistantChunks = "";
     let resultContent: string | null = null;
     let buffer = "";
+    let sseParseErrors = 0;
 
     try {
       while (true) {
@@ -326,13 +364,28 @@ export class TeamExecutor extends BaseExecutor<AgentNode, AgentEdge> {
               // The result event carries the complete final response
               resultContent = event.content;
             }
-          } catch {
-            // Skip malformed JSON
+            if (event.type === "error" && event.error) {
+              // Surface API-level errors (e.g. auth failures, rate limits)
+              throw new Error(event.error);
+            }
+          } catch (parseErr) {
+            // Re-throw intentional errors (from event.type === "error" above)
+            if (parseErr instanceof Error && !jsonStr.includes(parseErr.message)) {
+              // This is a JSON parse error — log and continue
+              console.warn("[TeamExecutor] Malformed SSE data, skipping:", jsonStr.slice(0, 120));
+              sseParseErrors++;
+            } else {
+              throw parseErr;
+            }
           }
         }
       }
     } finally {
       reader.releaseLock();
+    }
+
+    if (sseParseErrors > 0) {
+      console.warn(`[TeamExecutor] ${sseParseErrors} malformed SSE event(s) were skipped during streaming.`);
     }
 
     // Prefer the result event (complete response) over accumulated chunks

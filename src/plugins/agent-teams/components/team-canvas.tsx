@@ -1,8 +1,7 @@
 "use client";
 
 import {
-  useState, useCallback, useRef, useMemo, useEffect,
-  type DragEvent,
+  useState, useCallback, useEffect, useMemo,
 } from "react";
 import {
   ReactFlow,
@@ -24,21 +23,19 @@ import "@xyflow/react/dist/style.css";
 
 import { Button } from "@/components/ui/button";
 import { applyDagreLayout, extractPositions } from "@/lib/canvas";
-import { LayoutGrid, Maximize2, Save, Play, RotateCcw } from "lucide-react";
+import { Play } from "lucide-react";
 
 import type { AgentTeam, TeamMember } from "../types";
 import * as store from "../team-store";
 import { AgentNode, type AgentNodeData, type AgentNodeStatus } from "./agent-node";
 import { MemberPalette } from "./member-palette";
-import { ExecutionPanel, type ExecutionNodeStatus } from "./execution-panel";
+import { ExecutionPanel } from "./execution-panel";
 import { NodeContextMenu, type ContextMenuAction } from "./node-context-menu";
-import { TeamExecutor, type TeamExecutorOptions } from "../lib/team-executor";
-import type { ExecutionEvent } from "@/lib/execution";
+import { CanvasToolbar } from "./canvas-toolbar";
+import { useCanvasExecution } from "./use-canvas-execution";
+import { useCanvasDnd } from "./use-canvas-dnd";
 
 // ---- Node types (OUTSIDE component for React Flow perf) ----
-// NOTE: DecisionNode and AggregatorNode exist in ./decision-node.tsx and
-// ./aggregator-node.tsx but are not yet wired to execution logic, so they
-// are excluded from the active nodeTypes to avoid confusing users.
 const nodeTypes = {
   agent: AgentNode,
 };
@@ -51,16 +48,12 @@ const AGENT_NODE_HEIGHT = 120;
 function getEdgeStyle(type?: string): { strokeWidth: number; stroke?: string; strokeDasharray?: string } {
   switch (type) {
     case "control":
-      return { strokeWidth: 2, stroke: "#f59e0b", strokeDasharray: "5,5" }; // amber, dashed
+      return { strokeWidth: 2, stroke: "#f59e0b", strokeDasharray: "5,5" };
     case "review":
-      return { strokeWidth: 2, stroke: "#8b5cf6", strokeDasharray: "3,3" }; // purple, dotted
-    default: // "data"
-      return { strokeWidth: 2, stroke: "#60a5fa" }; // blue, solid
+      return { strokeWidth: 2, stroke: "#8b5cf6", strokeDasharray: "3,3" };
+    default:
+      return { strokeWidth: 2, stroke: "#60a5fa" };
   }
-}
-
-function generateMemberId(): string {
-  return `member-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /** Convert team members into React Flow nodes */
@@ -100,7 +93,6 @@ function membersToEdges(members: TeamMember[]): Edge[] {
       });
     }
   }
-  // For sequential: chain by order
   if (edges.length === 0 && members.length > 1) {
     const sorted = [...members].sort((a, b) => a.order - b.order);
     for (let i = 0; i < sorted.length - 1; i++) {
@@ -116,7 +108,6 @@ function membersToEdges(members: TeamMember[]): Edge[] {
   return edges;
 }
 
-/** dagre layout options matching the original inline constants */
 const DAGRE_OPTIONS = {
   rankdir: "TB" as const,
   ranksep: 80,
@@ -140,7 +131,7 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
   const [initialized, setInitialized] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [, setSelectedNodeId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -149,24 +140,14 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
   } | null>(null);
   const [paletteCollapsed, setPaletteCollapsed] = useState(false);
 
-  // Execution state
-  const [isRunning, setIsRunning] = useState(false);
-  const [executionLogs, setExecutionLogs] = useState<string[]>([]);
-  const [nodeStatuses, setNodeStatuses] = useState<ExecutionNodeStatus[]>([]);
-  const [nodeOutputs, setNodeOutputs] = useState<Record<string, string>>({});
-  const [totalTokens, setTotalTokens] = useState(0);
-  const [elapsedMs, setElapsedMs] = useState(0);
-  const [promptInput, setPromptInput] = useState("");
-  const [showPromptInput, setShowPromptInput] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef<number>(0);
-  const executorRef = useRef<TeamExecutor | null>(null);
+  // Custom hooks
+  const execution = useCanvasExecution({ team, nodes, edges, setNodes, setEdges });
+  const dnd = useCanvasDnd({ isZh, setNodes, screenToFlowPosition });
 
   // Initialize from team
   useEffect(() => {
     if (initialized) return;
 
-    // Convert TeamMemberNode[] to Record for membersToNodes
     const savedPositions: Record<string, { x: number; y: number }> | undefined =
       team.canvas?.memberPositions && team.canvas.memberPositions.length > 0
         ? Object.fromEntries(
@@ -176,7 +157,6 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
 
     const initialNodes = membersToNodes(team.members, savedPositions, isZh);
 
-    // Restore saved edges or generate from member relationships
     const initialEdges = team.canvas?.edges && team.canvas.edges.length > 0
       ? team.canvas.edges.map((e) => ({
           id: e.id,
@@ -193,13 +173,12 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
       setNodes(initialNodes);
       setEdges(initialEdges);
     } else {
-      // Auto-layout
       const laid = applyDagreLayout(initialNodes, initialEdges, DAGRE_OPTIONS);
       setNodes(laid);
       setEdges(initialEdges);
     }
 
-    setInitialized(true);
+    setInitialized(true); // eslint-disable-line react-hooks/set-state-in-effect -- one-time initialization
     setTimeout(() => fitView({ padding: 0.2 }), 150);
   }, [team, isZh, initialized, setNodes, setEdges, fitView]);
 
@@ -270,47 +249,6 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
     setContextMenu(null);
   }, [setNodes, setEdges]);
 
-  const onDragOver = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  }, []);
-
-  const onDrop = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    const raw = e.dataTransfer.getData("application/agent-team-template");
-    if (!raw) return;
-
-    let tpl: { id: string; name: string; nameZh: string; role: string; roleZh: string; provider: string; model: string; category: string };
-    try {
-      tpl = JSON.parse(raw);
-    } catch {
-      return;
-    }
-
-    const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-
-    // Skip utility nodes (decision/aggregator) — not yet wired to execution
-    if (tpl.category === "utilities") return;
-
-    // Agent node
-    const memberId = generateMemberId();
-    setNodes((nds) => [...nds, {
-      id: memberId,
-      type: "agent",
-      position,
-      data: {
-        memberId,
-        name: isZh ? tpl.nameZh : tpl.name,
-        role: isZh ? tpl.roleZh ?? tpl.role : tpl.role,
-        provider: tpl.provider,
-        model: tpl.model,
-        status: "idle" as AgentNodeStatus,
-        tokens: undefined,
-        isZh,
-      } satisfies AgentNodeData,
-    }]);
-  }, [screenToFlowPosition, setNodes, isZh]);
-
   const handleAutoLayout = useCallback(() => {
     const laid = applyDagreLayout(nodes, edges, DAGRE_OPTIONS);
     setNodes(laid);
@@ -322,14 +260,11 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
   }, [fitView]);
 
   const handleSave = useCallback(() => {
-    // Extract positions and sync members back to team
     const positions = extractPositions(nodes);
 
-    // Build updated members from agent nodes
     const agentNodes = nodes.filter((n) => n.type === "agent");
     const updatedMembers: TeamMember[] = agentNodes.map((n, idx) => {
       const d = n.data as AgentNodeData;
-      // Find existing member to preserve fields
       const existing = team.members.find((m) => m.id === d.memberId);
       return {
         id: d.memberId,
@@ -365,208 +300,33 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
       updated_at: new Date().toISOString(),
     };
 
-    store.updateTeam(team.id, updatedTeam);
+    store.updateTeamAsync(team.id, updatedTeam);
     onTeamUpdate(updatedTeam);
   }, [nodes, edges, team, onTeamUpdate]);
 
-  // ---- Execution ----
-  const handleRunWithPrompt = useCallback((prompt: string) => {
-    if (!prompt.trim()) return;
-    setShowPromptInput(false);
-    setIsRunning(true);
-    setExecutionLogs([]);
-    setNodeOutputs({});
-    setTotalTokens(0);
-    setElapsedMs(0);
-    startTimeRef.current = Date.now();
-
-    // Initialize node statuses
-    const agentNodes = nodes.filter((n) => n.type === "agent");
-    const statuses: ExecutionNodeStatus[] = agentNodes.map((n) => ({
-      nodeId: n.id,
-      name: (n.data as AgentNodeData).name ?? "Agent",
-      status: "queued" as AgentNodeStatus,
-    }));
-    setNodeStatuses(statuses);
-
-    // Update node visuals to queued
-    setNodes((nds) => nds.map((n) =>
-      n.type === "agent" ? { ...n, data: { ...n.data, status: "queued" } } : n
-    ));
-
-    // Timer
-    timerRef.current = setInterval(() => {
-      setElapsedMs(Date.now() - startTimeRef.current);
-    }, 500);
-
-    // Build edges from current canvas
-    const canvasEdges = edges
-      .filter((e) => {
-        const src = nodes.find((n) => n.id === e.source);
-        const tgt = nodes.find((n) => n.id === e.target);
-        return src?.type === "agent" && tgt?.type === "agent";
-      })
-      .map((e) => ({ id: e.id, source: e.source, target: e.target }));
-
-    // Create execution listener
-    const listener = (event: ExecutionEvent) => {
-      if (event.type === "node-status" && event.nodeId && event.status) {
-        const status = event.status as AgentNodeStatus;
-        setNodes((nds) => nds.map((n) =>
-          n.id === event.nodeId ? { ...n, data: { ...n.data, status } } : n
-        ));
-        setEdges((eds) => eds.map((e) =>
-          e.source === event.nodeId || e.target === event.nodeId
-            ? { ...e, animated: status === "running" }
-            : e
-        ));
-        setNodeStatuses((prev) => prev.map((ns) =>
-          ns.nodeId === event.nodeId ? { ...ns, status } : ns
-        ));
-      }
-      if (event.type === "log" && event.message) {
-        setExecutionLogs((prev) => [
-          ...prev.slice(-200),
-          `[${new Date().toLocaleTimeString()}] ${event.message}`,
-        ]);
-      }
-      if (event.type === "pipeline-done" || event.type === "pipeline-error") {
-        setIsRunning(false);
-        if (timerRef.current) clearInterval(timerRef.current);
-        setExecutionLogs((prev) => [...prev, `\n=== ${event.message} ===`]);
-      }
-    };
-
-    const executor = new TeamExecutor(team, canvasEdges, listener, {
-      prompt,
-      team,
-      edges: canvasEdges,
-      maxParallel: team.workflow === "parallel" ? agentNodes.length : 1,
-    });
-    executorRef.current = executor;
-
-    executor.runPipeline()
-      .then((run) => {
-        setTotalTokens(run.totalTokens ?? 0);
-        if (run.nodeOutputs) {
-          setNodeOutputs(run.nodeOutputs);
-        }
-      })
-      .catch((err) => {
-        console.error("[TeamCanvas] runPipeline failed:", err);
-        setIsRunning(false);
-        if (timerRef.current) clearInterval(timerRef.current);
-        setExecutionLogs((prev) => [
-          ...prev,
-          `\n=== Error: ${err instanceof Error ? err.message : String(err)} ===`,
-        ]);
-      });
-  }, [nodes, edges, team, setNodes, setEdges]);
-
-  const handleRun = useCallback(() => {
-    setShowPromptInput(true);
-  }, []);
-
-  const handleStop = useCallback(() => {
-    executorRef.current?.abort();
-    setIsRunning(false);
-    if (timerRef.current) clearInterval(timerRef.current);
-    setExecutionLogs((prev) => [...prev, `\n=== Execution stopped ===`]);
-    // Reset running nodes to idle
-    setNodes((nds) => nds.map((n) =>
-      n.type === "agent" && (n.data as AgentNodeData).status === "running"
-        ? { ...n, data: { ...n.data, status: "idle" } }
-        : n
-    ));
-  }, [setNodes]);
-
-  const handleReset = useCallback(() => {
-    setNodes((nds) => nds.map((n) =>
-      n.type === "agent"
-        ? { ...n, data: { ...n.data, status: "idle", tokens: undefined } }
-        : n
-    ));
-    setEdges((eds) => eds.map((e) => ({ ...e, animated: false })));
-    setExecutionLogs([]);
-    setNodeStatuses([]);
-    setNodeOutputs({});
-    setTotalTokens(0);
-    setElapsedMs(0);
-  }, [setNodes, setEdges]);
-
-  // Cleanup timer
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, []);
+  const agentCount = useMemo(
+    () => nodes.filter((n) => n.type === "agent").length,
+    [nodes],
+  );
 
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 border-b bg-background/80 backdrop-blur-sm">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold truncate max-w-[200px]">
-            {team.name}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {nodes.filter((n) => n.type === "agent").length} {isZh ? "个成员" : "members"}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs px-2"
-            onClick={handleAutoLayout}
-            title={isZh ? "自动布局" : "Auto Layout"}
-          >
-            <LayoutGrid className="h-3.5 w-3.5 mr-1" />
-            {isZh ? "布局" : "Layout"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs px-2"
-            onClick={handleFitView}
-            title={isZh ? "适应视图" : "Fit View"}
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs px-2"
-            onClick={handleReset}
-            title={isZh ? "重置状态" : "Reset"}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </Button>
-          <div className="w-px h-5 bg-border mx-0.5" />
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs px-2"
-            onClick={handleSave}
-          >
-            <Save className="h-3.5 w-3.5 mr-1" />
-            {isZh ? "保存" : "Save"}
-          </Button>
-          <Button
-            size="sm"
-            className="h-7 text-xs px-2"
-            onClick={handleRun}
-            disabled={isRunning || nodes.filter((n) => n.type === "agent").length === 0}
-          >
-            <Play className="h-3.5 w-3.5 mr-1" />
-            {isZh ? "运行" : "Run"}
-          </Button>
-        </div>
-      </div>
+      <CanvasToolbar
+        teamName={team.name}
+        agentCount={agentCount}
+        isZh={isZh}
+        isRunning={execution.isRunning}
+        onAutoLayout={handleAutoLayout}
+        onFitView={handleFitView}
+        onReset={execution.handleReset}
+        onSave={handleSave}
+        onRun={execution.handleRun}
+      />
 
       {/* Main area */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Palette (hidden on small screens via CSS) */}
+        {/* Palette */}
         <div className="hidden md:block">
           <MemberPalette
             locale={locale}
@@ -587,8 +347,8 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
             onNodeContextMenu={onNodeContextMenu}
-            onDragOver={onDragOver}
-            onDrop={onDrop}
+            onDragOver={dnd.onDragOver}
+            onDrop={dnd.onDrop}
             nodeTypes={nodeTypes}
             fitView
             deleteKeyCode={["Backspace", "Delete"]}
@@ -640,20 +400,20 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
       </div>
 
       {/* Prompt input bar */}
-      {showPromptInput && (
+      {execution.showPromptInput && (
         <div className="border-t bg-background px-4 py-3">
           <div className="flex items-center gap-2">
             <input
               className="flex-1 h-8 px-3 rounded-md border border-input bg-background text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder={isZh ? "输入任务指令给工作流工作室..." : "Enter the task prompt for the workflow studio..."}
-              value={promptInput}
-              onChange={(e) => setPromptInput(e.target.value)}
+              value={execution.promptInput}
+              onChange={(e) => execution.setPromptInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && promptInput.trim()) {
-                  handleRunWithPrompt(promptInput);
+                if (e.key === "Enter" && execution.promptInput.trim()) {
+                  execution.handleRunWithPrompt(execution.promptInput);
                 }
                 if (e.key === "Escape") {
-                  setShowPromptInput(false);
+                  execution.setShowPromptInput(false);
                 }
               }}
               autoFocus
@@ -661,8 +421,8 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
             <Button
               size="sm"
               className="h-8 px-3"
-              onClick={() => handleRunWithPrompt(promptInput)}
-              disabled={!promptInput.trim()}
+              onClick={() => execution.handleRunWithPrompt(execution.promptInput)}
+              disabled={!execution.promptInput.trim()}
             >
               <Play className="h-3.5 w-3.5 mr-1" />
               {isZh ? "执行" : "Execute"}
@@ -671,28 +431,28 @@ function TeamCanvasInner({ team, onTeamUpdate, locale }: TeamCanvasInnerProps) {
               size="sm"
               variant="ghost"
               className="h-8 px-2"
-              onClick={() => setShowPromptInput(false)}
+              onClick={() => execution.setShowPromptInput(false)}
             >
               {isZh ? "取消" : "Cancel"}
             </Button>
           </div>
           <p className="text-[10px] text-muted-foreground mt-1">
             {isZh
-              ? `${team.workflow === "parallel" ? "并行" : team.workflow === "hierarchical" ? "层级" : "顺序"}执行 ${nodes.filter((n) => n.type === "agent").length} 个 Agent`
-              : `${team.workflow} execution with ${nodes.filter((n) => n.type === "agent").length} agents`}
+              ? `${team.workflow === "parallel" ? "并行" : team.workflow === "hierarchical" ? "层级" : "顺序"}执行 ${agentCount} 个 Agent`
+              : `${team.workflow} execution with ${agentCount} agents`}
           </p>
         </div>
       )}
 
       {/* Execution panel */}
       <ExecutionPanel
-        isRunning={isRunning}
-        logs={executionLogs}
-        nodeStatuses={nodeStatuses}
-        nodeOutputs={nodeOutputs}
-        totalTokens={totalTokens}
-        elapsedMs={elapsedMs}
-        onStop={handleStop}
+        isRunning={execution.isRunning}
+        logs={execution.executionLogs}
+        nodeStatuses={execution.nodeStatuses}
+        nodeOutputs={execution.nodeOutputs}
+        totalTokens={execution.totalTokens}
+        elapsedMs={execution.elapsedMs}
+        onStop={execution.handleStop}
         isZh={isZh}
       />
     </div>

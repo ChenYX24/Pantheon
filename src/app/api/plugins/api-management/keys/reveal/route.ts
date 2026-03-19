@@ -26,6 +26,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ key: decrypted });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const isCorrupted = message.includes("decryption failed");
+    return NextResponse.json(
+      {
+        error: isCorrupted
+          ? "Key decryption failed — hostname may have changed. Please delete and re-enter this key."
+          : message,
+        corrupted: isCorrupted,
+      },
+      { status: isCorrupted ? 422 : 500 }
+    );
   }
 }

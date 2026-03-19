@@ -145,7 +145,9 @@ export async function POST(req: NextRequest) {
     }
 
     const claudeBin = findClaudeBinary();
-    console.log(`[Generate API] Spawning: ${claudeBin} for ${type} generation`);
+    if (process.env.NODE_ENV === "development") {
+      console.log(`[Generate API] Spawning: ${claudeBin} for ${type} generation`);
+    }
 
     const child = spawn(claudeBin, args, {
       env: env as NodeJS.ProcessEnv,

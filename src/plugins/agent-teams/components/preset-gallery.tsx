@@ -5,7 +5,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Users, Castle, FlaskConical, Layers, Brain, Plus,
-  ArrowRight,
 } from "lucide-react";
 import type { TeamPreset } from "../types";
 import { TEAM_PRESETS } from "../team-data";

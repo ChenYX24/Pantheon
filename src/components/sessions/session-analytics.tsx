@@ -4,11 +4,21 @@ import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  PieChart, Pie, Cell, BarChart, Bar, ResponsiveContainer,
+  PieChart, Pie, Cell, BarChart, Bar, AreaChart, Area,
+  ResponsiveContainer,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from "recharts";
 import type { PieLabelRenderProps } from "recharts";
+import {
+  FileText, Wrench, Clock, Zap, Activity,
+} from "lucide-react";
 import { fmtTokens } from "@/lib/format-utils";
+import {
+  computeTokenTimeline,
+  generateInsights,
+  type ToolCallInfo,
+  type Insight,
+} from "@/lib/session-analysis";
 import type { SessionDetail } from "./types";
 
 interface SessionAnalyticsProps {
@@ -60,6 +70,14 @@ const TOOL_COLORS = [
   "#06b6d4", // cyan
   "#84cc16", // lime
 ];
+
+const INSIGHT_ICONS: Record<string, typeof Activity> = {
+  file: FileText,
+  tool: Wrench,
+  clock: Clock,
+  zap: Zap,
+  activity: Activity,
+};
 
 export function SessionAnalytics({ detail }: SessionAnalyticsProps) {
   // Calculate tool usage statistics
@@ -119,6 +137,32 @@ export function SessionAnalytics({ detail }: SessionAnalyticsProps) {
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [detail.messages]);
 
+  // Compute insights
+  const insights = useMemo(() => {
+    const toolCalls: ToolCallInfo[] = [];
+    for (const msg of detail.messages) {
+      if (msg.toolUse) {
+        for (const tool of msg.toolUse) {
+          let parsed: Record<string, unknown> = {};
+          try { parsed = tool.input ? JSON.parse(tool.input) : {}; } catch { parsed = {}; }
+          toolCalls.push({ name: tool.name, input: parsed, timestamp: msg.timestamp });
+        }
+      }
+    }
+    return generateInsights(detail.messages, toolCalls);
+  }, [detail.messages]);
+
+  // Compute token timeline for sparkline
+  const tokenTimeline = useMemo(() => {
+    const msgs = detail.messages
+      .filter((m) => m.timestamp && (m.inputTokens || m.outputTokens))
+      .map((m) => ({
+        timestamp: m.timestamp,
+        usage: { input_tokens: m.inputTokens || 0, output_tokens: m.outputTokens || 0 },
+      }));
+    return computeTokenTimeline(msgs);
+  }, [detail.messages]);
+
   const totalToolCalls = toolStats.reduce((sum, t) => sum + t.value, 0);
   const totalMessages = detail.messages.filter(m => m.role === "user" || m.role === "assistant").length;
   const userMessages = detail.messages.filter(m => m.role === "user").length;
@@ -151,6 +195,70 @@ export function SessionAnalytics({ detail }: SessionAnalyticsProps) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Insights */}
+      {insights.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Insights</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-1.5">
+              {insights.map((insight, i) => {
+                const IconComp = INSIGHT_ICONS[insight.icon] || Activity;
+                return (
+                  <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+                    <IconComp className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-foreground/70" />
+                    <span>{insight.text}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Token Sparkline */}
+      {tokenTimeline.length > 1 && (
+        <Card>
+          <CardHeader className="pb-1">
+            <CardTitle className="text-sm">Token Usage Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={80}>
+              <AreaChart data={tokenTimeline} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="inputGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="outputGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis dataKey="time" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
+                <Tooltip
+                  contentStyle={{ fontSize: 11, background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
+                  formatter={(value?: number, name?: string) => [fmtTokens(value ?? 0), name === "inputTokens" ? "Input" : "Output"]}
+                />
+                <Area type="monotone" dataKey="inputTokens" stroke="#3b82f6" fill="url(#inputGrad)" strokeWidth={1.5} />
+                <Area type="monotone" dataKey="outputTokens" stroke="#f97316" fill="url(#outputGrad)" strokeWidth={1.5} />
+              </AreaChart>
+            </ResponsiveContainer>
+            <div className="flex items-center gap-3 mt-1 justify-center">
+              <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <div className="w-2 h-2 rounded-full bg-blue-500" />
+                Input
+              </div>
+              <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <div className="w-2 h-2 rounded-full bg-orange-500" />
+                Output
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Tool Usage Distribution */}
       <Card>

@@ -12,6 +12,13 @@ import {
   Rss,
   Search,
   Settings2,
+  Play,
+  TrendingUp,
+  Globe,
+  Plug,
+  Send,
+  MessageSquare,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +31,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { SourceType } from "../types";
+import { useToast } from "@/components/toast";
+import type { SourceType, PushConfig, PushChannel } from "../types";
 
 interface RssFeed { name: string; url: string }
 
@@ -34,14 +42,16 @@ interface BriefingConfig {
   arxiv: { categories: string[] };
   rssFeeds: RssFeed[];
   display: { maxItemsPerSource: number; autoRefreshInterval: string };
+  summaryLanguage: "zh" | "en";
 }
 
 const DEFAULT_CONFIG: BriefingConfig = {
-  sources: { github: true, huggingface: true, arxiv: true, rss: false, "web-search": true, "custom-api": false },
+  sources: { github: true, huggingface: true, arxiv: true, rss: false, rsshub: false, youtube: false, finance: false, "web-search": true, "custom-api": false },
   github: { language: "All", timeRange: "daily" },
   arxiv: { categories: ["cs.AI", "cs.CL", "cs.CV", "cs.LG"] },
   rssFeeds: [],
   display: { maxItemsPerSource: 10, autoRefreshInterval: "off" },
+  summaryLanguage: "en",
 };
 
 const SOURCE_META: { type: SourceType; icon: typeof Github; label: string; labelZh: string }[] = [
@@ -49,8 +59,99 @@ const SOURCE_META: { type: SourceType; icon: typeof Github; label: string; label
   { type: "huggingface", icon: BookOpen, label: "HuggingFace", labelZh: "HuggingFace" },
   { type: "arxiv", icon: FileText, label: "arXiv", labelZh: "arXiv" },
   { type: "rss", icon: Rss, label: "RSS Feeds", labelZh: "RSS 订阅" },
+  { type: "rsshub", icon: Globe, label: "RSSHub", labelZh: "RSSHub 订阅" },
+  { type: "youtube", icon: Play, label: "YouTube", labelZh: "YouTube" },
+  { type: "finance", icon: TrendingUp, label: "Finance", labelZh: "财经新闻" },
   { type: "web-search", icon: Search, label: "Web Search", labelZh: "网页搜索" },
-  { type: "custom-api", icon: FileText, label: "Custom API", labelZh: "自定义 API" },
+  { type: "custom-api", icon: Plug, label: "Custom API", labelZh: "自定义 API" },
+];
+
+interface ConfigPreset {
+  id: string;
+  name: string;
+  nameZh: string;
+  description: string;
+  descriptionZh: string;
+  icon: string;
+  config: Partial<BriefingConfig>;
+}
+
+const CONFIG_PRESETS: ConfigPreset[] = [
+  {
+    id: "ml-researcher",
+    name: "ML Researcher",
+    nameZh: "ML 研究者",
+    description: "arXiv + HuggingFace + GitHub ML repos",
+    descriptionZh: "arXiv + HuggingFace + GitHub ML 仓库",
+    icon: "\u{1F52C}",
+    config: {
+      sources: { github: true, huggingface: true, arxiv: true, rss: false, rsshub: false, youtube: false, finance: false, "web-search": false, "custom-api": false },
+      github: { language: "Python", timeRange: "weekly" },
+      arxiv: { categories: ["cs.AI", "cs.CL", "cs.CV", "cs.LG", "cs.NE"] },
+      display: { maxItemsPerSource: 15, autoRefreshInterval: "2h" },
+    },
+  },
+  {
+    id: "fullstack-dev",
+    name: "Full Stack Dev",
+    nameZh: "全栈开发者",
+    description: "GitHub trending + RSS tech blogs",
+    descriptionZh: "GitHub 趋势 + RSS 技术博客",
+    icon: "\u{1F4BB}",
+    config: {
+      sources: { github: true, huggingface: false, arxiv: false, rss: true, rsshub: false, youtube: false, finance: false, "web-search": true, "custom-api": false },
+      github: { language: "TypeScript", timeRange: "daily" },
+      arxiv: { categories: [] },
+      rssFeeds: [
+        { name: "Hacker News", url: "https://hnrss.org/frontpage" },
+        { name: "Dev.to", url: "https://dev.to/feed" },
+      ],
+      display: { maxItemsPerSource: 10, autoRefreshInterval: "1h" },
+    },
+  },
+  {
+    id: "ai-engineer",
+    name: "AI Engineer",
+    nameZh: "AI 工程师",
+    description: "All AI sources, balanced",
+    descriptionZh: "全部 AI 来源，均衡配置",
+    icon: "\u{1F916}",
+    config: {
+      sources: { github: true, huggingface: true, arxiv: true, rss: true, rsshub: false, youtube: false, finance: false, "web-search": true, "custom-api": false },
+      github: { language: "Python", timeRange: "daily" },
+      arxiv: { categories: ["cs.AI", "cs.CL", "cs.LG"] },
+      rssFeeds: [
+        { name: "OpenAI Blog", url: "https://openai.com/blog/rss.xml" },
+      ],
+      display: { maxItemsPerSource: 10, autoRefreshInterval: "2h" },
+    },
+  },
+  {
+    id: "robotics",
+    name: "Robotics",
+    nameZh: "机器人",
+    description: "Robotics papers + hardware repos",
+    descriptionZh: "机器人论文 + 硬件仓库",
+    icon: "\u{1F9BE}",
+    config: {
+      sources: { github: true, huggingface: true, arxiv: true, rss: false, rsshub: false, youtube: false, finance: false, "web-search": false, "custom-api": false },
+      github: { language: "Python", timeRange: "weekly" },
+      arxiv: { categories: ["cs.RO", "cs.AI", "cs.CV"] },
+      display: { maxItemsPerSource: 15, autoRefreshInterval: "6h" },
+    },
+  },
+  {
+    id: "minimal",
+    name: "Minimal",
+    nameZh: "精简模式",
+    description: "HuggingFace daily papers only",
+    descriptionZh: "仅 HuggingFace 每日论文",
+    icon: "\u2728",
+    config: {
+      sources: { github: false, huggingface: true, arxiv: false, rss: false, rsshub: false, youtube: false, finance: false, "web-search": false, "custom-api": false },
+      display: { maxItemsPerSource: 20, autoRefreshInterval: "off" },
+    },
+  },
 ];
 
 const GITHUB_LANGUAGES = ["All", "Python", "TypeScript", "JavaScript", "Rust", "Go", "Java", "C++", "C", "Swift", "Kotlin", "Ruby", "PHP"];
@@ -71,6 +172,21 @@ export function BriefingSettings({ open, onClose, isZh }: BriefingSettingsProps)
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [newFeed, setNewFeed] = useState<RssFeed>({ name: "", url: "" });
+  const { toast } = useToast();
+
+  // Push config state
+  const DEFAULT_PUSH_CONFIG: PushConfig = {
+    enabled: false,
+    channels: [],
+    format: "summary-and-items",
+    maxItems: 10,
+    includeLinks: true,
+  };
+  const [pushConfig, setPushConfig] = useState<PushConfig>(DEFAULT_PUSH_CONFIG);
+  const [pushDirty, setPushDirty] = useState(false);
+  const [pushSaving, setPushSaving] = useState(false);
+  const [pushTesting, setPushTesting] = useState(false);
+  const [newChannel, setNewChannel] = useState<{ platform: "telegram" | "feishu"; chatId: string }>({ platform: "telegram", chatId: "" });
 
   // Load config on open
   useEffect(() => {
@@ -87,7 +203,20 @@ export function BriefingSettings({ open, onClose, isZh }: BriefingSettingsProps)
       } catch {
         /* use defaults */
       }
+      // Load push config
+      try {
+        const res = await fetch("/api/plugins/daily-briefing/push");
+        if (res.ok) {
+          const { config: saved } = await res.json();
+          if (saved) {
+            setPushConfig({ ...DEFAULT_PUSH_CONFIG, ...saved });
+          }
+        }
+      } catch {
+        /* use defaults */
+      }
       setDirty(false);
+      setPushDirty(false);
     })();
   }, [open]);
 
@@ -136,6 +265,19 @@ export function BriefingSettings({ open, onClose, isZh }: BriefingSettingsProps)
     setDirty(true);
   }, []);
 
+  const applyPreset = useCallback((preset: ConfigPreset) => {
+    setConfig((prev) => ({
+      ...prev,
+      ...preset.config,
+      sources: { ...prev.sources, ...preset.config.sources },
+      github: { ...prev.github, ...preset.config.github },
+      arxiv: { ...prev.arxiv, ...preset.config.arxiv },
+      display: { ...prev.display, ...preset.config.display },
+      rssFeeds: preset.config.rssFeeds ?? prev.rssFeeds,
+    }));
+    setDirty(true);
+  }, []);
+
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
@@ -150,6 +292,85 @@ export function BriefingSettings({ open, onClose, isZh }: BriefingSettingsProps)
     }
     setSaving(false);
   }, [config]);
+
+  // Push config helpers
+  const updatePush = useCallback(<K extends keyof PushConfig>(key: K, value: PushConfig[K]) => {
+    setPushConfig((prev) => ({ ...prev, [key]: value }));
+    setPushDirty(true);
+  }, []);
+
+  const addPushChannel = useCallback(() => {
+    if (!newChannel.chatId.trim()) return;
+    const channel: PushChannel = {
+      platform: newChannel.platform,
+      chatId: newChannel.chatId.trim(),
+      enabled: true,
+    };
+    setPushConfig((prev) => ({
+      ...prev,
+      channels: [...prev.channels, channel],
+    }));
+    setNewChannel({ platform: "telegram", chatId: "" });
+    setPushDirty(true);
+  }, [newChannel]);
+
+  const removePushChannel = useCallback((index: number) => {
+    setPushConfig((prev) => ({
+      ...prev,
+      channels: prev.channels.filter((_, i) => i !== index),
+    }));
+    setPushDirty(true);
+  }, []);
+
+  const togglePushChannel = useCallback((index: number) => {
+    setPushConfig((prev) => ({
+      ...prev,
+      channels: prev.channels.map((ch, i) =>
+        i === index ? { ...ch, enabled: !ch.enabled } : ch,
+      ),
+    }));
+    setPushDirty(true);
+  }, []);
+
+  const handleSavePush = useCallback(async () => {
+    setPushSaving(true);
+    try {
+      await fetch("/api/plugins/daily-briefing/push", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pushConfig),
+      });
+      setPushDirty(false);
+      toast(isZh ? "推送设置已保存" : "Push settings saved", "success");
+    } catch (err) {
+      console.error("[BriefingSettings] Save push config error:", err);
+      toast(isZh ? "保存推送设置失败" : "Failed to save push settings", "error");
+    }
+    setPushSaving(false);
+  }, [pushConfig, isZh, toast]);
+
+  const handleTestPush = useCallback(async () => {
+    setPushTesting(true);
+    try {
+      const res = await fetch("/api/plugins/daily-briefing/push", {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error || (isZh ? "测试推送失败" : "Test push failed"), "error");
+      } else {
+        toast(
+          isZh
+            ? `测试推送完成（${data.successCount} 成功，${data.failCount} 失败）`
+            : `Test push done (${data.successCount} ok, ${data.failCount} failed)`,
+          data.failCount > 0 ? "info" : "success",
+        );
+      }
+    } catch {
+      toast(isZh ? "测试推送失败" : "Test push failed", "error");
+    }
+    setPushTesting(false);
+  }, [isZh, toast]);
 
   if (!open) return null;
 
@@ -174,6 +395,30 @@ export function BriefingSettings({ open, onClose, isZh }: BriefingSettingsProps)
         </div>
 
         <div className="p-6 space-y-6">
+          {/* ---- Quick Setup Presets ---- */}
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              {t("Quick Setup", "快速配置")}
+            </h3>
+            <div className="grid grid-cols-2 gap-2">
+              {CONFIG_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  className="rounded-lg border p-3 text-left hover:border-primary/50 hover:bg-accent/30 transition-all"
+                  onClick={() => applyPreset(preset)}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-lg">{preset.icon}</span>
+                    <span className="text-sm font-medium">{isZh ? preset.nameZh : preset.name}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground line-clamp-1">
+                    {isZh ? preset.descriptionZh : preset.description}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </section>
+
           {/* ---- Data Sources ---- */}
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
@@ -332,12 +577,189 @@ export function BriefingSettings({ open, onClose, isZh }: BriefingSettingsProps)
             </section>
           )}
 
+          {/* ---- Push Notifications ---- */}
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              {t("Push Notifications", "推送通知")}
+            </h3>
+            <div className="space-y-3 rounded-md border p-4">
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Send className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm">{t("Enable Push", "启用推送")}</span>
+                </div>
+                <Switch
+                  checked={pushConfig.enabled}
+                  onCheckedChange={(v) => updatePush("enabled", v)}
+                />
+              </div>
+
+              {/* Channels */}
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground">
+                  {t("Channels", "推送渠道")}
+                </label>
+                {pushConfig.channels.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("No channels configured.", "暂无推送渠道。")}
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {pushConfig.channels.map((ch, i) => (
+                      <div key={i} className="flex items-center gap-2 text-sm">
+                        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <Badge variant="outline" className="text-[10px]">{ch.platform}</Badge>
+                        <span className="text-muted-foreground truncate flex-1 text-xs">{ch.chatId}</span>
+                        <Switch
+                          checked={ch.enabled}
+                          onCheckedChange={() => togglePushChannel(i)}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-destructive"
+                          onClick={() => removePushChannel(i)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Add channel */}
+                <div className="flex gap-2 items-center">
+                  <Select
+                    value={newChannel.platform}
+                    onValueChange={(v) => setNewChannel((prev) => ({ ...prev, platform: v as "telegram" | "feishu" }))}
+                  >
+                    <SelectTrigger className="h-8 w-28 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="telegram">Telegram</SelectItem>
+                      <SelectItem value="feishu">{isZh ? "飞书" : "Feishu"}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    className="h-8 text-xs flex-1"
+                    placeholder="Chat ID"
+                    value={newChannel.chatId}
+                    onChange={(e) => setNewChannel((prev) => ({ ...prev, chatId: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") addPushChannel(); }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2"
+                    onClick={addPushChannel}
+                    disabled={!newChannel.chatId.trim()}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Format */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">
+                  {t("Format", "推送格式")}
+                </label>
+                <Select
+                  value={pushConfig.format}
+                  onValueChange={(v) => updatePush("format", v as PushConfig["format"])}
+                >
+                  <SelectTrigger className="h-9 w-52">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="summary-only">{t("Summary only", "仅摘要")}</SelectItem>
+                    <SelectItem value="summary-and-items">{t("Summary + Items", "摘要 + 条目")}</SelectItem>
+                    <SelectItem value="items-only">{t("Items only", "仅条目")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Max items */}
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">
+                  {t("Max items", "最大条目数")}
+                </label>
+                <Input
+                  type="number"
+                  className="h-9 w-24"
+                  min={1}
+                  max={20}
+                  value={pushConfig.maxItems}
+                  onChange={(e) =>
+                    updatePush("maxItems", Math.max(1, Math.min(20, Number(e.target.value) || 10)))
+                  }
+                />
+              </div>
+
+              {/* Include links */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm">{t("Include links", "包含链接")}</span>
+                <Switch
+                  checked={pushConfig.includeLinks}
+                  onCheckedChange={(v) => updatePush("includeLinks", v)}
+                />
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={handleSavePush}
+                  disabled={pushSaving || !pushDirty}
+                >
+                  <Save className="h-3.5 w-3.5 mr-1" />
+                  {pushSaving
+                    ? t("Saving...", "保存中...")
+                    : pushDirty
+                      ? t("Save Push Settings", "保存推送设置")
+                      : t("Saved", "已保存")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestPush}
+                  disabled={pushTesting || pushConfig.channels.filter((c) => c.enabled).length === 0}
+                >
+                  {pushTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Send className="h-3.5 w-3.5 mr-1" />}
+                  {t("Test Push", "测试推送")}
+                </Button>
+              </div>
+            </div>
+          </section>
+
           {/* ---- Display Settings ---- */}
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
               {t("Display", "显示")}
             </h3>
             <div className="space-y-3 rounded-md border p-4">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">
+                  {t("Summary Language", "简报语言")}
+                </label>
+                <Select
+                  value={config.summaryLanguage ?? "en"}
+                  onValueChange={(v) =>
+                    update("summaryLanguage", v as "zh" | "en")
+                  }
+                >
+                  <SelectTrigger className="h-9 w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="en">English</SelectItem>
+                    <SelectItem value="zh">中文</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <label className="text-xs text-muted-foreground">
                   {t("Max items per source", "每个来源最大条目数")}

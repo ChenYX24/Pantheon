@@ -45,7 +45,9 @@ export async function loadAllPlugins(): Promise<void> {
   for (const plugin of PLUGINS) {
     try {
       await pluginRegistry.register(plugin);
-      console.log(`[PluginLoader] Registered: ${plugin.manifest.id}`);
+      if (process.env.NODE_ENV === "development") {
+        console.log(`[PluginLoader] Registered: ${plugin.manifest.id}`);
+      }
     } catch (err) {
       console.error(`[PluginLoader] Failed to register plugin:`, err);
     }

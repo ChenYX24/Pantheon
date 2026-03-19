@@ -29,15 +29,6 @@ const STATUS_ICONS: Record<AgentNodeStatus, React.ReactNode> = {
   skipped: <X className="h-3.5 w-3.5 text-muted-foreground/40" />,
 };
 
-const STATUS_LABELS: Record<AgentNodeStatus, string> = {
-  idle: "Idle",
-  queued: "Queued",
-  running: "Running",
-  done: "Done",
-  error: "Error",
-  skipped: "Skipped",
-};
-
 const PROVIDER_STYLES: Record<string, { bg: string; text: string; border: string }> = {
   claude: {
     bg: "bg-orange-100 dark:bg-orange-900/30",

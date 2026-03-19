@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { memo, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,11 +31,7 @@ const ICON_MAP: Record<string, typeof Users> = {
   brain: Brain,
 };
 
-function getTeamIcon(icon: string) {
-  return ICON_MAP[icon] || Users;
-}
-
-function MemberRow({ member }: { member: TeamMember }) {
+const MemberRow = memo(function MemberRow({ member }: { member: TeamMember }) {
   return (
     <div className="flex items-center gap-2 py-1.5 px-2 rounded-md bg-muted/50 hover:bg-muted transition-colors">
       <div className="flex items-center gap-1.5 min-w-0 flex-1">
@@ -57,7 +53,7 @@ function MemberRow({ member }: { member: TeamMember }) {
       </div>
     </div>
   );
-}
+});
 
 interface TeamCardProps {
   team: AgentTeam;
@@ -69,9 +65,9 @@ interface TeamCardProps {
   onOpenHistory?: () => void;
 }
 
-export function TeamCard({ team, onEdit, onClone, onDelete, onRun, onOpenCanvas, onOpenHistory }: TeamCardProps) {
+export const TeamCard = memo(function TeamCard({ team, onEdit, onClone, onDelete, onRun, onOpenCanvas, onOpenHistory }: TeamCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const Icon = getTeamIcon(team.icon);
+  const IconComp = ICON_MAP[team.icon] || Users;
   const wf = WORKFLOW_LABELS[team.workflow] || WORKFLOW_LABELS.sequential;
 
   const tierGroups = useMemo(() => {
@@ -103,7 +99,7 @@ export function TeamCard({ team, onEdit, onClone, onDelete, onRun, onOpenCanvas,
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <Icon className="h-4 w-4 text-primary" />
+              <IconComp className="h-4 w-4 text-primary" />
             </div>
             <div className="min-w-0">
               <CardTitle className="text-base truncate">{team.name}</CardTitle>
@@ -198,4 +194,4 @@ export function TeamCard({ team, onEdit, onClone, onDelete, onRun, onOpenCanvas,
       </CardContent>
     </Card>
   );
-}
+});

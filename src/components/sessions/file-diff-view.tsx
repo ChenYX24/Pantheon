@@ -1,8 +1,9 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Copy, Check, FileText, Terminal as TerminalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { computeUnifiedDiff, type DiffLine } from "@/lib/session-analysis";
 
 interface FileDiffViewProps {
   toolName: string;
@@ -41,54 +42,68 @@ function highlightLine(line: string): React.ReactNode {
   return parts.length > 0 ? <>{parts}</> : line;
 }
 
-function DiffLines({
+function UnifiedDiffLines({
   oldStr,
   newStr,
 }: {
   oldStr: string;
   newStr: string;
 }) {
-  const oldLines = oldStr.split("\n");
-  const newLines = newStr.split("\n");
+  const diffLines = useMemo(() => computeUnifiedDiff(oldStr, newStr), [oldStr, newStr]);
+
+  const addCount = diffLines.filter((l) => l.type === "add").length;
+  const removeCount = diffLines.filter((l) => l.type === "remove").length;
 
   return (
     <div className="font-mono text-xs leading-relaxed overflow-x-auto">
-      {/* Removed lines */}
-      {oldLines.map((line, i) => (
-        <div
-          key={`old-${i}`}
-          className="bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 px-2 py-0.5 flex"
-        >
-          <span className="text-red-400 dark:text-red-600 select-none w-5 flex-shrink-0 text-right mr-2">
-            {i + 1}
-          </span>
-          <span className="select-none text-red-400 dark:text-red-600 mr-1 flex-shrink-0">
-            -
-          </span>
-          <span className="whitespace-pre-wrap break-words min-w-0">
-            {highlightLine(line)}
-          </span>
-        </div>
-      ))}
-      {/* Separator */}
-      <div className="border-t border-dashed border-muted-foreground/20 my-0.5" />
-      {/* Added lines */}
-      {newLines.map((line, i) => (
-        <div
-          key={`new-${i}`}
-          className="bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-400 px-2 py-0.5 flex"
-        >
-          <span className="text-green-400 dark:text-green-600 select-none w-5 flex-shrink-0 text-right mr-2">
-            {i + 1}
-          </span>
-          <span className="select-none text-green-400 dark:text-green-600 mr-1 flex-shrink-0">
-            +
-          </span>
-          <span className="whitespace-pre-wrap break-words min-w-0">
-            {highlightLine(line)}
-          </span>
-        </div>
-      ))}
+      {/* Change summary badge */}
+      <div className="flex items-center gap-1.5 px-2 py-1 bg-muted/30 border-b border-muted text-[10px]">
+        <span className="text-green-600 dark:text-green-400 font-semibold">+{addCount}</span>
+        <span className="text-red-600 dark:text-red-400 font-semibold">-{removeCount}</span>
+      </div>
+      {/* Unified diff lines */}
+      {diffLines.map((line, i) => {
+        const bgClass =
+          line.type === "remove"
+            ? "bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400"
+            : line.type === "add"
+              ? "bg-green-50 dark:bg-green-950/40 text-green-700 dark:text-green-400"
+              : "";
+        const signChar = line.type === "remove" ? "-" : line.type === "add" ? "+" : " ";
+        const signColor =
+          line.type === "remove"
+            ? "text-red-400 dark:text-red-600"
+            : line.type === "add"
+              ? "text-green-400 dark:text-green-600"
+              : "text-transparent";
+        const gutterColor =
+          line.type === "remove"
+            ? "text-red-400 dark:text-red-600"
+            : line.type === "add"
+              ? "text-green-400 dark:text-green-600"
+              : "text-muted-foreground/50";
+
+        return (
+          <div key={i} className={`${bgClass} px-2 py-0.5 flex`}>
+            {/* Old line number gutter */}
+            <span className={`${gutterColor} select-none w-5 flex-shrink-0 text-right mr-0.5`}>
+              {line.oldLineNum ?? ""}
+            </span>
+            {/* New line number gutter */}
+            <span className={`${gutterColor} select-none w-5 flex-shrink-0 text-right mr-1.5`}>
+              {line.newLineNum ?? ""}
+            </span>
+            {/* Sign */}
+            <span className={`select-none ${signColor} mr-1 flex-shrink-0`}>
+              {signChar}
+            </span>
+            {/* Content */}
+            <span className="whitespace-pre-wrap break-words min-w-0">
+              {highlightLine(line.content)}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -145,7 +160,7 @@ export const FileDiffView = memo(function FileDiffView({
         )}
         {/* Diff view */}
         <div className="rounded border border-muted overflow-hidden">
-          <DiffLines oldStr={oldString} newStr={newString} />
+          <UnifiedDiffLines oldStr={oldString} newStr={newString} />
         </div>
       </div>
     );

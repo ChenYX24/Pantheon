@@ -35,10 +35,14 @@ export const plugin: PluginModule = {
   },
 
   onLoad: async () => {
-    console.log("[Plugin] Daily Briefing v2 loaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] Daily Briefing v2 loaded");
+    }
   },
 
   onUnload: async () => {
-    console.log("[Plugin] Daily Briefing v2 unloaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] Daily Briefing v2 unloaded");
+    }
   },
 };

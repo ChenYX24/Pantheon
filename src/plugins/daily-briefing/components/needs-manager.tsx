@@ -1,20 +1,10 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import {
-  X,
-  Plus,
-  Trash2,
-  Edit2,
-  ChevronDown,
-  ChevronUp,
-  Clock,
-  Power,
-} from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import type { InfoNeed } from "../types";
+import { NeedCard, type EditForm } from "./need-card";
 
 interface NeedsManagerProps {
   open: boolean;
@@ -32,6 +22,22 @@ export function NeedsManager({
   isZh,
 }: NeedsManagerProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<EditForm | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-dismiss delete confirmation after 3 seconds
+  useEffect(() => {
+    if (deleteConfirmId) {
+      deleteTimerRef.current = setTimeout(() => {
+        setDeleteConfirmId(null);
+      }, 3000);
+    }
+    return () => {
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    };
+  }, [deleteConfirmId]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedId((prev) => (prev === id ? null : id));
@@ -61,12 +67,80 @@ export function NeedsManager({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id }),
         });
+        setDeleteConfirmId(null);
         onNeedsChange();
       } catch (err) {
         console.error("[NeedsManager] Delete error:", err);
       }
     },
     [onNeedsChange],
+  );
+
+  // --- Edit handlers ---
+
+  const startEdit = useCallback((need: InfoNeed) => {
+    setEditingId(need.id);
+    setEditForm({
+      name: need.name,
+      description: need.description,
+      tags: [...need.tags],
+      keywords: [...need.strategy.keywords],
+    });
+    setExpandedId(need.id);
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditForm(null);
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!editingId || !editForm) return;
+    try {
+      await fetch("/api/plugins/daily-briefing/needs", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingId,
+          name: editForm.name,
+          description: editForm.description,
+          tags: editForm.tags,
+          strategy: { keywords: editForm.keywords },
+        }),
+      });
+      onNeedsChange();
+      setEditingId(null);
+      setEditForm(null);
+    } catch (err) {
+      console.error("[NeedsManager] Save error:", err);
+    }
+  }, [editingId, editForm, onNeedsChange]);
+
+  const updateField = useCallback(
+    (field: keyof EditForm, value: string | string[]) => {
+      setEditForm((prev) => (prev ? { ...prev, [field]: value } : prev));
+    },
+    [],
+  );
+
+  const removeChip = useCallback(
+    (field: "tags" | "keywords", index: number) => {
+      setEditForm((prev) => {
+        if (!prev) return prev;
+        return { ...prev, [field]: prev[field].filter((_, i) => i !== index) };
+      });
+    },
+    [],
+  );
+
+  const addChip = useCallback(
+    (field: "tags" | "keywords", value: string) => {
+      setEditForm((prev) => {
+        if (!prev || prev[field].includes(value)) return prev;
+        return { ...prev, [field]: [...prev[field], value] };
+      });
+    },
+    [],
   );
 
   if (!open) return null;
@@ -83,12 +157,7 @@ export function NeedsManager({
           <h2 className="text-lg font-semibold">
             {isZh ? "我的信息需求" : "My Information Needs"}
           </h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0"
-            onClick={onClose}
-          >
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -104,117 +173,28 @@ export function NeedsManager({
               </p>
             </div>
           ) : (
-            needs.map((need) => {
-              const isExpanded = expandedId === need.id;
-              return (
-                <div
-                  key={need.id}
-                  className="rounded-lg border p-4 space-y-2"
-                >
-                  {/* Header */}
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">
-                          {need.name}
-                        </span>
-                        {need.tags.slice(0, 2).map((tag) => (
-                          <Badge
-                            key={tag}
-                            variant="secondary"
-                            className="text-[10px] px-1 py-0"
-                          >
-                            {tag}
-                          </Badge>
-                        ))}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-                        {need.description}
-                      </p>
-                    </div>
-
-                    <Switch
-                      checked={need.enabled}
-                      onCheckedChange={(v) => handleToggle(need.id, v)}
-                    />
-                  </div>
-
-                  {/* Last fetched */}
-                  {need.lastFetchedAt && (
-                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      {isZh ? "上次抓取" : "Last fetched"}:{" "}
-                      {new Date(need.lastFetchedAt).toLocaleString()}
-                    </div>
-                  )}
-
-                  {/* Actions + expand */}
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => toggleExpand(need.id)}
-                    >
-                      {isExpanded ? (
-                        <ChevronUp className="h-3 w-3 mr-1" />
-                      ) : (
-                        <ChevronDown className="h-3 w-3 mr-1" />
-                      )}
-                      {isZh ? "策略详情" : "Strategy"}
-                    </Button>
-                    <div className="flex-1" />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleDelete(need.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-
-                  {/* Strategy details (expanded) */}
-                  {isExpanded && (
-                    <div className="rounded-md bg-muted/30 p-3 space-y-2 text-xs">
-                      <div>
-                        <span className="text-muted-foreground">
-                          {isZh ? "关键词" : "Keywords"}:
-                        </span>{" "}
-                        {need.strategy.keywords.join(", ")}
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">
-                          {isZh ? "来源" : "Sources"}:
-                        </span>{" "}
-                        {need.strategy.sources
-                          .map((s) => `${s.name} (${s.type})`)
-                          .join(", ")}
-                      </div>
-                      {need.strategy.filters.length > 0 && (
-                        <div>
-                          <span className="text-muted-foreground">
-                            {isZh ? "过滤" : "Filters"}:
-                          </span>{" "}
-                          {need.strategy.filters
-                            .map(
-                              (f) =>
-                                `${f.field} ${f.operator} "${f.value}"`,
-                            )
-                            .join("; ")}
-                        </div>
-                      )}
-                      <div>
-                        <span className="text-muted-foreground">
-                          {isZh ? "频率" : "Schedule"}:
-                        </span>{" "}
-                        {need.strategy.schedule}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })
+            needs.map((need) => (
+              <NeedCard
+                key={need.id}
+                need={need}
+                isExpanded={expandedId === need.id}
+                editing={editingId === need.id}
+                editForm={editingId === need.id ? editForm : null}
+                deleteConfirming={deleteConfirmId === need.id}
+                isZh={isZh}
+                onToggleExpand={() => toggleExpand(need.id)}
+                onToggleEnabled={(v) => handleToggle(need.id, v)}
+                onStartEdit={() => startEdit(need)}
+                onCancelEdit={cancelEdit}
+                onSave={handleSave}
+                onUpdateField={updateField}
+                onRemoveChip={removeChip}
+                onAddChip={addChip}
+                onDeleteClick={() => setDeleteConfirmId(need.id)}
+                onDeleteConfirm={() => handleDelete(need.id)}
+                onDeleteCancel={() => setDeleteConfirmId(null)}
+              />
+            ))
           )}
         </div>
       </div>

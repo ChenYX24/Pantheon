@@ -1093,10 +1093,18 @@
       "rss": "RSS",
       "arxiv": "ArXiv",
       "web-search": "网页搜索",
-      "custom-api": "自定义 API"
+      "rsshub": "RSSHub",
+      "youtube": "YouTube",
+      "finance": "财经新闻",
+      "custom-api": "自定义API"
     },
     "emptyState": {
       "addNeedPrompt": "添加一个需求，告诉 AI 你关心什么，然后点击刷新。"
+    },
+    "tabs": {
+      "all": "全部",
+      "allSources": "全部来源",
+      "noSummary": "该分类暂无 AI 摘要（需要 3 条以上内容）"
     },
     "stats": {
       "totalItems": "总计",
@@ -1132,6 +1140,24 @@
       "strategy": "策略详情",
       "enable": "启用",
       "disable": "禁用"
+    },
+    "push": {
+      "push": "推送",
+      "pushNow": "立即推送",
+      "pushSuccess": "推送成功",
+      "pushFailed": "推送失败",
+      "pushSettings": "推送设置",
+      "channels": "推送渠道",
+      "addChannel": "添加渠道",
+      "format": "推送格式",
+      "maxItems": "最大条目数",
+      "includeLinks": "包含链接",
+      "testPush": "测试推送",
+      "summaryOnly": "仅摘要",
+      "summaryAndItems": "摘要 + 条目",
+      "itemsOnly": "仅条目",
+      "noChannels": "暂无推送渠道",
+      "noBriefing": "暂无可推送的简报数据"
     },
     "configSettings": {
       "title": "简报设置",

@@ -18,6 +18,13 @@ import {
 import type { SessionMessage } from "./types";
 import { TOOL_CONFIG, DEFAULT_TOOL_CONFIG } from "./conv-message";
 import { FileDiffView } from "./file-diff-view";
+import { CategoryView, HotspotsSection } from "./tool-sub-views";
+import {
+  groupToolsByCategory,
+  computeFileHotspots,
+  type ToolCallInfo,
+  type FileHotspot,
+} from "@/lib/session-analysis";
 
 interface ToolCallSummaryProps {
   messages: SessionMessage[];
@@ -92,8 +99,6 @@ function getOpBadge(toolName: string, isZh: boolean) {
       return { label: toolName, className: "bg-zinc-100 dark:bg-zinc-900/40 text-zinc-700 dark:text-zinc-400" };
   }
 }
-
-// ─────────────── File Changes Tab ───────────────
 
 function FileChangesTab({
   fileOps,
@@ -190,8 +195,6 @@ function FileChangesTab({
   );
 }
 
-// ─────────────── Tool Usage Tab ───────────────
-
 function ToolUsageTab({
   toolCounts,
   timeline,
@@ -202,37 +205,76 @@ function ToolUsageTab({
   isZh: boolean;
 }) {
   const [showTimeline, setShowTimeline] = useState(false);
+  const [viewMode, setViewMode] = useState<"bar" | "category">("bar");
+
   const sorted = [...toolCounts.entries()].sort((a, b) => b[1] - a[1]);
   const maxCount = sorted.length > 0 ? sorted[0][1] : 1;
 
+  const categories = useMemo(() => {
+    const calls: ToolCallInfo[] = timeline.map((t) => ({
+      name: t.name,
+      input: t.input,
+      timestamp: t.timestamp,
+    }));
+    return groupToolsByCategory(calls);
+  }, [timeline]);
+
   return (
     <div className="space-y-4">
-      {/* Bar chart */}
-      <div className="space-y-1.5">
-        {sorted.map(([name, count]) => {
-          const config = TOOL_CONFIG[name] || DEFAULT_TOOL_CONFIG;
-          const Icon = config.icon;
-          const pct = Math.round((count / maxCount) * 100);
-
-          return (
-            <div key={name} className="flex items-center gap-2">
-              <div className="w-20 flex items-center gap-1.5 flex-shrink-0">
-                <Icon className={`h-3 w-3 ${config.color}`} />
-                <span className="text-xs font-mono truncate">{name}</span>
-              </div>
-              <div className="flex-1 h-5 bg-muted/30 rounded overflow-hidden relative">
-                <div
-                  className={`h-full rounded transition-all ${config.bgColor} border ${config.borderColor}`}
-                  style={{ width: `${pct}%` }}
-                />
-                <span className="absolute right-1 top-0 h-full flex items-center text-[10px] font-mono text-muted-foreground">
-                  {count}
-                </span>
-              </div>
-            </div>
-          );
-        })}
+      {/* View mode toggle */}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => setViewMode("bar")}
+          className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+            viewMode === "bar"
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted/50 text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {isZh ? "柱状" : "Bar"}
+        </button>
+        <button
+          onClick={() => setViewMode("category")}
+          className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+            viewMode === "category"
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted/50 text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {isZh ? "分类" : "Category"}
+        </button>
       </div>
+
+      {viewMode === "bar" ? (
+        /* Bar chart */
+        <div className="space-y-1.5">
+          {sorted.map(([name, count]) => {
+            const config = TOOL_CONFIG[name] || DEFAULT_TOOL_CONFIG;
+            const Icon = config.icon;
+            const pct = Math.round((count / maxCount) * 100);
+
+            return (
+              <div key={name} className="flex items-center gap-2">
+                <div className="w-20 flex items-center gap-1.5 flex-shrink-0">
+                  <Icon className={`h-3 w-3 ${config.color}`} />
+                  <span className="text-xs font-mono truncate">{name}</span>
+                </div>
+                <div className="flex-1 h-5 bg-muted/30 rounded overflow-hidden relative">
+                  <div
+                    className={`h-full rounded transition-all ${config.bgColor} border ${config.borderColor}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                  <span className="absolute right-1 top-0 h-full flex items-center text-[10px] font-mono text-muted-foreground">
+                    {count}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <CategoryView categories={categories} isZh={isZh} />
+      )}
 
       {/* Timeline toggle */}
       <div>
@@ -287,13 +329,13 @@ function ToolUsageTab({
   );
 }
 
-// ─────────────── Files Modified Tab ───────────────
-
 function FilesModifiedTab({
   fileOps,
+  hotspots,
   isZh,
 }: {
   fileOps: Map<string, FileOperation[]>;
+  hotspots: FileHotspot[];
   isZh: boolean;
 }) {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => {
@@ -333,6 +375,7 @@ function FilesModifiedTab({
 
   return (
     <div className="space-y-1">
+      <HotspotsSection hotspots={hotspots} isZh={isZh} />
       {sortedDirs.map(([dirPath, filesMap]) => {
         const isDirExpanded = expandedDirs.has(dirPath);
 
@@ -438,8 +481,6 @@ function FilesModifiedTab({
   );
 }
 
-// ─────────────── Main Component ───────────────
-
 export function ToolCallSummary({ messages, isZh }: ToolCallSummaryProps) {
   // Extract all tool calls from messages
   const { allToolCalls, fileOps, toolCounts } = useMemo(() => {
@@ -483,6 +524,15 @@ export function ToolCallSummary({ messages, isZh }: ToolCallSummaryProps) {
 
     return { allToolCalls: calls, fileOps: files, toolCounts: counts };
   }, [messages]);
+
+  const hotspots = useMemo(() => {
+    const calls: ToolCallInfo[] = allToolCalls.map((t) => ({
+      name: t.name,
+      input: t.input,
+      timestamp: t.timestamp,
+    }));
+    return computeFileHotspots(calls);
+  }, [allToolCalls]);
 
   const totalTools = allToolCalls.length;
   const totalFiles = fileOps.size;
@@ -537,7 +587,7 @@ export function ToolCallSummary({ messages, isZh }: ToolCallSummaryProps) {
             />
           </TabsContent>
           <TabsContent value="files-modified">
-            <FilesModifiedTab fileOps={fileOps} isZh={isZh} />
+            <FilesModifiedTab fileOps={fileOps} hotspots={hotspots} isZh={isZh} />
           </TabsContent>
         </div>
       </Tabs>

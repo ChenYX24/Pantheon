@@ -36,10 +36,14 @@ export const plugin: PluginModule = {
   },
 
   onLoad: async () => {
-    console.log("[Plugin] Workflow Studio loaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] Workflow Studio loaded");
+    }
   },
 
   onUnload: async () => {
-    console.log("[Plugin] Workflow Studio unloaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] Workflow Studio unloaded");
+    }
   },
 };

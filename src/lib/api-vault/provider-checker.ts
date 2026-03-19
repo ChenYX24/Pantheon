@@ -300,16 +300,25 @@ function isCustomProxy(providerId: string, baseUrl: string): boolean {
 
 // ---- Auth header builder ----
 
+/** Strip non-ASCII from API key to prevent ByteString errors in HTTP headers */
+function ensureAsciiKey(apiKey: string): string {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = apiKey.replace(/[^\x20-\x7E]/g, "").trim();
+  if (!cleaned) throw new Error("API key is empty or contains only invalid characters");
+  return cleaned;
+}
+
 function buildHeaders(
   config: ProviderConfig,
   apiKey: string,
   forceBearer: boolean = false,
 ): Record<string, string> {
+  const safeKey = ensureAsciiKey(apiKey);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (forceBearer || config.authType === "bearer") {
-    headers["Authorization"] = `Bearer ${apiKey}`;
+    headers["Authorization"] = `Bearer ${safeKey}`;
   } else if (config.authType === "x-api-key") {
-    headers["x-api-key"] = apiKey;
+    headers["x-api-key"] = safeKey;
     headers["anthropic-version"] = "2023-06-01";
   }
   // query-param handled in URL
@@ -333,7 +342,7 @@ function buildUrl(
   }
   const url = new URL(fullUrl);
   if (!forceBearer && config.authType === "query-param") {
-    url.searchParams.set("key", apiKey);
+    url.searchParams.set("key", ensureAsciiKey(apiKey));
   }
   return url.toString();
 }

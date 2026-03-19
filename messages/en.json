@@ -1103,10 +1103,18 @@
       "rss": "RSS",
       "arxiv": "ArXiv",
       "web-search": "Web Search",
+      "rsshub": "RSSHub",
+      "youtube": "YouTube",
+      "finance": "Finance News",
       "custom-api": "Custom API"
     },
     "emptyState": {
       "addNeedPrompt": "Add a need to tell AI what you care about, then click Refresh."
+    },
+    "tabs": {
+      "all": "All",
+      "allSources": "All Sources",
+      "noSummary": "No AI summary for this category yet (needs 3+ items)"
     },
     "stats": {
       "totalItems": "Total",
@@ -1142,6 +1150,24 @@
       "strategy": "Strategy",
       "enable": "Enable",
       "disable": "Disable"
+    },
+    "push": {
+      "push": "Push",
+      "pushNow": "Push Now",
+      "pushSuccess": "Push successful",
+      "pushFailed": "Push failed",
+      "pushSettings": "Push Settings",
+      "channels": "Channels",
+      "addChannel": "Add Channel",
+      "format": "Format",
+      "maxItems": "Max Items",
+      "includeLinks": "Include Links",
+      "testPush": "Test Push",
+      "summaryOnly": "Summary only",
+      "summaryAndItems": "Summary + Items",
+      "itemsOnly": "Items only",
+      "noChannels": "No channels configured",
+      "noBriefing": "No briefing data to push"
     },
     "configSettings": {
       "title": "Briefing Settings",

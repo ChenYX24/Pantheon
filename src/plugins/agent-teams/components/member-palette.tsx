@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, type DragEvent } from "react";
+import { memo, useMemo, useState, type DragEvent } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Search, GripVertical, ChevronDown, ChevronRight,
   Shield, Code2, TestTube, PenTool, Brain, Layers,
-  Globe, Eye, Wrench, MessageSquare,
+  Globe, Eye,
 } from "lucide-react";
 
 /** Template for quickly adding a member node */
@@ -155,7 +155,7 @@ const PROVIDER_COLORS: Record<string, string> = {
   none: "bg-muted text-muted-foreground",
 };
 
-function DraggableTemplateItem({ tpl, isZh }: { tpl: MemberTemplate; isZh: boolean }) {
+const DraggableTemplateItem = memo(function DraggableTemplateItem({ tpl, isZh }: { tpl: MemberTemplate; isZh: boolean }) {
   const onDragStart = (e: DragEvent) => {
     e.dataTransfer.setData("application/agent-team-template", JSON.stringify(tpl));
     e.dataTransfer.effectAllowed = "move";
@@ -189,7 +189,7 @@ function DraggableTemplateItem({ tpl, isZh }: { tpl: MemberTemplate; isZh: boole
       )}
     </div>
   );
-}
+});
 
 interface MemberPaletteProps {
   locale: string;
@@ -205,6 +205,23 @@ export function MemberPalette({ locale, collapsed, onToggle }: MemberPaletteProp
   const toggleCategory = (cat: string) => {
     setCollapsedCats((prev) => ({ ...prev, [cat]: !prev[cat] }));
   };
+
+  const filteredByCategory = useMemo(() => {
+    const q = search.toLowerCase();
+    const result: Record<string, MemberTemplate[]> = {};
+    for (const cat of CATEGORIES) {
+      result[cat] = MEMBER_TEMPLATES.filter((t) => {
+        if (t.category !== cat) return false;
+        if (!search) return true;
+        return (
+          t.name.toLowerCase().includes(q) ||
+          t.nameZh.includes(q) ||
+          t.role.toLowerCase().includes(q)
+        );
+      });
+    }
+    return result;
+  }, [search]);
 
   if (collapsed) {
     return (
@@ -252,16 +269,7 @@ export function MemberPalette({ locale, collapsed, onToggle }: MemberPaletteProp
       <div className="flex-1 overflow-y-auto p-1">
         {CATEGORIES.map((cat) => {
           const meta = CATEGORY_META[cat];
-          const templates = MEMBER_TEMPLATES.filter((t) => {
-            if (t.category !== cat) return false;
-            if (!search) return true;
-            const q = search.toLowerCase();
-            return (
-              t.name.toLowerCase().includes(q) ||
-              t.nameZh.includes(q) ||
-              t.role.toLowerCase().includes(q)
-            );
-          });
+          const templates = filteredByCategory[cat];
 
           if (templates.length === 0) return null;
           const isOpen = !collapsedCats[cat];

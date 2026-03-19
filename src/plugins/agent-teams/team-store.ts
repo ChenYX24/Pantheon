@@ -2,7 +2,7 @@
  * Workflow Studio Plugin - Team Store (v4.0)
  *
  * File-based persistence via API with in-memory cache.
- * Async API functions + deprecated sync fallbacks for backward compatibility.
+ * All functions are async, using API-based storage.
  */
 
 import type { AgentTeam, TeamMember, TeamRun } from "./types";
@@ -23,14 +23,6 @@ function generateMemberId(): string {
 
 let teamsCache: AgentTeam[] | null = null;
 let runsCache: TeamRun[] | null = null;
-
-function invalidateTeamsCache() {
-  teamsCache = null;
-}
-
-function invalidateRunsCache() {
-  runsCache = null;
-}
 
 // ---- API helpers ----
 
@@ -125,6 +117,7 @@ export async function cloneTeamAsync(
 ): Promise<AgentTeam | null> {
   const team = await getTeamAsync(id);
   if (!team) return null;
+  // Clear canvas data so auto-layout triggers for the new member IDs
   return createTeamAsync({
     name: newName,
     description: team.description,
@@ -134,7 +127,7 @@ export async function cloneTeamAsync(
     tags: [...team.tags],
     isPreset: false,
     presetId: team.isPreset ? team.id : team.presetId,
-    canvas: team.canvas,
+    canvas: undefined,
   });
 }
 
@@ -199,112 +192,3 @@ export async function removeMemberAsync(
   return true;
 }
 
-// ---- Deprecated sync functions (backward compatibility) ----
-// These read from in-memory cache populated by the first async call.
-// They return empty data during SSR or before the first fetch.
-
-/** @deprecated Use getTeamsAsync() instead */
-export function getTeams(): AgentTeam[] {
-  return teamsCache ?? [];
-}
-
-/** @deprecated Use getTeamAsync() instead */
-export function getTeam(id: string): AgentTeam | undefined {
-  return (teamsCache ?? []).find((t) => t.id === id);
-}
-
-/** @deprecated Use createTeamAsync() instead */
-export function createTeam(
-  team: Omit<AgentTeam, "id" | "created_at" | "updated_at">
-): AgentTeam {
-  const now = new Date().toISOString();
-  const newTeam: AgentTeam = {
-    ...team,
-    id: generateId(),
-    members: team.members.map((m) => ({ ...m, id: m.id || generateMemberId() })),
-    created_at: now,
-    updated_at: now,
-  };
-  // Fire-and-forget save
-  const teams = [...(teamsCache ?? []), newTeam];
-  teamsCache = teams;
-  putKey("teams", teams);
-  return newTeam;
-}
-
-/** @deprecated Use updateTeamAsync() instead */
-export function updateTeam(id: string, updates: Partial<AgentTeam>): AgentTeam | null {
-  const teams = teamsCache ?? [];
-  const idx = teams.findIndex((t) => t.id === id);
-  if (idx === -1) return null;
-  const updated: AgentTeam = {
-    ...teams[idx],
-    ...updates,
-    id,
-    updated_at: new Date().toISOString(),
-  };
-  const next = teams.map((t, i) => (i === idx ? updated : t));
-  teamsCache = next;
-  putKey("teams", next);
-  return updated;
-}
-
-/** @deprecated Use deleteTeamAsync() instead */
-export function deleteTeam(id: string): boolean {
-  const teams = teamsCache ?? [];
-  const filtered = teams.filter((t) => t.id !== id);
-  if (filtered.length === teams.length) return false;
-  teamsCache = filtered;
-  putKey("teams", filtered);
-  return true;
-}
-
-/** @deprecated Use cloneTeamAsync() instead */
-export function cloneTeam(id: string, newName: string): AgentTeam | null {
-  const team = getTeam(id);
-  if (!team) return null;
-  return createTeam({
-    name: newName,
-    description: team.description,
-    icon: team.icon,
-    workflow: team.workflow,
-    members: team.members.map((m) => ({ ...m, id: generateMemberId() })),
-    tags: [...team.tags],
-    isPreset: false,
-    presetId: team.isPreset ? team.id : team.presetId,
-    canvas: team.canvas,
-  });
-}
-
-/** @deprecated Use addMemberAsync() instead */
-export function addMember(teamId: string, member: Omit<TeamMember, "id">): TeamMember | null {
-  const team = getTeam(teamId);
-  if (!team) return null;
-  const newMember: TeamMember = { ...member, id: generateMemberId() };
-  updateTeam(teamId, { members: [...team.members, newMember] });
-  return newMember;
-}
-
-/** @deprecated Use updateMemberAsync() instead */
-export function updateMember(
-  teamId: string,
-  memberId: string,
-  updates: Partial<TeamMember>
-): boolean {
-  const team = getTeam(teamId);
-  if (!team) return false;
-  const members = team.members.map((m) =>
-    m.id === memberId ? { ...m, ...updates, id: memberId } : m
-  );
-  updateTeam(teamId, { members });
-  return true;
-}
-
-/** @deprecated Use removeMemberAsync() instead */
-export function removeMember(teamId: string, memberId: string): boolean {
-  const team = getTeam(teamId);
-  if (!team) return false;
-  const members = team.members.filter((m) => m.id !== memberId);
-  updateTeam(teamId, { members });
-  return true;
-}

@@ -28,15 +28,6 @@ export interface ExecutionPanelProps {
   nodeOutputs?: Record<string, string>;
 }
 
-const STATUS_BADGE_STYLES: Record<AgentNodeStatus, string> = {
-  idle: "bg-muted text-muted-foreground",
-  queued: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
-  running: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
-  done: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
-  error: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
-  skipped: "bg-muted text-muted-foreground/60",
-};
-
 const STATUS_ICONS: Record<AgentNodeStatus, React.ReactNode> = {
   idle: <Clock className="h-3 w-3" />,
   queued: <Clock className="h-3 w-3" />,
@@ -97,14 +88,21 @@ export function ExecutionPanel({
   isZh,
   nodeOutputs,
 }: ExecutionPanelProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState<"logs" | "outputs">("logs");
+  const [manualExpanded, setManualExpanded] = useState(false);
+  const [manualTab, setManualTab] = useState<"logs" | "outputs" | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-expand when running starts
-  useEffect(() => {
-    if (isRunning) setExpanded(true);
-  }, [isRunning]);
+  // Derived state: auto-expand when running, allow manual toggle
+  const expanded = isRunning || manualExpanded;
+  const setExpanded = setManualExpanded;
+
+  const doneCount = nodeStatuses.filter((n) => n.status === "done").length;
+  const totalCount = nodeStatuses.length;
+  const allDone = !isRunning && doneCount > 0 && doneCount === totalCount;
+
+  // Derived tab: show outputs when done, unless user manually switched
+  const activeTab = manualTab ?? (allDone ? "outputs" : "logs");
+  const setActiveTab = setManualTab;
 
   // Auto-scroll logs
   useEffect(() => {
@@ -112,16 +110,6 @@ export function ExecutionPanel({
       logEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [logs.length, expanded]);
-
-  const doneCount = nodeStatuses.filter((n) => n.status === "done").length;
-  const totalCount = nodeStatuses.length;
-
-  // Auto-switch to outputs tab when execution completes
-  useEffect(() => {
-    if (!isRunning && doneCount > 0 && doneCount === totalCount) {
-      setActiveTab("outputs");
-    }
-  }, [isRunning, doneCount, totalCount]);
 
   const hasContent = logs.length > 0 || nodeStatuses.length > 0 || isRunning;
   if (!hasContent) return null;

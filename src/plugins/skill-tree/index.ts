@@ -35,10 +35,14 @@ export const plugin: PluginModule = {
   },
 
   onLoad: async () => {
-    console.log("[Plugin] Skill Tree loaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] Skill Tree loaded");
+    }
   },
 
   onUnload: async () => {
-    console.log("[Plugin] Skill Tree unloaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] Skill Tree unloaded");
+    }
   },
 };

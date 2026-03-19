@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import type { InfoNeed, DailyBriefing, BriefingItem } from "../types";
+import type { InfoNeed, DailyBriefing, BriefingItem, PushConfig } from "../types";
 
 // ---- Paths ----
 
@@ -21,6 +21,14 @@ function needsPath(): string {
   return path.join(dataDir(), "needs.json");
 }
 
+function configPath(): string {
+  return path.join(dataDir(), "config.json");
+}
+
+function pushConfigPath(): string {
+  return path.join(dataDir(), "push-config.json");
+}
+
 function itemsPath(date: string): string {
   const safe = date.replace(/[^0-9-]/g, "").slice(0, 10);
   return path.join(dataDir(), `items-${safe}.json`);
@@ -30,6 +38,18 @@ function ensureDir(): void {
   const dir = dataDir();
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+}
+
+// ---- Config ----
+
+export function getConfig(): Record<string, unknown> | null {
+  try {
+    const fp = configPath();
+    if (!fs.existsSync(fp)) return null;
+    return JSON.parse(fs.readFileSync(fp, "utf-8"));
+  } catch {
+    return null;
   }
 }
 
@@ -117,4 +137,30 @@ export function updateBriefingItem(
   const updated: DailyBriefing = { ...briefing, items: updatedItems };
   saveBriefing(updated);
   return updated;
+}
+
+// ---- Push Config ----
+
+const DEFAULT_PUSH_CONFIG: PushConfig = {
+  enabled: false,
+  channels: [],
+  format: "summary-and-items",
+  maxItems: 10,
+  includeLinks: true,
+};
+
+export function getPushConfig(): PushConfig {
+  try {
+    const fp = pushConfigPath();
+    if (!fs.existsSync(fp)) return { ...DEFAULT_PUSH_CONFIG };
+    const data = JSON.parse(fs.readFileSync(fp, "utf-8"));
+    return { ...DEFAULT_PUSH_CONFIG, ...data };
+  } catch {
+    return { ...DEFAULT_PUSH_CONFIG };
+  }
+}
+
+export function savePushConfig(config: PushConfig): void {
+  ensureDir();
+  fs.writeFileSync(pushConfigPath(), JSON.stringify(config, null, 2), "utf-8");
 }

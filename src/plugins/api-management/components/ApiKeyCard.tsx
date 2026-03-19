@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { memo, useState, useCallback, useMemo } from "react";
 import {
   RefreshCw,
   Trash2,
@@ -29,7 +29,7 @@ import {
   formatCurrency,
 } from "./types";
 
-export function ApiKeyCard({
+export const ApiKeyCard = memo(function ApiKeyCard({
   keyRecord,
   onCheck,
   onEdit,
@@ -49,15 +49,24 @@ export function ApiKeyCard({
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
+  const [copyError, setCopyError] = useState<string | null>(null);
+
   const handleCopyKey = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
+    setCopyError(null);
     try {
       const res = await fetch(`/api/plugins/api-management/keys/reveal?id=${keyRecord.id}`);
       const data = await res.json();
+      if (data.corrupted) {
+        setCopyError(data.error || "Key corrupted — please delete and re-enter.");
+        return;
+      }
       if (data.key) {
         await navigator.clipboard.writeText(data.key);
         setCopiedKey(true);
         setTimeout(() => setCopiedKey(false), 1500);
+      } else if (data.error) {
+        setCopyError(data.error);
       }
     } catch { /* ignore */ }
   }, [keyRecord.id]);
@@ -273,9 +282,9 @@ export function ApiKeyCard({
           </div>
 
           {/* Error */}
-          {checkResult?.error && (
+          {(checkResult?.error || copyError) && (
             <div className="text-xs text-destructive bg-destructive/10 rounded p-2">
-              {checkResult.error}
+              {copyError || checkResult?.error}
             </div>
           )}
 
@@ -289,4 +298,4 @@ export function ApiKeyCard({
       )}
     </div>
   );
-}
+});

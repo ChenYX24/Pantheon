@@ -36,10 +36,14 @@ export const plugin: PluginModule = {
   },
 
   onLoad: async () => {
-    console.log("[Plugin] SAGE loaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] SAGE loaded");
+    }
   },
 
   onUnload: async () => {
-    console.log("[Plugin] SAGE unloaded");
+    if (process.env.NODE_ENV === "development") {
+      console.log("[Plugin] SAGE unloaded");
+    }
   },
 };

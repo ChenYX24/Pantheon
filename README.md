@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.5.0-blue" alt="Version" />
+  <img src="https://img.shields.io/badge/version-4.6.0-blue" alt="Version" />
   <img src="https://img.shields.io/badge/Next.js-16-black" alt="Next.js" />
   <img src="https://img.shields.io/badge/TypeScript-5.x-blue" alt="TypeScript" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License" />
@@ -37,6 +37,7 @@
 |---------|-------------|
 | **Overview** | 6 stat cards, active process detection, 7-day token sparkline, quick actions |
 | **Sessions** | Grid/List view, ClaudeGlance colors, search, filters, favorites, markdown export |
+| **Session Analytics** | Unified diff view (LCS-based), tool category grouping, file hotspots heatmap, token timeline sparkline, AI auto-insights |
 | **Tokens** | Interactive charts with brush zoom, model pie chart, CSV export, cost tracking |
 | **Queue** | Background task queue management with auto-refresh |
 
@@ -73,6 +74,18 @@
 | **Auto Report** | Structured report with timeline on pipeline completion |
 | **Stage Sync** | Auto-updates stage status when skills complete |
 
+### Daily Briefing
+
+| Feature | Description |
+|---------|-------------|
+| **Magazine Cards** | Rich visual cards with 120x80px thumbnails and source-specific gradient fallbacks |
+| **9 Data Sources** | GitHub, HuggingFace, ArXiv, RSS, Web Search, RSSHub (Xiaohongshu/Bilibili/Weibo), YouTube, Finance (Finnhub/Yahoo), Custom API |
+| **Category Tabs** | Need-based tab navigation — view all items or filter by research category |
+| **Per-Need AI Summaries** | Each category gets its own AI-generated summary |
+| **Push Notifications** | Push briefing to Telegram (Markdown) and Feishu (Interactive Card) |
+| **Grid/List View** | Toggle between list and 2-column grid layout |
+| **Proxy Support** | Automatic proxy detection for China network access |
+
 ### Workflow Studio
 
 | Feature | Description |
@@ -80,6 +93,8 @@
 | **Visual Canvas** | React Flow team editor with drag-and-drop agent nodes |
 | **5 Presets** | Pair Programming, TDD Squad, Full Stack Team, Research & Analysis, etc. |
 | **Multi-Provider** | Each agent can use different model (Claude / GPT-5.4 / DeepSeek) |
+| **Async-First** | Full async store migration eliminates race conditions; AbortController cancellation |
+| **Error Resilience** | Rate limit (429) detection, SSE error handling, production console.log guards |
 | **Execution** | Sequential / Parallel / Hierarchical workflows with live logs |
 | **Run History** | Browse past executions with per-agent status and logs |
 
@@ -88,7 +103,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Toolbox** | 5-tab hub: MCP servers, Skills, Hooks, Agents, Rules — with marketplace |
-| **API Keys** | Manage keys for 15+ providers with balance/model queries |
+| **API Keys** | Manage keys for 15+ providers with balance/model queries, machine-independent encryption, HTTP header sanitization |
 | **CLAUDE.md Editor** | Split editor + preview, registry support |
 | **Settings** | Model selectors, bot wizards, permissions, language switch |
 | **Telegram/Feishu** | Bot integration for notifications and remote control |
@@ -189,6 +204,7 @@ dashboard/
 │   │   ├── skill-tree/         # Skill Tree (1.8K LOC)
 │   │   ├── aris-research/      # SAGE Research (9.6K LOC)
 │   │   ├── agent-teams/        # Workflow Studio (3.5K LOC)
+│   │   ├── daily-briefing/     # Daily Briefing (9 sources, AI summaries)
 │   │   └── api-management/     # API Key Management
 │   ├── components/             # Shared UI (shadcn/ui)
 │   ├── hooks/                  # Custom React hooks
@@ -230,6 +246,7 @@ dashboard/
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| **v4.6.0** | 2026-03-20 | Daily Briefing v2 (9 sources, magazine cards, push), Session Analytics, Workflow Studio async-first, API key encryption fix |
 | **v4.5.0** | 2026-03-18 | Rebranded to Pantheon, SAGE research pipeline, code quality improvements |
 | **v4.4.0** | 2026-03-18 | Skill Tree (smart creator + auto-detect + config), SAGE report, Workflow Studio refactor, Chat perf |
 | **v4.3.0** | 2026-03-17 | Skill Tree dual view (list + graph), 49 skills, 8 categories |
@@ -255,16 +272,17 @@ dashboard/
 
 ## Roadmap
 
-### v4.5 — Polish & Reliability
-- [ ] Session detail viewer — structured tool calls & file changes from JSONL
+### v4.7 — Polish & Expansion
 - [ ] Skill Tree: sub-skill expansion (drill into skill internals)
 - [ ] Skill Tree: disable actually removes skill/MCP from system
 - [ ] SAGE: node right-click menu, smart parameter inference
 - [ ] Workflow Studio: undo/redo in canvas, team export/import
+- [ ] **Decision Nodes**: Conditional branching in Workflow Studio (Decision Gate + Aggregator)
+- [ ] **SAGE Multi-Project**: Parallel research project support with independent stage tracking
+- [ ] **Skill Tree x Briefing**: Discover skills from GitHub, AI recommend, Bubble UX, Claude Code develops
 
-### v5.0 — Intelligence Layer
-- [ ] Daily intelligence briefing (GitHub Trending + HF Papers + RSS + AI summary)
-- [ ] Telegram/Feishu push notifications for briefings
+### v5.0 — Finance & Intelligence
+- [ ] **Stock Dashboard**: Multi-market finance dashboard (A-shares / HK / US / TW, Gold/Silver, Sectors, AI Trading)
 - [ ] Smart task routing — AI auto-dispatches tasks to best agent
 - [ ] Multi-platform bot (WeChat / Discord)
 

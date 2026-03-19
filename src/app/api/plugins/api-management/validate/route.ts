@@ -19,9 +19,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Strip non-ASCII characters that cause ByteString errors in HTTP headers
+    // eslint-disable-next-line no-control-regex
+    const cleanKey = key.replace(/[^\x20-\x7E]/g, "").trim();
+    if (cleanKey.length < 4) {
+      return NextResponse.json(
+        { error: "API key contains invalid characters. Please re-enter the key without copying from PDFs or formatted text." },
+        { status: 400 }
+      );
+    }
+
     const result = await validateKey(
       String(provider),
-      String(key).trim(),
+      cleanKey,
       base_url ? String(base_url) : undefined
     );
 

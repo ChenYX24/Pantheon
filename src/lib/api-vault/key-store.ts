@@ -62,7 +62,17 @@ export const PROVIDERS = [
 
 // ---- Obfuscation ----
 
+/**
+ * Derive encryption key from machine-specific seed.
+ * Uses only homedir (stable) — hostname can change across reboots/renames.
+ */
 function deriveKey(): Buffer {
+  const seed = `ptn-vault-v2:${os.homedir()}`;
+  return crypto.createHash("sha256").update(seed).digest();
+}
+
+/** Legacy key derivation (v1: included hostname) — used for migration only */
+function deriveKeyV1(): Buffer {
   const seed = `ptn-vault:${os.hostname()}:${os.homedir()}`;
   return crypto.createHash("sha256").update(seed).digest();
 }
@@ -84,7 +94,27 @@ function deobfuscate(encoded: string): string {
   for (let i = 0; i < buf.length; i++) {
     out[i] = buf[i] ^ key[i % key.length];
   }
-  return out.toString("utf-8");
+  const result = out.toString("utf-8");
+  // Detect corrupted decryption (U+FFFD replacement characters indicate
+  // the key was encrypted with a different machine seed)
+  if (result.includes("\uFFFD")) {
+    throw new Error(
+      "API key decryption failed — the key may have been stored on a different machine or the hostname changed. Please re-enter the key."
+    );
+  }
+  return result;
+}
+
+/** Validate that a string is safe for use in HTTP headers (Latin-1 / ByteString compatible) */
+export function sanitizeApiKey(key: string): string {
+  // Strip any non-ASCII characters (control chars, Unicode, BOM, etc.)
+  const cleaned = key.replace(/[^\x20-\x7E]/g, "").trim();
+  if (cleaned.length < 4) {
+    throw new Error(
+      "API key contains invalid characters. Please re-enter the key — avoid copying from PDFs or formatted text."
+    );
+  }
+  return cleaned;
 }
 
 function maskKey(key: string): string {
@@ -191,8 +221,9 @@ export function getDecryptedKey(id: string): string | null {
 export function addKey(input: ApiKeyInput): ApiKeyRecord {
   const db = getDb();
   const id = crypto.randomUUID();
-  const encrypted = obfuscate(input.key);
-  const masked = maskKey(input.key);
+  const cleanKey = sanitizeApiKey(input.key);
+  const encrypted = obfuscate(cleanKey);
+  const masked = maskKey(cleanKey);
 
   db.prepare(
     `INSERT INTO api_keys (id, provider, name, key_encrypted, key_masked, base_url, monthly_budget, notes)
