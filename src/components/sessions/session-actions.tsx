@@ -29,6 +29,7 @@ import {
   Tag,
   Trash2,
   Copy,
+  ExternalLink,
 } from "lucide-react";
 import type { SessionMetaEntry } from "@/hooks/use-session-meta";
 
@@ -61,6 +62,7 @@ interface SessionActionsProps {
     sessionId: string,
     updates: Partial<Pick<SessionMetaEntry, "displayName" | "pinned" | "tags" | "deleted">>
   ) => void;
+  onViewInSessions?: () => void;
   trigger?: React.ReactNode;
 }
 
@@ -68,6 +70,7 @@ export function SessionActions({
   sessionId,
   meta,
   onUpdate,
+  onViewInSessions,
   trigger,
 }: SessionActionsProps) {
   const [renameOpen, setRenameOpen] = useState(false);
@@ -116,6 +119,12 @@ export function SessionActions({
             <Copy className="h-3.5 w-3.5 mr-2" />
             Copy Session ID
           </DropdownMenuItem>
+          {onViewInSessions && (
+            <DropdownMenuItem onClick={onViewInSessions}>
+              <ExternalLink className="h-3.5 w-3.5 mr-2" />
+              Open in Sessions
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() => {
