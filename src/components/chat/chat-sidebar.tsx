@@ -1,11 +1,11 @@
 "use client";
 
-import { memo, useState, useMemo } from "react";
+import { memo, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Search, X, PanelLeftClose, PanelLeft, MessageCircle, Plus, ExternalLink, Pin, Copy, Check,
+  Search, X, PanelLeftClose, PanelLeft, MessageCircle, Plus, Pin,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { timeAgo, shortModel } from "@/lib/format-utils";
@@ -13,6 +13,10 @@ import { STATUS_CONFIG } from "@/components/sessions/session-block";
 import type { SessionInfo, SessionStatus } from "@/components/sessions/types";
 import { useSessionMeta } from "@/hooks/use-session-meta";
 import { SessionActions, getTagColor } from "@/components/sessions/session-actions";
+
+const DEFAULT_SIDEBAR_WIDTH = 288;
+const MIN_SIDEBAR_WIDTH = 280;
+const MAX_SIDEBAR_WIDTH = 520;
 
 interface ChatSidebarProps {
   sessions: SessionInfo[];
@@ -53,14 +57,14 @@ export const ChatSidebar = memo(function ChatSidebar({
   isChatMode,
 }: ChatSidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const router = useRouter();
-  const { getMeta, updateMeta, metaMap } = useSessionMeta();
+  const { getMeta, updateMeta } = useSessionMeta();
 
   // Filter out deleted sessions
   const visibleSessions = useMemo(() => {
     return sessions.filter(s => !getMeta(s.id).deleted);
-  }, [sessions, metaMap, getMeta]);
+  }, [sessions, getMeta]);
 
   const filtered = useMemo(() => {
     if (!searchQuery.trim()) return visibleSessions;
@@ -134,8 +138,39 @@ export const ChatSidebar = memo(function ChatSidebar({
     );
   }
 
+  const handleResizeStart = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const nextWidth = Math.max(
+        MIN_SIDEBAR_WIDTH,
+        Math.min(MAX_SIDEBAR_WIDTH, startWidth + delta)
+      );
+      setSidebarWidth(nextWidth);
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
   return (
-    <div className="w-72 border-r bg-card flex flex-col flex-shrink-0 h-full">
+    <div
+      data-testid="chat-sidebar"
+      className="border-r bg-card flex flex-col flex-shrink-0 h-full relative"
+      style={{ width: `${sidebarWidth}px` }}
+    >
       {/* Header */}
       <div className="px-3 py-3 border-b flex items-center gap-2">
         <MessageCircle className="h-4 w-4 text-primary flex-shrink-0" />
@@ -227,69 +262,65 @@ export const ChatSidebar = memo(function ChatSidebar({
                             : "hover:bg-muted/60"
                         }`}
                       >
-                        <button
-                          onClick={() => onSelect(key)}
-                          className="w-full text-left"
-                        >
-                          <div className="flex items-start gap-2">
-                            <div className={`h-2 w-2 rounded-full mt-1.5 flex-shrink-0 ${cfg.dot} ${cfg.animation || ""}`} />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium truncate leading-tight">
-                                {displayName}
-                              </div>
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                <span className="text-xs text-muted-foreground truncate">
-                                  {s.projectName}
-                                </span>
-                                {s.model && (
-                                  <Badge variant="secondary" className="text-[10px] h-3.5 px-1">
-                                    {shortModel(s.model)}
-                                  </Badge>
-                                )}
-                                <span className="text-xs text-muted-foreground ml-auto flex-shrink-0">
-                                  {timeAgo(s.lastActive)}
-                                </span>
-                              </div>
-                              {tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {tags.map((tag) => (
-                                    <span key={tag} className={`text-[9px] px-1 py-0 rounded border ${getTagColor(tag)}`}>
-                                      {tag}
-                                    </span>
-                                  ))}
+                        <div className="flex items-start gap-2">
+                          <button
+                            onClick={() => onSelect(key)}
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <div className="flex items-start gap-2 min-w-0">
+                              <div className={`h-2 w-2 rounded-full mt-1.5 flex-shrink-0 ${cfg.dot} ${cfg.animation || ""}`} />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start gap-2 min-w-0">
+                                  <div className="text-sm font-medium leading-tight min-w-0 flex-1 truncate overflow-hidden whitespace-nowrap text-ellipsis">
+                                    {displayName}
+                                  </div>
                                 </div>
-                              )}
+                                <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                                  <span className="text-xs text-muted-foreground truncate min-w-0">
+                                    {s.projectName}
+                                  </span>
+                                  {s.model && (
+                                    <Badge variant="secondary" className="text-[10px] h-3.5 px-1">
+                                      {shortModel(s.model)}
+                                    </Badge>
+                                  )}
+                                  <span className="text-xs text-muted-foreground ml-auto flex-shrink-0">
+                                    {timeAgo(s.lastActive)}
+                                  </span>
+                                </div>
+                                {tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {tags.map((tag) => (
+                                      <span key={tag} className={`text-[9px] px-1 py-0 rounded border ${getTagColor(tag)}`}>
+                                        {tag}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             </div>
+                          </button>
+                          <div className="w-6 shrink-0 flex justify-end">
+                            <SessionActions
+                              sessionId={s.id}
+                              meta={meta}
+                              onUpdate={updateMeta}
+                              onViewInSessions={() => {
+                                router.push(`/sessions?highlight=${encodeURIComponent(s.id)}`);
+                              }}
+                              trigger={
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+                                  title="Session actions"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  ...
+                                </Button>
+                              }
+                            />
                           </div>
-                        </button>
-                        <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 w-5 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigator.clipboard.writeText(s.id);
-                              setCopiedId(s.id);
-                              setTimeout(() => setCopiedId(null), 1500);
-                            }}
-                            title={`Copy ID: ${s.id}`}
-                          >
-                            {copiedId === s.id ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-                          </Button>
-                          <SessionActions sessionId={s.id} meta={meta} onUpdate={updateMeta} />
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-5 w-5 p-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              router.push(`/sessions?highlight=${encodeURIComponent(s.id)}`);
-                            }}
-                            title="View in Sessions page"
-                          >
-                            <ExternalLink className="h-3 w-3" />
-                          </Button>
                         </div>
                       </div>
                     );
@@ -305,6 +336,11 @@ export const ChatSidebar = memo(function ChatSidebar({
       <div className="px-3 py-2 border-t text-xs text-muted-foreground">
         {filtered.length} session{filtered.length !== 1 ? "s" : ""}
       </div>
+      <div
+        data-testid="chat-sidebar-resize-handle"
+        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-border/80"
+        onMouseDown={handleResizeStart}
+      />
     </div>
   );
 });
