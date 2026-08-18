@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <img src="public/logo.svg" alt="Pantheon" width="128" />
 </p>
@@ -158,8 +160,8 @@
 ### Install & Run
 
 ```bash
-git clone https://github.com/ChenYX24/Super-Claude-Code.git
-cd Super-Claude-Code/dashboard
+git clone https://github.com/ChenYX24/Pantheon.git
+cd Pantheon/dashboard
 npm install
 npm run dev
 ```
