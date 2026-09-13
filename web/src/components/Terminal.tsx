@@ -131,6 +131,9 @@ export function TerminalView({
   const controllingRef = useRef(false)
   const [controlling, setControlling] = useState(false)
   const [grid, setGrid] = useState({ cols: 0, rows: 0 })
+  // Invisible while a replay snapshot is being parsed. See onData below for
+  // why the cover exists and when it goes up.
+  const [covering, setCovering] = useState(false)
   // What this window would render if it owned the grid. Only meaningful while
   // passive, and only so the offer to take over can be withheld when there is
   // nothing to gain by it.
@@ -307,6 +310,9 @@ export function TerminalView({
     const encoder = new TextEncoder()
 
     let disposed = false
+    // A resumed gap is appended below a screen that is already right, so it
+    // is the one replay the cover stays down for.
+    let resuming = false
     const timer = new LoadTimer()
     timer.begin(false)
     const showCounts = () =>
@@ -326,7 +332,10 @@ export function TerminalView({
     const finishLoad = () => {
       if (disposed || !replayDoneRef.current || !sizedRef.current || finishedRef.current) return
       finishedRef.current = true
+      // Scrolled before the reveal, so the first thing anyone sees is the live
+      // screen rather than wherever the last parsed row left the viewport.
       term.scrollToBottom()
+      setCovering(false)
       setLoadPhase('ready')
       const timing = timer.finish(replayTotalRef.current, hiddenRef.current)
       socket.reportLoadTiming(sessionId, timing)
@@ -424,6 +433,7 @@ export function TerminalView({
       // terminal that still had something worth reading in it.
       onReset: () => {
         replayQueue.restart()
+        resuming = false
         replayDoneRef.current = false
         finishedRef.current = false
         sizedRef.current = false
@@ -446,6 +456,7 @@ export function TerminalView({
             // output, and a bar flashing over a terminal that is already
             // right would be the old full-replay behaviour's shadow.
             finishedRef.current = false
+            resuming = true
             replayReceivedRef.current = 0
             replayParsedRef.current = 0
             replayTotalRef.current = replayBytes
@@ -463,6 +474,7 @@ export function TerminalView({
           return
         }
         timer.markSubscribed()
+        resuming = false
         replayTotalRef.current = replayBytes
         replayReceivedRef.current = 0
         replayParsedRef.current = 0
@@ -472,6 +484,19 @@ export function TerminalView({
         finishLoad()
       },
       onData: (bytes, replay) => {
+        // The cover goes up on a snapshot's first chunk, never on onReset.
+        // onReset is armed before anybody knows whether a snapshot follows --
+        // an empty ring buffer sends no frames at all -- and hiding there
+        // would leave the terminal blank over nothing to show. Not for a
+        // resumed gap either: that is appended below a screen that is already
+        // right, and hiding it would blank the terminal somebody is reading.
+        //
+        // The reason it exists at all: replay is parsed chunk by chunk with a
+        // paint boundary between them, which is what stops a phone freezing on
+        // a large scrollback, and is also what let a person watch history
+        // scroll past from the top on every open. finishLoad releases it once
+        // the last chunk is parsed and the viewport is on the live screen.
+        if (replay && !resuming) setCovering(true)
         if (replay) {
           replayReceivedRef.current += bytes.byteLength
           timer.markByte(replayReceivedRef.current >= replayTotalRef.current)
@@ -823,7 +848,17 @@ export function TerminalView({
       <div
         ref={hostRef}
         className="h-full w-full"
-        style={touchSelect ? { touchAction: 'none' } : undefined}
+        // Opacity, not visibility or display. Both of those remove the
+        // element from hit-testing and blur focus, so a reconnect during a
+        // replay would drop the keyboard out of a terminal somebody is typing
+        // into and force a click to get it back. This keeps the layout and the
+        // focus; pointer events are off so a click on an invisible terminal
+        // does not land either.
+        style={{
+          touchAction: touchSelect ? 'none' : undefined,
+          opacity: covering ? 0 : undefined,
+          pointerEvents: covering ? 'none' : undefined,
+        }}
       />
       {offerControl && (
         <button

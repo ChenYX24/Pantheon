@@ -24245,3 +24245,33 @@ Not fixed here, because it is not this bug: the `？`-in-Safari reports where no
 `beforeinput` fires at all (xterm #3070) and the iOS emoji double-commit
 (#5614). This patch neither claims nor breaks them; the composition guards are
 what keep it from making the second one worse.
+
+## The visible scroll from the top, behind the load bar
+
+Every open of a session, and every page reload, replayed the ring from the
+top while the terminal was on screen. TerminalReplay parses the snapshot chunk
+by chunk with a paint boundary between chunks, so what a person saw was their
+history scrolling past before the prompt arrived. The yielding is load-bearing
+-- a phone that parses two megabytes of scrollback in one task freezes -- so the
+fix is not to remove it but to stop showing the half-parsed screen. The load
+bar says how far along the parse is; it sits over the top edge and did not
+hide the scroll underneath it.
+
+The terminal is now invisible from the snapshot's first replay-flagged chunk
+until `finishLoad`, which already knows when the snapshot is complete (the
+announced byte count, not an empty queue) and already scrolls to the bottom,
+so the reveal is one frame showing the live screen. `opacity`, not `visibility`
+or `display`: those drop the element from hit-testing and blur focus, so a
+reconnect during a replay would take the keyboard away from somebody typing.
+
+It stays down in two cases. On `onReset`, because that is armed before anybody
+knows whether a snapshot follows -- an empty ring sends no frames at all, and
+hiding there would blank a terminal over nothing. And for a resumed gap, which
+is appended below a screen that is already right; hiding that would blank the
+terminal somebody is reading for the length of a reconnect.
+
+This was first written against a queue with no end-of-snapshot signal, as an
+`onReplayEnd` callback on TerminalReplay. The load bar arrived with its own,
+and a second definition of "the snapshot is done" that could disagree with the
+first is how a terminal ends up invisible with its bar saying 100%, so the
+cover is released from the same place the bar is.
