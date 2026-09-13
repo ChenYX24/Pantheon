@@ -44,10 +44,16 @@ const (
 	ToolClaude   Tool = "claude"
 	ToolCodex    Tool = "codex"
 	ToolOpencode Tool = "opencode"
+	ToolHermes   Tool = "hermes"
+	ToolPi       Tool = "pi"
 )
 
 // Tools is every source this package knows how to read, in display order.
-var Tools = []Tool{ToolClaude, ToolCodex, ToolOpencode}
+//
+// New agents are appended rather than inserted: this order reaches the API and
+// the browser, and a row that moves because a tool was added above it is a
+// chart that looks like it changed for a reason.
+var Tools = []Tool{ToolClaude, ToolCodex, ToolOpencode, ToolHermes, ToolPi}
 
 // Counts is one normalised reading, in tokens.
 //
@@ -633,6 +639,10 @@ type Scanner struct {
 	CodexRoot  string
 	// OpencodeRoot holds one database rather than a tree. See readOpencode.
 	OpencodeRoot string
+	// HermesRoot holds one database rather than a tree. See readHermes.
+	HermesRoot string
+	// PiRoot holds one tree of session JSONL files. See readPi.
+	PiRoot string
 	// Loc decides which day a timestamp belongs to. Nil means the server's
 	// local zone, which is the right default: the machine is the user's.
 	//
@@ -650,6 +660,10 @@ func DefaultScanner(home string) *Scanner {
 		CodexRoot:  filepath.Join(home, ".codex", "sessions"),
 		// Where opencode keeps its state; the ledger is one file inside it.
 		OpencodeRoot: filepath.Join(home, ".local", "share", "opencode"),
+		// Hermes keeps one SQLite ledger per home directory.
+		HermesRoot: filepath.Join(home, ".hermes"),
+		// pi writes one JSONL file per session, under a slug of the cwd.
+		PiRoot: filepath.Join(home, ".pi", "agent", "sessions"),
 	}
 }
 
@@ -667,6 +681,8 @@ func (s *Scanner) Roots() map[Tool]string {
 		ToolClaude:   s.ClaudeRoot,
 		ToolCodex:    s.CodexRoot,
 		ToolOpencode: s.OpencodeRoot,
+		ToolHermes:   s.HermesRoot,
+		ToolPi:       s.PiRoot,
 	}
 }
 
@@ -751,11 +767,16 @@ func (s *Scanner) Walk(tool Tool) ([]Ref, Source, error) {
 	src.Root = resolved
 	src.Found = true
 
-	// opencode keeps one database rather than a tree of transcripts, so the
-	// walk is a stat. Everything downstream is unchanged: it is one path with
-	// a size and an mtime, and the cursor skips it when it has not moved.
-	if tool == ToolOpencode {
+	// opencode and Hermes each keep one database rather than a tree of
+	// transcripts, so the walk is a stat. Everything downstream is unchanged:
+	// it is one path with a size and an mtime, and the cursor skips it when it
+	// has not moved. pi is a tree of JSONL files like Claude's and Codex's,
+	// and falls through to the walk below.
+	switch tool {
+	case ToolOpencode:
 		return statOne(filepath.Join(resolved, dbFile), &src)
+	case ToolHermes:
+		return statOne(filepath.Join(resolved, hermesDBFile), &src)
 	}
 
 	var out []Ref
@@ -807,19 +828,23 @@ func (s *Scanner) ReadFile(tool Tool, path string) File {
 	// otherwise have its new bytes recorded under the size and mtime they
 	// arrived with, and the next pass would see nothing to do. Taking the
 	// stamp first means a concurrent append leaves the recorded stamp stale,
-	// and the file is read again. Both branches below do that before reading.
+	// and the file is read again. Every branch below does that before reading.
 	//
-	// opencode's branch comes first because it is a database and not a
-	// stream. Reading it through an *os.File would mean holding 2 GB open to
-	// hand a driver a path it is going to open itself.
-	if tool == ToolOpencode {
+	// The databases come first because they are not streams. Reading one
+	// through an *os.File would mean holding 2 GB open to hand a driver a
+	// path it is going to open itself.
+	if tool == ToolOpencode || tool == ToolHermes {
 		size, modified, err := dbStamp(path)
 		if err != nil {
 			f.Problem = err.Error()
 			return f
 		}
 		f.Size, f.ModifiedAt = size, modified
-		res, rerr := readOpencode(path, s.loc())
+		read := readOpencode
+		if tool == ToolHermes {
+			read = readHermes
+		}
+		res, rerr := read(path, s.loc())
 		if rerr != nil {
 			f.Problem = rerr.Error()
 			return f
@@ -849,6 +874,8 @@ func (s *Scanner) ReadFile(tool Tool, path string) File {
 		res, err = readClaude(fh, s.loc())
 	case ToolCodex:
 		res, err = readCodex(fh, s.loc())
+	case ToolPi:
+		res, err = readPi(fh, s.loc())
 	default:
 		f.Problem = fmt.Sprintf("unknown tool %q", tool)
 		return f

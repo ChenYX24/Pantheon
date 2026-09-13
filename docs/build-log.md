@@ -24208,3 +24208,56 @@ the moment it looks, which is why it passed on both branches before they were
 merged. The overlay is a column now with the label in it. Two scale-check runs
 after were clean; neither is proof the timing was hit, and the fix is argued
 from the layout rather than from a reproduction.
+
+## Two more agents, and one word that means two different things
+
+Hermes and pi joined the usage sources, appended to `usage.Tools` so no row on
+an existing chart moves. Both turned out to expose real recorded usage and
+neither is estimated, which is the only condition this package accepts.
+
+**pi** writes one JSONL file per session and puts usage in three places: a
+message's own `message.usage`, and a top-level `usage` on `compaction` and
+`branch_summary` entries for the summary call each one made. The trap is
+`retainedTail` — a compaction embeds copies of earlier messages *with the usage
+object they were first written with*. A reader that walked the JSON tree
+looking for `usage` anywhere would re-count the retained conversation on every
+compaction. The Go struct only has the two top-level fields, so that mistake is
+not expressible.
+
+**Hermes** keeps one SQLite ledger. The source is `session_model_usage`, not
+the `sessions` summary columns: the summary counts the main loop only, while
+the per-model table also accumulates auxiliary calls (titles, approvals,
+compression), which are real API calls. Hermes' own overview says in a comment
+that it sums the breakdown for exactly this reason, so the panel now shows what
+Hermes itself would show. A row is cumulative for a session/model/task and
+carries no per-call timestamps, so a session that spans midnight lands whole on
+the day of its `last_seen`; a split would need a distribution Hermes does not
+store.
+
+The one thing worth writing down carefully is `reasoning`. opencode stores it
+as a column disjoint from `output`, so `readOpencode` folds it in. pi fills it
+from OpenAI's `output_tokens_details.thinking_tokens`, which is *inside*
+`completion_tokens`, so folding there would count every thinking token twice.
+Hermes' own totals sum only input+output+cache_read+cache_write and list
+reasoning beside them, which is the same relationship. pi and Hermes are not
+folded, opencode is, and the comments at each site say which is which rather
+than inviting the next reader to make them agree.
+
+Both readers were checked against a copy of the machine that has been running
+these agents — 9 pi sessions and a 29-row Hermes ledger — and the sums match
+the agents' own arithmetic to the token:
+
+```
+pi     in 606,786  out 71,167  cacheRead 5,553,147  requests 175
+hermes in 3,755,350 out 367,711 cacheRead 96,505,821 calls 746
+```
+
+`wire.ts`'s `UsageTool` union was also three agents behind, claiming to mirror
+`usage.Tools` while naming two. It now names all five; nothing consumed it, so
+nothing had noticed.
+
+The usage dialog's **Tool** menu is the other place that names agents, and it
+is hand-written rather than read from the server, so it still offered three.
+The totals, the per-tool bar and the "By tool" rows picked the new sources up
+on their own; filtering to one of them did not exist until the menu got two
+more options. `docs/api.md` said three agents in two places and now says five.

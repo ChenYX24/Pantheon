@@ -241,6 +241,8 @@ function Filters(props: {
           <option value="claude">Claude Code</option>
           <option value="codex">Codex</option>
           <option value="opencode">opencode</option>
+          <option value="hermes">Hermes</option>
+          <option value="pi">pi</option>
         </select>
       </label>
     </div>
