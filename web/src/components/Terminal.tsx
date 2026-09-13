@@ -4,6 +4,7 @@ import { iosInputText, shouldBypassXtermKeydown } from './iosInput'
 import { liveTerminals } from './terminals'
 import { copyText, copyTextInGesture } from '../clipboard'
 import { isBrowserCopy, isBrowserPaste } from './clipboardKeys'
+import { attachImeCommitFix } from './imeInput'
 import { rendererPreference } from './renderer'
 import { TerminalReplay } from './terminalReplay'
 import { LoadTimer, formatLoadBytes, loadPercents } from './terminalLoad'
@@ -215,6 +216,12 @@ export function TerminalView({
 
     term.open(host)
     liveTerminals.set(sessionId, term)
+
+    // Full-width punctuation from the macOS Chinese IME, which xterm's input
+    // event drops when it arrives before the punctuation's own keydown. The
+    // listener has to sit on the host, not the textarea; imeInput.ts explains
+    // the event order and why a fix there was not enough.
+    const detachIme = attachImeCommitFix(host, term)
 
     // The renderer, which was never loaded.
     //
@@ -548,6 +555,7 @@ export function TerminalView({
       host.removeEventListener('keydown', bypassIOSKeydown, true)
       host.removeEventListener('input', forwardIOSInput, true)
       host.removeEventListener('keyup', finishIOSInput, true)
+      detachIme()
       detachTouch?.()
       host.removeEventListener('pointerup', copyOnSelect)
       selSub.dispose()

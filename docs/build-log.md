@@ -24208,3 +24208,40 @@ the moment it looks, which is why it passed on both branches before they were
 merged. The overlay is a column now with the label in it. Two scale-check runs
 after were clean; neither is proof the timing was hit, and the fix is argued
 from the layout rather than from a reproduction.
+
+## The first `！` needed two presses
+
+Full-width punctuation typed with the macOS Chinese IME was dropped by xterm,
+once per keyboard focus: the first `！` after clicking into a terminal did
+nothing, the second landed, and `？` and `＋` behaved the same way. ASCII `?`,
+`!` and `+` were fine, which is what made it look like a character problem.
+
+It is an event-order problem. xterm 6.0.0's `_inputEvent` accepts a browser
+`insertText` event only when `!ev.composed || !this._keyDownSeen`; a
+browser-dispatched input event always has `composed === true`, so the real gate
+is `_keyDownSeen`. That flag is set at the top of every keydown and cleared in
+keyup — an assumption that `input` arrives after the keydown of the same
+keystroke. macOS IME punctuation inverts that order: `beforeinput` → `input` →
+`keydown(229)`, with no `composition*` events at all. `！` needs Shift, so
+Shift's keydown set the flag and its keyup had not yet happened, and the
+character was discarded. The next keystroke's keyup cleared the flag, which is
+why only the first one after each focus was lost. ASCII survived because
+xterm's keypress path had already sent it and `_keyPressHandled` rejects the
+input event regardless of the flag.
+
+`imeInput.ts` clears `_keyDownSeen` from a capture-phase `beforeinput`
+listener on the element containing the textarea, before xterm's own listener
+reads it. Two guards keep it from recreating a worse bug: it only acts outside
+composition state, because xterm's CompositionHelper sends real composition
+commits from a deferred callback and releasing the flag there would send the
+text twice; and every private field is optional, so an xterm upgrade that
+renames one makes the workaround go quiet instead of throwing inside a
+keyboard event. A test reads the installed xterm bundle and fails if those
+fields move, so the next upgrade is looked at rather than silently losing the
+fix. The unit tests pin the sequence itself — flag set, no composition, one
+`insertText` — and the composition cases that must be left alone.
+
+Not fixed here, because it is not this bug: the `？`-in-Safari reports where no
+`beforeinput` fires at all (xterm #3070) and the iOS emoji double-commit
+(#5614). This patch neither claims nor breaks them; the composition guards are
+what keep it from making the second one worse.
