@@ -760,17 +760,24 @@ export function TerminalView({
             aria-valuenow={shown}
             aria-label={label}
           >
-            <div className="relative h-1 w-full bg-black/10 dark:bg-white/10">
+            {/* Theme tokens, not `dark:` and a palette colour: Tailwind's dark
+                variant follows the system, and the panel's own toggle wins
+                over the system (red line 5). A panel forced light on a dark
+                machine drew a white track on a white page. */}
+            <div className="relative h-1 w-full bg-surface-2">
               {/* What has arrived, behind what has been drawn. On a slow link
                   the gap between the two is the network; on a fast one it is
                   the parse. */}
               <div
-                className="absolute inset-y-0 left-0 bg-emerald-500/30 transition-[width] duration-150 ease-out"
-                style={{ width: `${loadPhase === 'connecting' ? 0 : pct.received}%` }}
+                className="absolute inset-y-0 left-0 transition-[width] duration-150 ease-out"
+                style={{
+                  width: `${loadPhase === 'connecting' ? 0 : pct.received}%`,
+                  background: 'var(--vp-selection)',
+                }}
               />
               <div
-                className="absolute inset-y-0 left-0 bg-emerald-500 transition-[width] duration-150 ease-out"
-                style={{ width: `${shown}%` }}
+                className="absolute inset-y-0 left-0 transition-[width] duration-150 ease-out"
+                style={{ width: `${shown}%`, background: 'var(--vp-accent)' }}
               />
             </div>
             <span className="absolute top-1 right-2 rounded-vp bg-elevated/90 px-1.5 py-0.5 text-vp-xs text-ink-2 shadow-sm tabular-nums">
