@@ -355,6 +355,57 @@ Restore is offered, never automatic, unless you asked for it on a particular
 session. A boot that starts two dozen agents at once is a worse failure than a
 list to click through.
 
+## Archiving a project hides it and frees nothing
+
+A project nobody has touched in a month is still a heading in the sidebar, and
+a panel with forty of them is a list nobody reads. Archiving takes a project
+out of the sidebar, and that is all it does: its sessions keep running in tmux,
+its notes and todos stay, and restoring it puts the same row back.
+
+"Hidden" is enforced where the lists are built, not where they are drawn. The
+snapshot leaves out archived projects *and their sessions* and adds a summary
+of them (`archived`) instead, so no view has to remember a filter, and the
+chat bridge and share walls read the same filtered lists. What must still see
+everything -- the poller, reconcile, scrollback capture, restore after a
+reboot, the resources page, usage history -- reads the unfiltered ones,
+because those processes are exactly as alive as before. The resources page and
+the memory alert name such a session from the server's own record, since it is
+no longer in the snapshot the page would have looked it up in.
+
+One exception, and it is about attention rather than lists: a session in an
+archived project that stops to wait for its person still says so -- in the
+tab title, the browser's notification, the phone and webhooks -- and the
+archived line carries a triangle. Hiding a project is not asking to miss the
+agent in it that needs a decision. Everything else those channels would say
+about it (a session finishing, changing state) stays hidden with the project.
+
+What was considered and left out is freeing the memory. The kernel cannot page
+an archived session out: the sessions scope runs with `MemorySwapMax=0`, on
+purpose (build log, 2026-09-14), and swap limits nest, so no session leaf may
+swap while the scope may not. Reopening that needs root and gives back the
+throttle that decision removed. A pager of the panel's own would need ptrace
+and userfaultfd on processes it is not the parent of, and would leave every
+archived process hanging on the panel being up, which is red line 2 by another
+route. Killing the agent and resuming it from its transcript frees everything
+and loses whatever was not in the transcript. None of these was what was asked
+for, which was a shorter sidebar.
+
+The ways back are the ways a person looks for it. The line under the last
+project lists what is archived. The "new project" picker shows archived
+projects over the directories, and choosing an archived project's directory --
+from that list, by walking into it or by typing its path -- restores it rather
+than adding the same tree a second time. The server enforces the same rule on
+`POST /api/projects`, so a script or the CLI gets it too.
+
+Archiving by itself is off unless it is turned on: a project disappearing
+overnight should be somebody's choice. When it is on, "idle" means no session
+created, no session printing or changing state and no note edited for the
+chosen number of days, and no todo added or ticked; `last_active_at` alone
+moves only when a session is created, so a project with one agent working for
+three weeks would have read as three weeks idle. Pinned projects are never
+archived this way. The rule is asked again inside the `UPDATE` that archives,
+so a project that came back to life after it was listed stays put.
+
 ## Claude accounts share everything but the login
 
 A second Claude Code account is `CLAUDE_CONFIG_DIR`, and that variable moves far

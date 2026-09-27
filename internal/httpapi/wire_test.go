@@ -56,6 +56,7 @@ func TestTypeScriptRowsMatchWhatIsSent(t *testing.T) {
 		// home of this test could not import without a cycle — so the rows
 		// were pinned and the envelope carrying them was not.
 		{"PanelState", stateResponse{}},
+		{"ArchivedProject", archivedProject{}},
 		// The rest of the hand-written surface. These went uncovered only
 		// because the test could not see this package from where it lived;
 		// none of them is less hand-written than the rows above.
@@ -478,6 +479,13 @@ func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 		"resources.boost_ended": true,
 		"chat.consent":          true,
 		"chat.alerts":           true,
+		// Hiding a project and bringing it back, by hand or by the idle rule,
+		// and the setting that turns the rule on. One prefix, so a GROUP BY
+		// answers "what happened to my projects".
+		"project.archived":      true,
+		"project.archived_idle": true,
+		"project.restored":      true,
+		"project.archive_idle":  true,
 	}
 
 	files, err := filepath.Glob("*.go")

@@ -337,6 +337,7 @@ export class PanelSocket {
             projects: st.projects,
             sessions: st.sessions,
             live: st.live,
+            archived: st.archived ?? [],
             fullscreen: st.fullscreen ?? [],
             frozen: st.frozen ?? [],
             projectOrder: st.projectOrder,

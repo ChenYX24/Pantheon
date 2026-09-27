@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
+  Archive,
   ChevronLeft,
   Clock,
   GripVertical,
@@ -13,7 +14,7 @@ import {
   X,
 } from 'lucide-react'
 
-import type { GitRemote, Project, Session, SessionState } from '../protocol/wire'
+import type { ArchivedProject, GitRemote, Project, Session, SessionState } from '../protocol/wire'
 import { useDragList } from '../hooks/useDragList'
 import { projectLabel, sessionLabel } from './label'
 import { StateDot } from './StateDot'
@@ -66,6 +67,11 @@ export interface SidebarProps {
   onNewSession: (project: Project) => void
   onRenameProject: (project: Project, name: string) => void
   onRemoveProject: (project: Project) => void
+  /** Hides a project. Its sessions keep running. */
+  onArchiveProject: (project: Project) => void
+  /** Projects not in the sidebar, for the one line that leads to them. */
+  archived: ArchivedProject[]
+  onOpenArchived: () => void
   onRenameSession: (session: Session, title: string) => void
   onPinSession: (session: Session, pinned: boolean) => void
   onSetSessionState: (session: Session, state: SessionState) => void
@@ -151,6 +157,7 @@ function initials(name: string): string {
 export function Sidebar(props: SidebarProps) {
   useLang()
   const { projects, sessions, expanded, overlay, touch } = props
+  const archivedWaiting = props.archived.reduce((n, p) => n + p.waiting, 0)
 
   const projectIds = useMemo(() => projects.map((p) => p.id), [projects])
   const drag = useDragList(projectIds, props.onReorderProjects)
@@ -226,6 +233,30 @@ export function Sidebar(props: SidebarProps) {
             </button>
           )
         })}
+        {/* The rail's way to the archived list, and the one place a session
+            waiting inside a hidden project shows while the sidebar is
+            collapsed. Same triangle as the expanded line. */}
+        {props.archived.length > 0 && (
+          <button
+            type="button"
+            data-testid="rail-archived"
+            onClick={props.onOpenArchived}
+            title={t('archive.entry', { n: props.archived.length })}
+            aria-label={
+              archivedWaiting > 0
+                ? `${t('archive.entry', { n: props.archived.length })}, ${t('archive.waiting', { n: archivedWaiting })}`
+                : t('archive.entry', { n: props.archived.length })
+            }
+            className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-vp text-ink-2 transition-colors duration-200 ease-vp hover:bg-surface-2"
+          >
+            <Archive size={14} aria-hidden="true" />
+            {archivedWaiting > 0 && (
+              <span className="absolute -right-0.5 -bottom-0.5">
+                <StateDot state="waiting" size={8} />
+              </span>
+            )}
+          </button>
+        )}
         <button
           type="button"
           onClick={props.onAddProject}
@@ -367,8 +398,11 @@ export function Sidebar(props: SidebarProps) {
 
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         {projects.length === 0 && (
-          <p className="px-2 py-6 text-vp-base leading-relaxed text-ink-2">
-            {t('app.noProjects')}
+          <p data-testid="sidebar-empty" className="px-2 py-6 text-vp-base leading-relaxed text-ink-2">
+            {/* Not the fresh-install line when everything is only archived:
+                "add a project to get started" over five archived projects and
+                nine running sessions reads as a panel that lost them. */}
+            {props.archived.length > 0 ? t('archive.allArchived') : t('app.noProjects')}
           </p>
         )}
         {projects.map((p, index) => (
@@ -418,6 +452,15 @@ export function Sidebar(props: SidebarProps) {
                   happens to exist gives you a project you could not remove from
                   here at all — the endpoint, the CLI and even the client method
                   were all there, and nothing in the panel called it. */}
+              <button
+                type="button"
+                onClick={() => props.onArchiveProject(p)}
+                data-testid="project-archive"
+                title={t('project.archive')}
+                className="vp-control vp-tap vp-reveal"
+              >
+                <Archive size={13} />
+              </button>
               <button
                 type="button"
                 onClick={() => props.onRemoveProject(p)}
@@ -564,6 +607,34 @@ export function Sidebar(props: SidebarProps) {
         ))}
         {drag.overIndex === projects.length && drag.draggingId !== null && (
           <div className="mx-2 h-0.5 rounded-full bg-accent" />
+        )}
+        {/* Under the last project rather than in the header: it is where the
+            list continues, and it is not there at all until something has been
+            archived. The triangle is for an agent that stopped for a decision
+            inside a hidden project -- the one thing about them that cannot
+            wait until somebody thinks to look. */}
+        {props.archived.length > 0 && (
+          <button
+            type="button"
+            data-testid="archived-open"
+            onClick={props.onOpenArchived}
+            className={`vp-press mt-1 flex w-full items-center gap-2 rounded-vp ${pack.row} text-left ${rank.row} text-ink-2 transition-colors duration-200 ease-vp hover:bg-surface-2 hover:text-ink`}
+          >
+            <Archive size={13} aria-hidden="true" className="shrink-0" />
+            <span className="min-w-0 flex-1 truncate">
+              {t('archive.entry', { n: props.archived.length })}
+            </span>
+            {archivedWaiting > 0 && (
+              <span
+                data-testid="archived-waiting"
+                title={t('archive.waiting', { n: archivedWaiting })}
+                className="inline-flex shrink-0 items-center gap-1 text-vp-xs tabular"
+              >
+                <StateDot state="waiting" />
+                {archivedWaiting}
+              </span>
+            )}
+          </button>
         )}
       </nav>
 

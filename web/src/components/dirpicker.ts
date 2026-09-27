@@ -187,6 +187,13 @@ export interface KeyState {
   count: number
   active: number
   hasParent: boolean
+  /**
+   * Exactly one archived project matches the text. Enter restores it when no
+   * directory matched: somebody who typed "api" with `api-server` alone on
+   * the archived shelf wants that project back, and was being offered a new
+   * folder called "api" instead.
+   */
+  restorable?: boolean
 }
 
 /**
@@ -221,6 +228,8 @@ export type Act =
   | { do: 'use' }
   /** Start a directory named after what was typed and matched nothing. */
   | { do: 'createNamed' }
+  /** Bring back the one archived project the text matched. */
+  | { do: 'restore' }
   | { do: 'clear' }
   | { do: 'close' }
   /** Not ours: the input gets it, with its default behaviour intact. */
@@ -248,6 +257,7 @@ export function resolveKey(s: KeyState): Act {
       return clamp(s.count - 1, s.count)
     case 'Enter':
       if (s.count > 0 && s.active >= 0) return { do: 'open' }
+      if (s.hasText && s.restorable) return { do: 'restore' }
       // Nothing to open. With text in the box, that text is a name nothing
       // matched, and offering to make it is what somebody who typed it is
       // after; with an empty box in an empty directory the only thing left is
@@ -265,4 +275,53 @@ export function resolveKey(s: KeyState): Act {
     default:
       return { do: 'text' }
   }
+}
+
+/** A path without a trailing slash, so `/a/b/` and `/a/b` are one directory. */
+function trimSlash(p: string): string {
+  return p.length > 1 && p.endsWith('/') ? p.replace(/\/+$/, '') || '/' : p
+}
+
+/**
+ * The archived project whose directory this is, if any.
+ *
+ * What turns the picker's "use this directory" into "restore that project":
+ * choosing the directory of a project that was archived means wanting it back,
+ * with its notes and its sessions, not a second project beside it.
+ */
+export function archivedFor<T extends { path: string }>(archived: readonly T[], abs: string): T | null {
+  if (!abs) return null
+  const want = trimSlash(abs)
+  return archived.find((p) => trimSlash(p.path) === want) ?? null
+}
+
+/**
+ * How many archived projects the picker shows before anything is typed.
+ *
+ * The list is for the directories; the archived section sits over it and must
+ * not push them off the screen. Typing narrows both, and then every match is
+ * shown, because somebody who typed a name is looking for that one.
+ */
+export const ARCHIVED_SHOWN = 4
+
+/**
+ * The archived projects the picker shows for what was typed: by name or by the
+ * last part of the path, best first, and only the most recent few when
+ * nothing was typed. `archived` arrives most recently archived first.
+ */
+export function archivedMatches<T extends { name: string; path: string }>(
+  archived: readonly T[],
+  query: string,
+): T[] {
+  const q = query.trim()
+  if (!q) return archived.slice(0, ARCHIVED_SHOWN)
+  const hits: { p: T; at: number }[] = []
+  for (const p of archived) {
+    const byName = matchSpan(p.name, q)
+    const base = trimSlash(p.path).split('/').pop() ?? ''
+    const byDir = matchSpan(base, q)
+    const at = Math.min(byName ? byName[0] : Infinity, byDir ? byDir[0] : Infinity)
+    if (at !== Infinity) hits.push({ p, at })
+  }
+  return hits.sort((a, b) => a.at - b.at).map((h) => h.p)
 }

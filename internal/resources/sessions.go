@@ -23,7 +23,7 @@ func (g *Governor) readSessions(l *Layout, ro roster, now time.Time) []SessionVi
 	out := make([]SessionView, 0, len(ro.metas))
 	seen := map[string]bool{}
 	for _, m := range ro.metas {
-		v := SessionView{ID: m.ID, TmuxName: m.TmuxName, Priority: PriorityNormal}
+		v := SessionView{ID: m.ID, TmuxName: m.TmuxName, Title: m.Title, Priority: PriorityNormal}
 		// heldKnown says the growth sample below is a reading rather than a
 		// read that failed: a zero sample in the window reads as the session
 		// having just released everything, and growth picks culprit.

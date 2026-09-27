@@ -84,6 +84,12 @@ are installed, and any storage warning.
 This is the one to poll if you are not using the WebSocket. It is also what the
 socket pushes, so the shapes are identical.
 
+Archived projects are not in `projects`, and their sessions are not in
+`sessions`, although those sessions are still running. They are listed in
+`archived` instead: `id`, `name`, `path`, `archivedAt`, `archivedAuto` (the
+idle rule archived it), `lastActiveAt`, and `sessions` and `waiting`, which
+count its sessions still running and those waiting for a person.
+
 ### `GET /api/system`
 
 CPU, memory, swap, disk and load. `cpuPercent` is `null` until there are two
@@ -229,6 +235,8 @@ counts and timestamps out of those files and nothing else leaves the machine.
 ### `PATCH /api/projects/{id}`
 ### `DELETE /api/projects/{id}`
 ### `POST /api/projects/reorder`
+### `POST /api/projects/{id}/archive`
+### `POST /api/projects/{id}/restore`
 
 `POST /api/projects` takes `{"path": "...", "name": "..."}`; a leading `~` is
 expanded and the name defaults to the directory's base. `PATCH` accepts `name`
@@ -237,6 +245,17 @@ It does not touch the directory.
 
 `reorder` takes `{"ids": [...]}` in the order you want and switches the panel to
 manual ordering.
+
+`archive` hides a project and `restore` brings it back; both answer with the
+project. Archiving ends nothing: the sessions keep running in tmux, and the
+notes and todos stay. What changes is who is told about it -- `GET /api/state`,
+the chat bridge and share walls leave it and its sessions out. Archiving an
+archived project, or restoring one that is not, succeeds and changes nothing.
+A restored project counts as just active and loses any manual position.
+
+`POST /api/projects` with the directory of an archived project restores that
+project and answers `200` rather than `201`: nothing was created.
+`POST /api/sessions` in an archived project is a `409`.
 
 Paths in `files`, `download`, `preview` and `upload` are relative to the project
 root and are resolved through it: a path that leaves the project is refused,
@@ -597,6 +616,7 @@ see looks like.
 ### `POST /api/clipboard`
 ### `PUT /api/settings/paste`
 ### `PUT /api/settings/timezone`
+### `PUT /api/settings/archive`
 ### `GET /api/notes`
 ### `PUT /api/notes`
 ### `GET /api/projects/{id}/todos`
@@ -616,6 +636,12 @@ lands, and what happens to its path. `dir` defaults to `panel`, which is a
 directory the panel owns: a picture pasted at an agent used to land in the
 session's working directory, which for an agent session is a git repository.
 `GET /api/settings` carries both as `pasteDir` and `pasteThen`.
+
+`PUT /api/settings/archive` takes `{"days": n}`, one of `0`, `14`, `30`, `60`
+or `90`, and archives a project nothing has touched for that many days; `0`,
+the default, turns it off. Touched means a session created, a session printing
+or changing state, or the note edited. Pinned projects are never archived this
+way. `GET /api/settings` carries it as `archiveIdleDays`.
 
 `PUT /api/settings/timezone` takes `{"zone": "Asia/Shanghai"}` -- an IANA name,
 or `""` for the machine's own zone -- and decides where the day starts for

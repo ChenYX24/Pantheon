@@ -375,7 +375,7 @@ func (s *Server) handleChatSettings(w http.ResponseWriter, r *http.Request) {
 		for _, p := range projects {
 			names[p.ID] = p.Name
 		}
-		if sessions, err := s.DB.ListSessions(ctx); err == nil {
+		if sessions, err := s.DB.ListVisibleSessions(ctx); err == nil {
 			for _, row := range sessions {
 				if !chat.Addressable(row) {
 					continue
@@ -1012,7 +1012,7 @@ func (s *Server) handleChatToolSessions(w http.ResponseWriter, r *http.Request) 
 			names[p.ID] = p.Name
 		}
 	}
-	rows, err := s.DB.ListSessions(ctx)
+	rows, err := s.DB.ListVisibleSessions(ctx)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

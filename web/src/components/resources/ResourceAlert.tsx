@@ -56,7 +56,15 @@ export function ResourceAlertBar({
     }
   }, [alert.autoAt])
 
-  const session = alert.sessionId ? sessions.find((s) => s.id === alert.sessionId) : undefined
+  // The session to name and act on. Found in the snapshot when it is there;
+  // otherwise it is in an archived project, which hides it and frees nothing,
+  // so the server's name for it stands in and the answers stay on offer.
+  const found = alert.sessionId ? sessions.find((s) => s.id === alert.sessionId) : undefined
+  const session = found
+    ? { id: found.id, name: sessionLabel(found) }
+    : alert.sessionId
+      ? { id: alert.sessionId, name: safeText(alert.sessionTitle ?? '') }
+      : undefined
   const proc = alert.proc
   const procName = proc ? safeText(proc.name) : ''
   const tone = levelTone(alert.level)
@@ -99,7 +107,7 @@ export function ResourceAlertBar({
       <span className="min-w-[14rem] flex-1 text-ink-2">
         {proc && session ? (
           <>
-            {t('res.alert.culprit', { session: sessionLabel(session), proc: procName })}{' '}
+            {t('res.alert.culprit', { session: session.name, proc: procName })}{' '}
             <span className="whitespace-nowrap tabular">{formatBytes(proc.rss)}</span>
           </>
         ) : (
@@ -139,7 +147,7 @@ export function ResourceAlertBar({
             onClick={() => void run(() => api.freezeSession(session.id, true))}
             className="vp-outline max-w-full text-vp-sm"
           >
-            <span className="truncate">{t('res.alert.pause', { session: sessionLabel(session) })}</span>
+            <span className="truncate">{t('res.alert.pause', { session: session.name })}</span>
           </button>
         )}
         {alert.canBoost && (

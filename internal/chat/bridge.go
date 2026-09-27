@@ -503,6 +503,17 @@ func (b *Bridge) push(ctx context.Context, sessionID string) {
 	// Before anything else, whatever the rules say about telling anybody:
 	// a request that ended at the laptop must not keep its buttons.
 	b.sweep(ctx, row)
+	// A session in an archived project is hidden from the phone as it is from
+	// the sidebar -- except when it is waiting for its person. Hiding a
+	// project is not asking to miss the agent in it that stopped for a
+	// decision; the tab title and the browser's notification say so too, and
+	// catchUp only ever replays waiting sessions. After the sweep, which takes
+	// back buttons for a request answered elsewhere and is owed either way.
+	if row.State != session.StateWaiting {
+		if hidden, err := b.d.DB.SessionHidden(ctx, sessionID); err != nil || hidden {
+			return
+		}
+	}
 	raw, _ := b.d.DB.GetSetting(ctx, RoutesKey, "")
 	d := ParseRoutes(raw).Decide(c, b.d.Now().In(b.d.Zone()))
 	if d.Hold {

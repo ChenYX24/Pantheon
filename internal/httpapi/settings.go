@@ -37,6 +37,7 @@ func (s *Server) registerSettingsRoutes(r chi.Router) {
 	r.Post("/settings/tour", s.handleTourDone)
 	r.Put("/settings/paste", s.handlePutPaste)
 	r.Put("/settings/timezone", s.handlePutTimeZone)
+	r.Put("/settings/archive", s.handlePutArchiveIdle)
 	r.Get("/settings/env", s.handleGetEnv)
 	r.Put("/settings/env", s.handlePutEnv)
 	r.Get("/settings/tune", s.handleTuneStatus)
@@ -107,6 +108,9 @@ type settingsResponse struct {
 	// "type" | "buffer" | "both".
 	PasteDir  string `json:"pasteDir"`
 	PasteThen string `json:"pasteThen"`
+	// ArchiveIdleDays archives a project after this many days untouched; 0
+	// is off. See archive.go.
+	ArchiveIdleDays int `json:"archiveIdleDays"`
 
 	// TourDone is whether the first-run tour has been dismissed.
 	//
@@ -233,6 +237,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		TourDone:  tour == "1",
 		PasteDir:  pdir,
 		PasteThen: pthen,
+
+		ArchiveIdleDays: s.archiveIdleDays(r.Context()),
 
 		Version: version.Version, Commit: version.Commit, Built: version.Date,
 		Go:     runtime.Version(),

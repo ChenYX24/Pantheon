@@ -560,7 +560,7 @@ func startResources(ctx context.Context, a *app, srv *httpapi.Server, logger *sl
 
 func cmdProject(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: vibepanel project <add|ls|rm> [args]")
+		return errors.New("usage: vibepanel project <add|ls|rm|archive|restore> [args]")
 	}
 	ctx := context.Background()
 	sub, rest := args[0], args[1:]
@@ -595,6 +595,17 @@ func cmdProject(args []string) error {
 			return err
 		}
 		defer a.Close()
+		// The same rule as the API: an archived project on this directory
+		// comes back rather than being added twice.
+		if old, err := a.db.ArchivedProjectAt(ctx, abs); err == nil {
+			if err := a.db.RestoreProject(ctx, old.ID); err != nil {
+				return err
+			}
+			fmt.Printf("restored archived project %s  %s  %s\n", old.ID, old.Name, old.Path)
+			return nil
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
 		p, err := a.db.CreateProject(ctx, id.New(), *name, abs)
 		if err != nil {
 			return err
@@ -608,16 +619,60 @@ func cmdProject(args []string) error {
 			return err
 		}
 		defer a.Close()
+		// The sidebar's projects in its order, then the archived ones: an
+		// admin listing that left them out would make them look deleted.
 		ps, err := a.db.ListProjects(ctx)
 		if err != nil {
 			return err
 		}
+		archived, err := a.db.ListArchivedProjects(ctx)
+		if err != nil {
+			return err
+		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tPATH\tPINNED\tLAST ACTIVE")
-		for _, p := range ps {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%v\t%s\n", p.ID, p.Name, p.Path, p.Pinned, ago(p.LastActiveAt))
+		fmt.Fprintln(w, "ID\tNAME\tPATH\tPINNED\tLAST ACTIVE\tARCHIVED")
+		for _, p := range append(ps, archived...) {
+			arch := "-"
+			if p.ArchivedAt != nil {
+				arch = ago(*p.ArchivedAt)
+				if p.ArchivedAuto {
+					arch += " (idle)"
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%v\t%s\t%s\n", p.ID, p.Name, p.Path, p.Pinned, ago(p.LastActiveAt), arch)
 		}
 		return w.Flush()
+
+	case "archive", "restore":
+		// Hides or brings back a project. Nothing is killed either way; see
+		// internal/httpapi/archive.go. Written straight to the database, like
+		// every other subcommand here.
+		fs := flag.NewFlagSet("project "+sub, flag.ContinueOnError)
+		pid := fs.String("id", "", "project id")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		if *pid == "" {
+			return fmt.Errorf("project %s: --id is required", sub)
+		}
+		a, err := openApp(ctx, fs.Args())
+		if err != nil {
+			return err
+		}
+		defer a.Close()
+		if sub == "archive" {
+			err = a.db.ArchiveProject(ctx, *pid, false)
+			if errors.Is(err, store.ErrAlreadyArchived) {
+				err = nil
+			}
+		} else {
+			err = a.db.RestoreProject(ctx, *pid)
+		}
+		if err != nil {
+			return fmt.Errorf("project %s: %w", sub, err)
+		}
+		fmt.Printf("%sd project %s\n", sub, *pid)
+		return nil
 
 	case "rm":
 		fs := flag.NewFlagSet("project rm", flag.ContinueOnError)

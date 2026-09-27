@@ -58,6 +58,10 @@ panes-check:          ## The side panel's pane layout: drag, drop, merge, restor
 first-run-check: build ## The setup wizard and the first project, in a browser
 	cd web && npm run check:first-run
 
+.PHONY: archive-check
+archive-check: build  ## Archiving a project: the sidebar, the list, the picker, a phone
+	cd web && npm run check:archive
+
 .PHONY: render-check
 render-check: build   ## Drive the real binary with a real browser
 	cd web && npm run check:render

@@ -43,6 +43,8 @@ const FAKE: Project = {
   pinned: false,
   lastActiveAt: 0,
   createdAt: 0,
+  archivedAt: null,
+  archivedAuto: false,
 }
 
 export function PanesHarness() {

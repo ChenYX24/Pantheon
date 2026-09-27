@@ -24075,3 +24075,109 @@ screen 385 ms after the network came back.
 What this does not cover: a terminal that has been unmounted, because it fell
 out of the recently-viewed window, has no screen left to append to, so opening
 it again is still a full load.
+
+## 2026-09-25 — Archiving a project: hidden, and nothing else
+
+Asked for: projects nobody uses any more should leave the sidebar, by hand or
+after a while on their own, stay findable, and come back when they are picked
+in the "new project" picker. And, as a question: could archiving also take the
+memory back, "转储到硬盘"?
+
+**The memory question, answered by measuring.** Every session already has its
+own leaf cgroup with a freezer. On this machine 38 leaves, idle agents at 130
+to 300 MiB anonymous memory each. In a throwaway user scope, a 1 GiB process
+frozen and pushed out with `memory.reclaim` went to swap in 0.8 s, and reading
+all of it back after thawing took 4.9 s. So the kernel mechanism is fast enough
+-- and unavailable: `vibepanel-sessions-*.scope` has `memory.swap.max = 0`, set
+deliberately on 2026-09-14, and swap limits nest, so no leaf under it can swap
+at all. Opening it needs root and gives back the reclaim throttle that entry
+measured. A pager of our own was looked at and is worse on every axis: another
+process's pages can only be dropped by injecting `madvise` through ptrace, and
+filled back through a userfaultfd the target has to create; this machine has
+`ptrace_scope = 1` (the panel is not the sessions' ancestor, and red line 2
+says it must not be) and `unprivileged_userfaultfd = 0`, whose user-mode-only
+fallback turns a kernel access to an evicted page -- a `read()` into a heap
+buffer -- into `EFAULT`. And every archived process would then hang on the
+panel being up. Hiding is what was chosen.
+
+**What "hidden" had to reach.** The snapshot now leaves out archived projects
+and their sessions and carries `archived` instead; chat (list, bare-reply
+candidates, pushes, the Chat page, the tools) and share walls read
+`ListVisibleSessions`. The poller, reconcile, scrollback capture and restore
+keep reading everything, because the processes are alive.
+
+Two things broke by that and were found by going through every reader of the
+lists rather than by a test:
+
+- The resources page filtered its rows to sessions it could find in the
+  snapshot (`ResourcesGroup.tsx`), so a 5 GiB session would have vanished from
+  the one page about memory the moment its project was archived. The memory
+  alert had the same lookup, and without a session found it drops its *End*
+  and *Pause* buttons -- at the moment they exist for. `SessionView` and
+  `Alert` now carry the session's title, and both use it when the snapshot has
+  no row.
+- `last_active_at` moves only when a session is *created*, so the idle rule
+  built on it would have archived a project whose one agent had been working
+  for three weeks. Idle is now no session created, printing or changing state,
+  and no note edited, since the cutoff.
+
+Also: `tokens.go` names nested projects so a parent's usage excludes theirs,
+and now reads archived ones too, or an archived child's spend would have been
+added to its parent; opening a page whose project is archived restores that
+project instead of creating a second one on the same directory.
+
+**Guards and their tests.** Every clause of `IdleProjects`, the archive and
+restore statements, the snapshot split, the 409 for a session in an archived
+project, restore-on-create, the chat list, the chat candidates, the chat push,
+the share wall and the setting's whitelist were each removed and watched turn a
+test red. One of those runs said "0 fails" for the chat push and meant nothing:
+the mutation left a variable unused and the package did not compile, and a
+count of `--- FAIL` lines is zero for a build failure too. Re-run with a
+mutation that compiles, it failed as it should. `archive-check` was run with
+the picker's restore detection and the waiting marker broken and reported
+both; the typed-path case also showed the server-side restore catching what
+the button no longer did, which is the reason it is in both places.
+
+**What the audits found.** Three reviews ran on the finished change: the
+backend read against every caller of the project and session lists, the
+frontend, and one driving a throwaway panel as a user would. What they found
+and what was done:
+
+- A share link scoped to one *session* in an archived project resolved as
+  deleted: the scope was looked up among the visible sessions. It resolves
+  against all of them now, and shows the name and nothing running, as a
+  project-scoped link already did.
+- The idle rule ignored todos, so a project somebody was ticking through was
+  idle. Todos added or ticked count now. And the rule archived from its list
+  without looking again, so a project that started printing between the query
+  and its turn was archived anyway; the predicate is now one SQL fragment used
+  by both the query and the `UPDATE`.
+- Attention was inconsistent: the browser counted and notified about a session
+  waiting in an archived project, the phone and webhooks said nothing. One rule
+  now, written in design.md: lists hide, a session waiting for its person still
+  reaches them. The phone's replay of missed requests already only replayed
+  waiting sessions, so it was right by that rule and stays as it was.
+- In the picker, typing part of an archived project's name and pressing Enter
+  offered to create a folder of that name, because Enter only counted directory
+  rows. With no directory matching and one archived project matching, Enter
+  restores it.
+- One Escape on the delete question closed the archived list under it too; the
+  list had no `data-vp-modal`, so the other dialogs and the terminal's focus
+  rule could not see it; the collapsed rail had no way to it; the tab title did
+  not count its waiting sessions; its shelf rows were unreachable by keyboard;
+  every project archived read "add a project to get started"; and
+  `sessions running: 1`. All fixed.
+
+Each was given a test first seen failing with the fix removed. Two of those
+mutation runs are worth recording because they were wrong the first time. A
+webhook mutation stopped compiling (the `session` import went unused) and
+counted as zero failures, the same trap as before. And the browser assertion
+for the all-archived sidebar passed with the fix removed: it matched
+/archived/ against the whole list, which contains "Archived · 2" whatever the
+empty line says. It reads the empty line alone now, and fails without the fix.
+
+Not covered by a test: that the idle ticker calls `ArchiveIfIdle` rather than
+the unconditional `ArchiveProject`. The predicate being re-asked is tested in
+the store; the race it closes needs a write landing between two statements of
+one function, and nothing here can hold it there.
+

@@ -1,4 +1,4 @@
-import type { ResourceAlert, Session } from './protocol/wire'
+import type { ArchivedProject, ResourceAlert, Session } from './protocol/wire'
 import { t } from './i18n'
 import { sessionLabel } from './components/label'
 import { formatBytes } from './components/bytes'
@@ -115,6 +115,43 @@ export function notifyOnWaiting(sessions: Session[], focused: boolean) {
 }
 
 
+let lastArchived: Map<string, number> | null = null
+
+/**
+ * The same, for sessions in archived projects, which the snapshot does not
+ * carry one by one: it counts how many in each project are waiting, so a count
+ * that went up is a session that has just started waiting.
+ *
+ * Seeded on the first snapshot without notifying, for the reason
+ * notifyOnWaiting gives. The notification names the project rather than the
+ * session, because the project is the one thing the panel still shows.
+ */
+export function notifyOnArchivedWaiting(archived: ArchivedProject[], focused: boolean) {
+  const seeded = lastArchived !== null
+  const prev = lastArchived ?? new Map<string, number>()
+  const next = new Map<string, number>()
+  const rising: ArchivedProject[] = []
+  for (const p of archived) {
+    next.set(p.id, p.waiting)
+    if (seeded && p.waiting > (prev.get(p.id) ?? 0)) rising.push(p)
+  }
+  lastArchived = next
+  if (rising.length === 0 || focused) return
+  if (!notifyEnabled() || !notifySupported() || Notification.permission !== 'granted') return
+  void navigator.serviceWorker.ready
+    .then((reg) => {
+      for (const p of rising) {
+        void reg.showNotification(t('notify.waitingTitle'), {
+          body: t('notify.archivedWaitingBody', { name: safeText(p.name) }),
+          icon: '/icon-192.png',
+          badge: '/icon-192.png',
+          tag: `vibepanel-archived-waiting-${p.id}`,
+        })
+      }
+    })
+    .catch(() => {})
+}
+
 /**
  * The memory question, when the panel is not being looked at.
  *
@@ -143,11 +180,13 @@ export function notifyOnResourceAlert(alert: ResourceAlert | null, sessions: Ses
   lastResourceLevel = alert.level
   if (focused) return
   if (!notifyEnabled() || !notifySupported() || Notification.permission !== 'granted') return
-  const session = alert.sessionId ? sessions.find((s) => s.id === alert.sessionId) : undefined
+  // An archived project's session is not in the snapshot; the alert names it.
+  const found = alert.sessionId ? sessions.find((s) => s.id === alert.sessionId) : undefined
+  const name = found ? sessionLabel(found) : alert.sessionTitle ? safeText(alert.sessionTitle) : ''
   const proc = alert.proc ? safeText(alert.proc.name) : ''
   const lines: string[] = []
-  if (alert.proc && session) {
-    lines.push(`${t('res.alert.culprit', { session: sessionLabel(session), proc })} ${formatBytes(alert.proc.rss)}`)
+  if (alert.proc && name) {
+    lines.push(`${t('res.alert.culprit', { session: name, proc })} ${formatBytes(alert.proc.rss)}`)
   } else if (alert.poolMax) {
     lines.push(t('res.alert.noCulprit', { used: formatBytes(alert.poolCurrent), max: formatBytes(alert.poolMax) }))
   } else {

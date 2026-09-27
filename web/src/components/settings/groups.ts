@@ -72,6 +72,7 @@ export const SETTINGS_SECTIONS = [
   'reporting',
   'tune',
   'paste',
+  'archive',
   'browser',
   'chat',
   'webhooks',
@@ -112,6 +113,9 @@ export const SECTION_GROUP: Record<SettingsSection, SettingsGroup> = {
   // Where a screenshot pasted into a terminal goes: about what a session
   // does, and next to the other things that write outside the panel.
   paste: 'sessions',
+  // When a project leaves the sidebar on its own: about where sessions are
+  // listed, and the only other setting that changes the sidebar.
+  archive: 'sessions',
   browser: 'notify',
   // A pointer to the chat page, where people look for "tell my phone".
   chat: 'notify',

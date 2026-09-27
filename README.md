@@ -217,6 +217,7 @@ the ones that do:
 |---|---|
 | `make panes-check` | the side panel's pane layout: drag, drop, merge, restore |
 | `make first-run-check` | the setup wizard and the first project |
+| `make archive-check` | archiving a project: the sidebar, the list, the picker, a phone |
 | `make render-check` | layout, states, arbitration, panels, mobile, clipboard, passkeys |
 | `make stress-check` | wide characters, full-screen programs, scrollback, floods, dropped sockets |
 | `make restart-check` | kill the backend; the sessions and the login must outlive it |

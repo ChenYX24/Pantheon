@@ -22,6 +22,47 @@ type Project struct {
 	Pinned       bool   `json:"pinned"`
 	LastActiveAt int64  `json:"lastActiveAt"`
 	CreatedAt    int64  `json:"createdAt"`
+	// ArchivedAt is when the project was hidden; nil for every project in the
+	// sidebar. Its sessions are untouched by archiving -- see v31.
+	ArchivedAt *int64 `json:"archivedAt"`
+	// ArchivedAuto is true when the idle rule archived it rather than a person.
+	ArchivedAuto bool `json:"archivedAuto"`
+}
+
+const projectColumns = `id, name, path, sort_index, pinned, last_active_at, created_at, archived_at, archived_auto`
+
+func scanProject(sc scanner) (Project, error) {
+	var p Project
+	var sortIdx, archived sql.NullInt64
+	if err := sc.Scan(&p.ID, &p.Name, &p.Path, &sortIdx, &p.Pinned, &p.LastActiveAt, &p.CreatedAt,
+		&archived, &p.ArchivedAuto); err != nil {
+		return Project{}, err
+	}
+	if sortIdx.Valid {
+		v := int(sortIdx.Int64)
+		p.SortIndex = &v
+	}
+	if archived.Valid {
+		p.ArchivedAt = &archived.Int64
+	}
+	return p, nil
+}
+
+func (d *DB) queryProjects(ctx context.Context, query string, args ...any) ([]Project, error) {
+	rows, err := d.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list projects: %w", err)
+	}
+	defer rows.Close()
+	var out []Project
+	for rows.Next() {
+		p, err := scanProject(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan project: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // CreateProject inserts a project and its empty note row.
@@ -59,8 +100,15 @@ func (d *DB) CreateProject(ctx context.Context, id, name, path string) (Project,
 	return p, nil
 }
 
-// ListProjects returns projects in display order: pinned first, then manually
-// positioned rows, then the rest by most recent activity.
+// ListProjects returns the projects in the sidebar, in display order: pinned
+// first, then manually positioned rows, then the rest by most recent activity.
+// Archived projects are not in it; ListArchivedProjects has them.
+//
+// Excluding them here rather than in each caller is the point: this is what
+// the snapshot, the chat bridge, share walls and the API token scopes all
+// read, and "archived means hidden" should not depend on every one of them
+// remembering a filter. The callers that must still see everything -- usage
+// history, naming a share link's scope in settings -- ask ListAllProjects.
 //
 // The ordering lives in SQL rather than in Go so that every caller — REST,
 // WebSocket snapshot, tests — sees the same sequence. Two implementations of
@@ -73,54 +121,166 @@ func (d *DB) ListProjects(ctx context.Context) ([]Project, error) {
 	// Two orderings, one query, chosen by a flag rather than by whether the
 	// positions happen to be null — because the positions have to survive a
 	// spell of automatic ordering. See ProjectOrderIsManual.
-	rows, err := d.sql.QueryContext(ctx, `
-		SELECT id, name, path, sort_index, pinned, last_active_at, created_at
+	return d.queryProjects(ctx, `
+		SELECT `+projectColumns+`
 		FROM projects
+		WHERE archived_at IS NULL
 		ORDER BY pinned DESC,
 		         CASE WHEN ? AND sort_index IS NOT NULL THEN 0 ELSE 1 END,
 		         CASE WHEN ? THEN sort_index END ASC,
 		         last_active_at DESC,
 		         created_at DESC`, manual, manual)
-	if err != nil {
-		return nil, fmt.Errorf("store: list projects: %w", err)
-	}
-	defer rows.Close()
-
-	var out []Project
-	for rows.Next() {
-		var p Project
-		var sortIdx sql.NullInt64
-		if err := rows.Scan(&p.ID, &p.Name, &p.Path, &sortIdx, &p.Pinned, &p.LastActiveAt, &p.CreatedAt); err != nil {
-			return nil, fmt.Errorf("store: scan project: %w", err)
-		}
-		if sortIdx.Valid {
-			v := int(sortIdx.Int64)
-			p.SortIndex = &v
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
 }
 
-// GetProject returns one project.
+// ListArchivedProjects returns the archived projects, most recently archived
+// first: the one somebody is looking for is usually the one that just went.
+func (d *DB) ListArchivedProjects(ctx context.Context) ([]Project, error) {
+	return d.queryProjects(ctx, `
+		SELECT `+projectColumns+`
+		FROM projects
+		WHERE archived_at IS NOT NULL
+		ORDER BY archived_at DESC, created_at DESC`)
+}
+
+// ListAllProjects returns every project, archived or not, in no particular
+// order. For callers naming things that outlive the sidebar, such as usage
+// history.
+func (d *DB) ListAllProjects(ctx context.Context) ([]Project, error) {
+	return d.queryProjects(ctx, `SELECT `+projectColumns+` FROM projects ORDER BY created_at`)
+}
+
+// GetProject returns one project, archived or not.
 func (d *DB) GetProject(ctx context.Context, id string) (Project, error) {
-	var p Project
-	var sortIdx sql.NullInt64
-	err := d.sql.QueryRowContext(ctx, `
-		SELECT id, name, path, sort_index, pinned, last_active_at, created_at
-		FROM projects WHERE id = ?`, id).
-		Scan(&p.ID, &p.Name, &p.Path, &sortIdx, &p.Pinned, &p.LastActiveAt, &p.CreatedAt)
+	p, err := scanProject(d.sql.QueryRowContext(ctx,
+		`SELECT `+projectColumns+` FROM projects WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
 		return Project{}, ErrNotFound
 	}
 	if err != nil {
 		return Project{}, fmt.Errorf("store: get project: %w", err)
 	}
-	if sortIdx.Valid {
-		v := int(sortIdx.Int64)
-		p.SortIndex = &v
+	return p, nil
+}
+
+// ArchivedProjectAt returns the archived project whose directory is path, the
+// most recently archived if there are several.
+//
+// This is what makes choosing an archived project's directory in the "new
+// project" picker bring the old one back instead of adding a second row for
+// the same tree, with none of the notes and todos the first one had.
+func (d *DB) ArchivedProjectAt(ctx context.Context, path string) (Project, error) {
+	p, err := scanProject(d.sql.QueryRowContext(ctx, `
+		SELECT `+projectColumns+` FROM projects
+		WHERE path = ? AND archived_at IS NOT NULL
+		ORDER BY archived_at DESC LIMIT 1`, path))
+	if err == sql.ErrNoRows {
+		return Project{}, ErrNotFound
+	}
+	if err != nil {
+		return Project{}, fmt.Errorf("store: archived project at path: %w", err)
 	}
 	return p, nil
+}
+
+// ArchiveProject hides a project. auto records that the idle rule did it.
+//
+// Only a project in the sidebar can be archived: archiving an archived one
+// again would move its archived_at and turn a manual archive into an automatic
+// one, which is the one fact the archived list exists to keep straight.
+func (d *DB) ArchiveProject(ctx context.Context, id string, auto bool) error {
+	res, err := d.sql.ExecContext(ctx,
+		`UPDATE projects SET archived_at = ?, archived_auto = ? WHERE id = ? AND archived_at IS NULL`,
+		now(), auto, id)
+	if err != nil {
+		return fmt.Errorf("store: archive project: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		if _, err := d.GetProject(ctx, id); err != nil {
+			return err
+		}
+		return ErrAlreadyArchived
+	}
+	return nil
+}
+
+// ErrAlreadyArchived is ArchiveProject on a project that is already hidden.
+var ErrAlreadyArchived = errors.New("store: project is already archived")
+
+// RestoreProject puts an archived project back in the sidebar.
+//
+// It counts as activity, or the idle rule would archive it again within the
+// hour: nothing else has touched it for as long as it has been away. Its
+// manual position is dropped, because the positions went on being handed out
+// while it was gone and one it came back holding may now belong to another
+// project -- and two rows sharing a position trade places at random. It
+// returns among the automatically ordered ones, which in automatic order is
+// the top, since it has just been active.
+//
+// Restoring a project that is not archived is not an error: two tabs, or the
+// picker and the list, can ask at once, and both got what they asked for.
+func (d *DB) RestoreProject(ctx context.Context, id string) error {
+	res, err := d.sql.ExecContext(ctx, `
+		UPDATE projects SET archived_at = NULL, archived_auto = 0, sort_index = NULL,
+		                    last_active_at = ?
+		WHERE id = ? AND archived_at IS NOT NULL`, now(), id)
+	if err != nil {
+		return fmt.Errorf("store: restore project: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		_, err := d.GetProject(ctx, id)
+		return err
+	}
+	return nil
+}
+
+// idleSince is the idle rule's predicate over a row of projects aliased p,
+// with ?1 the cutoff. One definition, used both to find the idle projects and
+// again inside the UPDATE that archives one, so a project that came back to
+// life between the two is not archived on the strength of the first look.
+//
+// "Touched" is everything the panel can see happen to a project, because the
+// obvious column alone is wrong: last_active_at moves only when a session is
+// created, so a project with one agent that has been working for three weeks
+// would read as three weeks idle. A session printing anything, or changing
+// state, is activity; so is editing the note, and adding or ticking a todo. A
+// pinned project is never idle -- pinning it is somebody saying they want it
+// in front of them.
+const idleSince = `p.archived_at IS NULL
+		  AND p.pinned = 0
+		  AND p.last_active_at < ?1
+		  AND p.created_at < ?1
+		  AND NOT EXISTS (
+		      SELECT 1 FROM sessions s
+		      WHERE s.project_id = p.id
+		        AND (s.last_output_at >= ?1 OR s.state_changed_at >= ?1 OR s.created_at >= ?1))
+		  AND NOT EXISTS (
+		      SELECT 1 FROM notes n WHERE n.project_id = p.id AND n.updated_at >= ?1)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM todos t
+		      WHERE t.project_id = p.id AND (t.created_at >= ?1 OR t.done_at >= ?1))`
+
+// IdleProjects returns the projects in the sidebar that nothing has touched
+// since cutoff: the ones the idle rule archives. See idleSince.
+func (d *DB) IdleProjects(ctx context.Context, cutoff int64) ([]Project, error) {
+	return d.queryProjects(ctx, `
+		SELECT `+projectColumns+` FROM projects p
+		WHERE `+idleSince+`
+		ORDER BY p.created_at`, cutoff)
+}
+
+// ArchiveIfIdle archives a project for the idle rule, only if it is still
+// idle since cutoff at the moment of the write, and reports whether it did.
+// Between IdleProjects and here a session can start printing or somebody can
+// open the project; the list was a candidate list, not a verdict.
+func (d *DB) ArchiveIfIdle(ctx context.Context, id string, cutoff int64) (bool, error) {
+	res, err := d.sql.ExecContext(ctx, `
+		UPDATE projects AS p SET archived_at = ?2, archived_auto = 1
+		WHERE p.id = ?3 AND `+idleSince, cutoff, now(), id)
+	if err != nil {
+		return false, fmt.Errorf("store: archive idle project: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 // RenameProject changes a project's display name.

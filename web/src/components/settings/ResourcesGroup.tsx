@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, Pause, Play, ShieldAlert, ShieldCheck } from 'lucide-react'
+import {
+  Archive,
+  ChevronDown,
+  ChevronRight,
+  ChevronsDown,
+  ChevronsUp,
+  Pause,
+  Play,
+  ShieldAlert,
+  ShieldCheck,
+} from 'lucide-react'
 
 import { api } from '../../protocol/api'
 import type {
@@ -453,7 +463,11 @@ function UsageSection({
   // The scale every row is drawn against: the pool when there is one, so the
   // bars add up to the pool's bar above them; the machine otherwise.
   const scale = view.pool.max > 0 ? view.pool.max : view.total
-  const rows = view.sessions.filter((r) => byId.has(r.id))
+  // Every session the server measured, including those of archived projects:
+  // hiding a project frees nothing, and a page about memory that stopped
+  // listing a session the moment its project was archived would be showing a
+  // machine with less in use than it has.
+  const rows = view.sessions
   return (
     <Section id="usage" title={t('res.sessions')}>
       {rows.length === 0 && <p className="text-vp-base text-ink-2">{t('res.none')}</p>}
@@ -462,7 +476,7 @@ function UsageSection({
           <UsageRow
             key={r.id}
             row={r}
-            session={byId.get(r.id)!}
+            session={byId.get(r.id)}
             scale={scale}
             isolated={view.isolation.state === 'isolated'}
             open={open === r.id}
@@ -485,7 +499,8 @@ function UsageRow({
   onChanged,
 }: {
   row: ResourceSession
-  session: Session
+  /** Absent for a session the snapshot does not carry: an archived project's. */
+  session: Session | undefined
   scale: number
   isolated: boolean
   open: boolean
@@ -494,7 +509,7 @@ function UsageRow({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const name = sessionLabel(session)
+  const name = session ? sessionLabel(session) : safeText(row.title)
 
   const act = async (run: () => Promise<unknown>) => {
     setBusy(true)
@@ -546,7 +561,14 @@ function UsageRow({
         className="vp-press flex w-full min-w-0 items-center gap-1.5 text-left"
       >
         <Chevron size={13} className="shrink-0 text-ink-3" aria-hidden="true" />
-        <StateDot state={session.state} size={9} exited={session.exited} exitStatus={session.exitStatus} />
+        {session ? (
+          <StateDot state={session.state} size={9} exited={session.exited} exitStatus={session.exitStatus} />
+        ) : (
+          <span title={t('res.inArchived')} className="inline-flex shrink-0 text-ink-3" data-testid="resources-session-archived">
+            <Archive size={10} aria-hidden="true" />
+            <span className="sr-only">{t('res.inArchived')}</span>
+          </span>
+        )}
         <span className="min-w-0 flex-1 truncate text-vp-base text-ink" title={name}>
           {name}
         </span>

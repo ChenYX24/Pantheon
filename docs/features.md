@@ -18,6 +18,14 @@ one can carry scratch terminals, the strip along the bottom of the screenshot;
 they open in the same directory, for a `git status` that does not interrupt the
 agent above.
 
+A project you are not using can be archived from its row. It leaves the
+sidebar, and nothing else happens to it: its sessions keep running and its
+notes stay. **Archived · N** under the last project lists them, with a triangle
+when a session in one is waiting for you, and the "new project" picker offers
+them too — picking an archived project's directory brings it back rather than
+adding it twice. Settings → Sessions can archive projects idle for 14 to 90
+days; it is off until you turn it on.
+
 <div align="center">
 <img src="docs/images/panel-light.png" width="49%" alt="Light theme">
 <img src="docs/images/phone.png" width="20%" alt="The phone layout">
