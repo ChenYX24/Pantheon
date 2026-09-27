@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, SlidersHorizontal } from 'lucide-react'
+import { ChevronDown, ChevronRight, SlidersHorizontal, Unlink } from 'lucide-react'
 
 import { api } from '../../protocol/api'
 import type { ProcUsage, Session, SessionUsage, SystemSample, UsageSample } from '../../protocol/wire'
@@ -87,10 +87,23 @@ function Meter({
 
 /** One process inside a session's tree, shown when its row is opened out. */
 function ProcRow({ proc }: { proc: ProcUsage }) {
+  // The command line when there is one: every command an agent runs is
+  // called "bash" by the kernel, and a list of five bashes names nothing.
+  const what = proc.cmd ? proc.cmd : proc.name
   return (
     <div className="flex min-w-0 items-center gap-2 text-vp-xs" data-testid="session-top-proc">
-      <span className="min-w-0 flex-1 truncate text-ink-2" title={safeText(proc.name)}>
-        {safeText(proc.name)} <span className="text-ink-3">pid {proc.pid}</span>
+      <span className="min-w-0 flex-1 truncate text-ink-2" title={`${safeText(what)} (pid ${proc.pid})`}>
+        {proc.detached && (
+          <span
+            className="mr-1 inline-flex items-center gap-0.5 text-ink-3"
+            title={t('monitor.detachedWhy')}
+            data-testid="session-top-proc-detached"
+          >
+            <Unlink size={10} aria-hidden="true" />
+            {t('monitor.detached')}
+          </span>
+        )}
+        <span className="font-mono">{safeText(what)}</span> <span className="text-ink-3">pid {proc.pid}</span>
       </span>
       <span className="tabular w-10 shrink-0 text-right text-ink">
         {proc.cpuPercent.toFixed(proc.cpuPercent < 10 ? 1 : 0)}%

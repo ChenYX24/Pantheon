@@ -378,6 +378,17 @@ export interface ProcUsage {
   rss: number
   /** Share of the whole machine, cpuPercent's own convention, not top's. */
   cpuPercent: number
+  /**
+   * The command line, one line and shortened; for an agent's shell, the
+   * command it ran rather than the wrapper. `name` is the kernel's fifteen
+   * characters, and every one of those is "bash".
+   */
+  cmd?: string
+  /**
+   * It left the pane's tree -- its parent exited -- and was found by the
+   * session id in its environment. What a forgotten background job looks like.
+   */
+  detached?: boolean
 }
 
 export interface UsageSample {
@@ -582,6 +593,8 @@ export interface ResourceProc {
   pid: number
   start: number
   name: string
+  /** Its command line, shortened; an agent's shell shows what it ran. */
+  cmd?: string
   rss: number
   /** The pane's own process: ending it ends the session. */
   root?: boolean

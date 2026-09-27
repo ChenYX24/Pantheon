@@ -24208,3 +24208,61 @@ the moment it looks, which is why it passed on both branches before they were
 merged. The overlay is a column now with the label in it. Two scale-check runs
 after were clean; neither is proof the timing was hit, and the fix is argued
 from the layout rather than from a reproduction.
+
+## 2026-09-27 — The monitor did not see what had left the pane
+
+Reported as "the monitor can't identify the CPU or the details of Claude
+Code's subshells". Asked of the running machine rather than of the code:
+this session's own cgroup held, beside `claude` and its current `bash -c`,
+three `sh -c sleep 30 & (while :; do :; done) & wait` at a core each -- one of
+them for 1 day 21 hours -- plus a `vite` and an `http.server`, all with ppid 1.
+The monitor showed none of it. It measured a session as the tree under its
+pane pid, and a process whose parent exits is handed to init (or to the
+nearest subreaper) and leaves that tree for good. `cmd &` from a shell that
+returns, `nohup`, a dev server an agent started and moved on from: exactly
+the processes somebody forgets.
+
+**Where the three spinners came from.** `internal/sysmon/proc_test.go`, the
+test for Top: it killed the `sh` it started, and the `( ... )` subshell is a
+process of its own, so every run of the package left one spinning for as long
+as the machine stayed up. Two of the three had working directories under
+deleted `/tmp/tmp.*` trees -- head-check's clean worktrees. The tests now start
+their shells in a process group of their own and kill the group. Checked by
+count: with the old cleanup put back one run leaves one more spinner, with the
+new none. The resources tests' pane helper had the same shape with a `sleep
+300`, and got the same fix.
+
+**Attribution.** After the panes' trees are walked, the processes nothing
+reached are asked for `VIBEPANEL_SESSION_ID` in their environment, which
+every pane is started with (`hooks.SessionEnv`) and which survives `&`, nohup
+and setsid. The root of each such subtree that names a running session is
+claimed for it, and marked detached. Each process's environment is read once
+in its life, keyed by pid and start time; on a steady machine that is the
+same few hundred daemons, cached as nobody's. An id that is not a running
+session claims nothing, which keeps a test harness's own panel out. The
+environment rather than the session's cgroup leaf, because the leaf exists
+only with isolation on, and this has to work without it; with isolation, the
+two agree.
+
+The session's CPU changed with it. It was the difference between two totals
+of the tree's ticks, which breaks as soon as membership moves: a detached
+process found for the first time brought its whole lifetime into one window,
+and any process exiting took its ticks out and read as the whole session
+doing nothing. It is now the sum of the processes' own shares, with a pid the
+previous sample never saw counted for all its ticks -- it was born in the
+window, and a build is mostly compilers that live for a second.
+
+**Naming.** A process was its comm, and every command an agent runs is called
+`bash` there. `top` now carries the command line, one line of at most 200
+characters, and Claude Code's wrapper (`bash -c "source <snapshot> ... && eval
+'<command>' && pwd -P >| <file>"`) is read back to the command inside the eval.
+The resources page's process list, where somebody decides which process to
+end, gets the same. The share surface restates its fields and carries none of
+this (red line 8).
+
+Verified end to end with a throwaway panel: a session that backgrounds a
+spinner and exits its launcher reads the spinner as `detached`, at 5.5% on
+this 18-core machine -- one core -- with `cmd` `sh -c (while :; do :; done) &`,
+and a Claude-Code-shaped wrapper reads as `sleep 120`. Mutations: no claiming,
+a newborn counted as zero, the command line replaced by the name (in sysmon
+and in resources) and the eval unwrap disabled each turn a test red.

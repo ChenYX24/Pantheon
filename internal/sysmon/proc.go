@@ -51,6 +51,16 @@ type ProcUsage struct {
 	// not top's. Zero on the first sample rather than absent, because a list
 	// exists to be sorted and a nil percentage sorts nowhere in particular.
 	CPUPercent float64 `json:"cpuPercent"`
+	// Cmd is the command line, shortened; see displayCommand. Name alone is
+	// the kernel's fifteen-character comm, and every command an agent runs
+	// is called "bash" there.
+	Cmd string `json:"cmd,omitempty"`
+	// Detached means the process has left the pane's tree -- its parent
+	// exited and it was reparented, as `cmd &`, nohup and a dev server all
+	// are -- and was found by the session id in its environment instead.
+	// Worth saying, because it is also what a forgotten background job
+	// looks like.
+	Detached bool `json:"detached,omitempty"`
 }
 
 // topProcs is how many of a tree's processes are worth naming. A pane with a
@@ -63,7 +73,6 @@ const topProcs = 5
 // counters so a percentage can be expressed over the interval.
 type TreeSampler struct {
 	mu     sync.Mutex
-	prev   map[int]uint64 // pane pid -> cumulative ticks over its tree
 	prevAt time.Time
 	last   map[int]Usage
 
@@ -72,6 +81,17 @@ type TreeSampler struct {
 	// exactly one tree in a given sample, so there is no ambiguity, and one
 	// map read at the top of the table is cheaper than one per pane.
 	prevProc map[int]uint64
+
+	// owner is which session a process outside every pane's tree belongs
+	// to, by its environment, and "" for one that belongs to none. Cached
+	// by pid and start time, so each process's environment is read once in
+	// its life rather than on every sample; see claimDetached.
+	owner map[procKey]string
+}
+
+type procKey struct {
+	pid   int
+	start uint64
 }
 
 // clockTicks is USER_HZ, which is 100 on every Linux this will run on.
@@ -122,7 +142,31 @@ func (t *TreeSampler) Sample(paneOf map[string]int) map[string]Usage {
 	elapsed := now.Sub(t.prevAt).Seconds()
 	haveprev := !t.prevAt.IsZero()
 
-	ticks := make(map[int]uint64, len(paneOf))
+	// Who owns what. The panes' trees first; then the processes that left
+	// them, which a walk from the pane can never reach again once their
+	// parent has exited and they have been handed to init. That is not a
+	// corner: `cmd &` from a shell that then returns, nohup, a dev server an
+	// agent started and moved on from -- the monitor showed none of it, and
+	// three busy loops leaked by a test ran at a core each for two days in a
+	// session that read idle.
+	taken := make(map[int]bool, len(stats))
+	members := make(map[string][]member, len(paneOf))
+	for id, pid := range paneOf {
+		if _, alive := stats[pid]; !alive {
+			continue
+		}
+		walkInto(pid, stats, children, taken, func(cpid int) {
+			members[id] = append(members[id], member{pid: cpid})
+		})
+	}
+	for id, roots := range t.claimDetached(stats, taken, paneOf) {
+		for _, root := range roots {
+			walkInto(root, stats, children, taken, func(cpid int) {
+				members[id] = append(members[id], member{pid: cpid, detached: true})
+			})
+		}
+	}
+
 	fresh := make(map[int]Usage, len(paneOf))
 	out := make(map[string]Usage, len(paneOf))
 
@@ -130,35 +174,42 @@ func (t *TreeSampler) Sample(paneOf map[string]int) map[string]Usage {
 		if _, alive := stats[pid]; !alive {
 			continue
 		}
-		var total uint64
 		u := Usage{}
 		var procs []ProcUsage
-		walk(pid, stats, children, func(cpid int, st procStat) {
-			total += st.ticks
+		for _, m := range members[id] {
+			cpid, st := m.pid, stats[m.pid]
 			u.RSS += st.rss
 			u.Procs++
 
-			proc := ProcUsage{PID: cpid, Start: st.start, Name: st.comm, RSS: st.rss}
+			proc := ProcUsage{PID: cpid, Start: st.start, Name: st.comm, RSS: st.rss, Detached: m.detached}
 			if haveprev && elapsed > 0 {
-				if before, ok := t.prevProc[cpid]; ok && st.ticks >= before {
-					used := float64(st.ticks-before) / clockTicks
-					proc.CPUPercent = used / elapsed / float64(runtime.NumCPU()) * 100
-					if proc.CPUPercent > 100 {
-						proc.CPUPercent = 100
-					}
+				// A pid the previous sample did not see at all was born inside
+				// this window, so every tick it has was spent in it -- a
+				// compiler that lived for one second is most of a build.
+				var used uint64
+				if before, seen := t.prevProc[cpid]; !seen {
+					used = st.ticks
+				} else if st.ticks >= before {
+					used = st.ticks - before
+				}
+				proc.CPUPercent = float64(used) / clockTicks / elapsed / float64(runtime.NumCPU()) * 100
+				if proc.CPUPercent > 100 {
+					proc.CPUPercent = 100
 				}
 			}
 			procs = append(procs, proc)
-		})
-		ticks[pid] = total
-		if haveprev && elapsed > 0 {
-			if before, ok := t.prev[pid]; ok && total >= before {
-				used := float64(total-before) / clockTicks
-				u.CPUPercent = used / elapsed / float64(runtime.NumCPU()) * 100
-				if u.CPUPercent > 100 {
-					u.CPUPercent = 100
-				}
-			}
+		}
+		// The session's share is the sum of its processes' shares over the
+		// window, not the difference between two tree totals. The totals
+		// were how this was done, and they are wrong both ways once
+		// membership moves: a detached process first found brings its whole
+		// lifetime's ticks into the difference, and one exiting takes its
+		// ticks out, which read as a tree that did nothing at all.
+		for _, p := range procs {
+			u.CPUPercent += p.CPUPercent
+		}
+		if u.CPUPercent > 100 {
+			u.CPUPercent = 100
 		}
 		// CPU first, RSS to break a tie -- a quiet tree still names something
 		// rather than an arbitrary /proc directory order, and a busy one names
@@ -172,6 +223,11 @@ func (t *TreeSampler) Sample(paneOf map[string]int) map[string]Usage {
 		if len(procs) > topProcs {
 			procs = procs[:topProcs]
 		}
+		// Only for the few that are shown: one more read each, and not one
+		// for every process in every tree on every sample.
+		for i := range procs {
+			procs[i].Cmd = displayCommand(readCmdline(procs[i].PID))
+		}
 		u.Top = procs
 		fresh[pid] = u
 		out[id] = u
@@ -182,36 +238,124 @@ func (t *TreeSampler) Sample(paneOf map[string]int) map[string]Usage {
 		nextProc[pid] = st.ticks
 	}
 
-	t.prev = ticks
 	t.prevAt = now
 	t.last = fresh
 	t.prevProc = nextProc
 	return out
 }
 
-// walk visits a pid and everything under it.
+// member is one process in a session's reading.
+type member struct {
+	pid      int
+	detached bool
+}
+
+// walkInto visits a pid and everything under it that no earlier walk has
+// taken, and takes them.
 //
-// The visited set is not defensive tidiness. /proc is read without a lock, so
-// a process can be reparented between reading its stat and reading its
-// children's, and a cycle in the ppid graph is then representable even though
-// the kernel's real tree has none. Without this the walk does not terminate.
-func walk(root int, stats map[int]procStat, children map[int][]int, visit func(pid int, st procStat)) {
-	seen := make(map[int]bool)
+// The shared set does two jobs. /proc is read without a lock, so a process can
+// be reparented between reading its stat and reading its children's, and a
+// cycle in the ppid graph is then representable even though the kernel's real
+// tree has none; without a visited set the walk does not terminate. And it is
+// what keeps a process counted once: a detached subtree claimed by its
+// environment must not also be counted by a pane that happens to reach it.
+func walkInto(root int, stats map[int]procStat, children map[int][]int, taken map[int]bool, visit func(pid int)) {
 	stack := []int{root}
 	for len(stack) > 0 {
 		pid := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		if seen[pid] {
+		if taken[pid] {
 			continue
 		}
-		seen[pid] = true
-		st, ok := stats[pid]
-		if !ok {
+		if _, ok := stats[pid]; !ok {
 			continue
 		}
-		visit(pid, st)
+		taken[pid] = true
+		visit(pid)
 		stack = append(stack, children[pid]...)
 	}
+}
+
+// sessionEnv is the variable every session's pane is started with; see
+// hooks.SessionEnv. A process keeps it through `&`, nohup and setsid, which
+// is why it can say where a process came from after its parent is gone.
+const sessionEnv = "VIBEPANEL_SESSION_ID="
+
+// claimDetached finds, for each session, the processes outside every pane's
+// tree that were started from it: the roots of the subtrees whose environment
+// names the session. Only sessions in paneOf count, so a session id left in
+// the environment of a process from a test harness's own panel, or from a
+// session since deleted, claims nothing.
+//
+// Each process's environment is read once in its life (by pid and start
+// time), and only for processes the pane walks did not reach -- which on a
+// steady machine is the same few hundred daemons every time, all already
+// cached. Another user's is unreadable and caches as nobody's.
+func (t *TreeSampler) claimDetached(stats map[int]procStat, taken map[int]bool, paneOf map[string]int) map[string][]int {
+	live := make(map[string]bool, len(paneOf))
+	for id := range paneOf {
+		live[id] = true
+	}
+	next := make(map[procKey]string, len(t.owner))
+	ownerOf := func(pid int) string {
+		st, ok := stats[pid]
+		if !ok {
+			return ""
+		}
+		k := procKey{pid, st.start}
+		if id, cached := next[k]; cached {
+			return id
+		}
+		id, cached := t.owner[k]
+		if !cached {
+			id = readSessionEnv(pid)
+		}
+		next[k] = id
+		return id
+	}
+	out := map[string][]int{}
+	for pid, st := range stats {
+		// Kernel threads have no environment and are all under kthreadd.
+		if taken[pid] || pid == 2 || st.ppid == 2 {
+			continue
+		}
+		id := ownerOf(pid)
+		if id == "" || !live[id] {
+			continue
+		}
+		// A root: its parent is not from the same session. Anything under it
+		// comes with it in the walk, environment or not.
+		if !taken[st.ppid] && ownerOf(st.ppid) == id {
+			continue
+		}
+		out[id] = append(out[id], pid)
+	}
+	t.owner = next
+	return out
+}
+
+// readSessionEnv is the session id in a process's environment, or "".
+func readSessionEnv(pid int) string {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/environ")
+	if err != nil {
+		return ""
+	}
+	for _, kv := range strings.Split(string(b), "\x00") {
+		if strings.HasPrefix(kv, sessionEnv) {
+			return kv[len(sessionEnv):]
+		}
+	}
+	return ""
+}
+
+// readCmdline is a process's argv, or nil for a kernel thread or one that
+// has gone.
+func readCmdline(pid int) []string {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	if err != nil || len(b) == 0 {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
 }
 
 type procStat struct {

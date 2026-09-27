@@ -117,6 +117,18 @@ with forked children; it is an over-estimate, like every tree total. `procs` is
 how many processes were found, which is what says whether the reading means
 anything: 1 is a bare shell.
 
+A session's processes are its pane's tree **and** anything that has left it:
+a process whose parent exited -- `cmd &` from a shell that returned, `nohup`, a
+dev server -- is reparented away from the pane, and is found instead by the
+`VIBEPANEL_SESSION_ID` its environment inherited. `cpuPercent` is the sum of
+its processes' shares over the window, a process born inside the window
+counting everything it did.
+
+`top` is the five busiest, each with `pid`, `start`, `name` (the kernel's
+fifteen-character comm), `cmd` (the command line, shortened to one line of 200
+characters; for Claude Code's shell wrapper, the command it `eval`s), `rss`,
+`cpuPercent`, and `detached: true` for one found by its environment.
+
 A session whose pane has gone is **absent** rather than zero, because zero is a
 real reading. `readable` is `false` where there is no `/proc` to walk.
 
