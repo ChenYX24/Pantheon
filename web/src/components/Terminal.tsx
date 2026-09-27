@@ -752,7 +752,11 @@ export function TerminalView({
         const label = t(loadCopyKey[loadPhase])
         return (
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 z-20"
+            // A column, so the label is inside this box rather than hanging
+            // below a one-pixel one: scale-check measures that nothing is
+            // painted outside its container, and an absolutely placed label
+            // under an h-1 bar was 19px of exactly that.
+            className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col items-end"
             data-testid="terminal-load-progress"
             role="progressbar"
             aria-valuemin={0}
@@ -780,7 +784,7 @@ export function TerminalView({
                 style={{ width: `${shown}%`, background: 'var(--vp-accent)' }}
               />
             </div>
-            <span className="absolute top-1 right-2 rounded-vp bg-elevated/90 px-1.5 py-0.5 text-vp-xs text-ink-2 shadow-sm tabular-nums">
+            <span className="mt-1 mr-2 rounded-vp bg-elevated/90 px-1.5 py-0.5 text-vp-xs text-ink-2 shadow-sm tabular-nums">
               {label} {shown}%
               {loadPhase === 'replay' && loadCounts.total > 0 && (
                 <> · {formatLoadBytes(loadCounts.received, loadCounts.total)}</>
