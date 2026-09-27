@@ -860,11 +860,27 @@ func (s *Server) buildShareReading(ctx context.Context, link store.ShareLink,
 	secret []byte, needs pages.Needs) (shareReading, error) {
 	sc := shareContext{link: link, secret: secret}
 
+	// Archived projects are hidden from walls as they are from the sidebar:
+	// their sessions are not counted and their names are not listed. A link
+	// scoped to one still resolves -- to its name and nothing running -- so a
+	// wall showing "no longer exists" is kept for a project that does not.
+	// The same for a link scoped to one session; see allSessions below.
 	projects, err := s.DB.ListProjects(ctx)
 	if err != nil {
 		return shareReading{}, err
 	}
-	sessions, err := s.DB.ListSessions(ctx)
+	sessions, err := s.DB.ListVisibleSessions(ctx)
+	if err != nil {
+		return shareReading{}, err
+	}
+	allProjects, err := s.DB.ListAllProjects(ctx)
+	if err != nil {
+		return shareReading{}, err
+	}
+	// Every session, for resolving the link's own scope only. A link scoped to
+	// one session in an archived project is about a session that is still
+	// running; resolved against the visible ones it read as deleted.
+	allSessions, err := s.DB.ListSessions(ctx)
 	if err != nil {
 		return shareReading{}, err
 	}
@@ -874,7 +890,7 @@ func (s *Server) buildShareReading(ctx context.Context, link store.ShareLink,
 
 	// What this link is about, resolved from its own row. Never from the
 	// request: a scope a caller could name is a scope a caller could change.
-	scope := resolveScope(sc.link, projects, sessions)
+	scope := resolveScope(sc.link, allProjects, allSessions)
 
 	out := shareReading{
 		At: time.Now().Unix(), Name: sc.link.Name, Detail: sc.link.Detail,
@@ -1713,7 +1729,9 @@ func (s *Server) handleListShares(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
-	projects, perr := s.DB.ListProjects(ctx)
+	// Every project, archived or not: this names what each link is about for
+	// its owner, and a link to an archived project is still about it.
+	projects, perr := s.DB.ListAllProjects(ctx)
 	if perr != nil {
 		s.writeStoreErr(w, perr)
 		return

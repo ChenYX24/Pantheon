@@ -1108,6 +1108,29 @@ const DICT = {
   'paste.thenBuffer': { zh: '放进 tmux 粘贴缓冲区', en: 'Put the path in the tmux paste buffer' },
   'paste.thenBoth': { zh: '两个都做', en: 'Both' },
   'paste.saved': { zh: '已保存。', en: 'Saved.' },
+  'project.archive': { zh: '归档（会话继续运行）', en: 'Archive (sessions keep running)' },
+  'archive.entry': { zh: '已归档 · {n}', en: 'Archived · {n}' },
+  'archive.title': { zh: '已归档的项目', en: 'Archived projects' },
+  'archive.allArchived': { zh: '项目都已归档，在下面找回。', en: 'Every project is archived; they are below.' },
+  'archive.empty': { zh: '没有已归档的项目。', en: 'No archived projects.' },
+  'archive.when': { zh: '{ago}归档', en: 'archived {ago}' },
+  'archive.whenAuto': { zh: '{ago}因闲置自动归档', en: 'archived {ago} for being idle' },
+  'archive.runningOne': { zh: '1 个会话在运行', en: '1 session running' },
+  'archive.runningMany': { zh: '{n} 个会话在运行', en: '{n} sessions running' },
+  'archive.waiting': { zh: '{n} 个在等你', en: '{n} waiting for you' },
+  'archive.restore': { zh: '恢复', en: 'Restore' },
+  'archive.done': { zh: '已归档 {name}，会话仍在运行。', en: 'Archived {name}; its sessions are still running.' },
+  'archive.restored': { zh: '已恢复 {name}。', en: 'Restored {name}.' },
+  'archive.pickerHeading': { zh: '已归档', en: 'Archived' },
+  'archive.pickerRestore': { zh: '恢复 {name}', en: 'Restore {name}' },
+  'archive.idleTitle': { zh: '闲置项目自动归档', en: 'Archive idle projects' },
+  'archive.idleHint': {
+    zh: '这么多天没有会话动静、没改过笔记的项目自动归档。置顶的除外，会话照常运行。',
+    en: 'Idle this long (no session activity, no note edits): archived. Pinned ones stay; sessions keep running.',
+  },
+  'archive.idleOff': { zh: '关闭', en: 'Off' },
+  'archive.idleDays': { zh: '{n} 天', en: '{n} days' },
+  'res.inArchived': { zh: '所在项目已归档', en: 'In an archived project' },
 
   // Restarting the panel itself.
   'rst.title': { zh: '重启面板', en: 'Restart the panel' },
@@ -1166,6 +1189,10 @@ const DICT = {
 
   'notify.waitingTitle': { zh: '有 agent 在等你', en: 'An agent is waiting' },
   'notify.waitingBody': { zh: '{name} 停下来等你处理了', en: '{name} has stopped and needs you' },
+  'notify.archivedWaitingBody': {
+    zh: '已归档的项目 {name} 里有会话在等你',
+    en: 'A session in archived project {name} needs you',
+  },
   'notify.browser': { zh: '这个浏览器', en: 'This browser' },
   'notify.explain': {
     zh: '会话变成“等你处理”时推一条。后台标签页或装成 App 都算开着。',

@@ -2,7 +2,10 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import {
+  ARCHIVED_SHOWN,
   absOf,
+  archivedFor,
+  archivedMatches,
   classifyInput,
   crumbs,
   filterEntries,
@@ -345,5 +348,56 @@ describe('resolveKey', () => {
     it('gets out of path mode without closing the dialog', () => {
       expect(at({ ...path, key: 'Escape' })).toEqual({ do: 'clear' })
     })
+  })
+})
+
+describe('archived projects in the picker', () => {
+  const a = (name: string, path: string) => ({ name, path })
+  const list = [
+    a('vibepanel', '/home/u/projects/vibepanel'),
+    a('notes', '/srv/notes'),
+    a('Old Site', '/home/u/www-old'),
+    a('five', '/tmp/5'),
+    a('six', '/tmp/6'),
+  ]
+
+  it('recognises an archived project by its directory, with or without a trailing slash', () => {
+    expect(archivedFor(list, '/srv/notes')?.name).toBe('notes')
+    expect(archivedFor(list, '/srv/notes/')?.name).toBe('notes')
+    // A prefix is another directory. Restoring `notes` for `/srv/note` would
+    // bring back a project somebody did not pick.
+    expect(archivedFor(list, '/srv/note')).toBeNull()
+    expect(archivedFor(list, '/srv/notes/sub')).toBeNull()
+    expect(archivedFor(list, '')).toBeNull()
+  })
+
+  it('shows the most recent few before anything is typed', () => {
+    expect(archivedMatches(list, '')).toHaveLength(ARCHIVED_SHOWN)
+    expect(archivedMatches(list, '')[0].name).toBe('vibepanel')
+  })
+
+  it('finds a project by its name or by its directory, and every match once typed', () => {
+    expect(archivedMatches(list, 'site').map((p) => p.name)).toEqual(['Old Site'])
+    expect(archivedMatches(list, 'www').map((p) => p.name)).toEqual(['Old Site'])
+    // Not by a parent directory: every project under ~/projects matching
+    // "projects" is the list failing to narrow.
+    expect(archivedMatches(list, 'projects')).toEqual([])
+    expect(archivedMatches(list, 'i').length).toBeGreaterThan(ARCHIVED_SHOWN - 1)
+  })
+})
+
+describe('Enter with an archived project on the shelf', () => {
+  const base: KeyState = {
+    key: 'Enter', kind: 'filter', navigable: false, hasText: true,
+    count: 0, active: -1, hasParent: true,
+  }
+  it('restores the one archived project the text matched when no directory did', () => {
+    expect(resolveKey({ ...base, restorable: true })).toEqual({ do: 'restore' })
+  })
+  it('still offers a folder when nothing archived matched either', () => {
+    expect(resolveKey({ ...base, restorable: false })).toEqual({ do: 'createNamed' })
+  })
+  it('opens a matching directory before anything else', () => {
+    expect(resolveKey({ ...base, count: 2, active: 0, restorable: true })).toEqual({ do: 'open' })
   })
 })

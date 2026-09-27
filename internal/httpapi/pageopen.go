@@ -107,6 +107,18 @@ func (s *Server) handleOpenPage(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	// Opening a page to work on it is using its project, so an archived one
+	// comes back rather than a second project being made beside it.
+	if out.ProjectID == "" {
+		if old, aerr := s.DB.ArchivedProjectAt(ctx, filepath.Clean(page.SourceDir)); aerr == nil {
+			if rerr := s.DB.RestoreProject(ctx, old.ID); rerr != nil {
+				s.writeStoreErr(w, rerr)
+				return
+			}
+			out.ProjectID = old.ID
+			s.notifyState()
+		}
+	}
 	if out.ProjectID == "" {
 		p, perr := s.DB.CreateProject(ctx, id.New(), pageProjectName(page), page.SourceDir)
 		if perr != nil {

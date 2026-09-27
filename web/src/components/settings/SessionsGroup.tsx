@@ -16,6 +16,7 @@ import { ClaudeAccounts } from '../ClaudeAccounts'
 import { Row, Section } from './parts'
 import { TuneClaude } from './TuneClaude'
 import { PasteSettings } from './PasteSettings'
+import { ArchiveSettings } from './ArchiveSettings'
 
 /**
  * What a session is started with, and how the panel learns what it is doing.
@@ -36,6 +37,7 @@ export function SessionsGroup() {
       <HooksSection />
       <TuneClaude />
       <PasteSettings />
+      <ArchiveSettings />
     </>
   )
 }

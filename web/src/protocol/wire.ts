@@ -110,6 +110,28 @@ export interface Project {
   pinned: boolean
   lastActiveAt: number
   createdAt: number
+  /** Always null in PanelState.projects: archived ones are in `archived`. */
+  archivedAt: number | null
+  archivedAuto: boolean
+}
+
+/**
+ * A project that is not in the sidebar. Hidden only: its sessions are still
+ * running, and are left out of PanelState.sessions rather than sent and
+ * filtered, so no view has to remember to filter them.
+ */
+export interface ArchivedProject {
+  id: string
+  name: string
+  path: string
+  archivedAt: number
+  /** Archived by the idle rule rather than by a person. */
+  archivedAuto: boolean
+  lastActiveAt: number
+  /** Its sessions still running. */
+  sessions: number
+  /** Of those, how many are waiting for a person. */
+  waiting: number
 }
 
 /**
@@ -228,6 +250,8 @@ export interface PanelState {
   projects: Project[]
   sessions: Session[]
   live: string[]
+  /** Projects not in the sidebar, most recently archived first. */
+  archived: ArchivedProject[]
   /**
    * Sessions with a full-screen program drawing in them.
    *
@@ -525,6 +549,8 @@ export interface ResourceProc {
 
 export interface ResourceSession {
   id: string
+  /** Its name, for a session the snapshot does not carry (an archived project's). */
+  title: string
   memory: number
   /** What only leaves when a process does; the rest is cache. */
   held: number
@@ -541,6 +567,8 @@ export interface ResourceAlert {
   reason: 'pool' | 'machine' | 'stall'
   /** Absent when no session holds enough to be the cause. */
   sessionId?: string
+  /** Its name, for a session the snapshot does not carry (an archived project's). */
+  sessionTitle?: string
   proc?: ResourceProc
   poolCurrent: number
   poolMax: number
@@ -755,6 +783,8 @@ export interface SettingsInfo {
   pasteDir: string
   /** What happens to its path: "type" | "buffer" | "both". */
   pasteThen: string
+  /** Days untouched before a project is archived; 0 is off. */
+  archiveIdleDays: number
   /** What the panel calls a day. Empty means the machine's own zone. */
   timezone?: string
   timezoneOffset?: number

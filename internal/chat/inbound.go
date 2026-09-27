@@ -537,7 +537,7 @@ func quoteShows(quoted, request string) bool {
 }
 
 func (b *Bridge) candidates(ctx context.Context) ([]Candidate, error) {
-	rows, err := b.d.DB.ListSessions(ctx)
+	rows, err := b.d.DB.ListVisibleSessions(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1626,7 +1626,7 @@ func (b *Bridge) ask(key, describe string, run func(ctx context.Context) said, l
 // list renders every session for a phone. A waiting session shows what it is
 // asking, and that counts as the person having seen it.
 func (b *Bridge) list(ctx context.Context, lang string, waitingOnly bool, viewer ...store.ChatPeer) said {
-	rows, err := b.d.DB.ListSessions(ctx)
+	rows, err := b.d.DB.ListVisibleSessions(ctx)
 	if err != nil {
 		return said{}
 	}

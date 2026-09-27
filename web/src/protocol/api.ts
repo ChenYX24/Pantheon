@@ -350,6 +350,13 @@ export const api = {
       body: JSON.stringify({ dir, then }),
     }),
 
+  /** Days untouched before a project is archived: 0, 14, 30, 60 or 90. */
+  saveArchiveIdle: (days: number) =>
+    request<{ days: number }>('/api/settings/archive', {
+      method: 'PUT',
+      body: JSON.stringify({ days }),
+    }),
+
   tourDone: () => request<{ ok: boolean }>('/api/settings/tour', { method: 'POST' }),
   /** Puts it back, for the button in the settings page. */
   tourAgain: () =>
@@ -742,6 +749,13 @@ export const api = {
     request<Project>(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   deleteProject: (id: string) => request<void>(`/api/projects/${id}`, { method: 'DELETE' }),
+
+  /** Hides a project. Its sessions keep running. */
+  archiveProject: (id: string) =>
+    request<Project>(`/api/projects/${id}/archive`, { method: 'POST' }),
+
+  restoreProject: (id: string) =>
+    request<Project>(`/api/projects/${id}/restore`, { method: 'POST' }),
 
   /** Writes an explicit project order, top first. */
   reorderLaunchProfiles: (ids: string[]) =>

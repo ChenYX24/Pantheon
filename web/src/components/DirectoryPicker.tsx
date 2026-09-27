@@ -1,12 +1,14 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import { ChevronRight, Folder, FolderPlus, Pencil } from 'lucide-react'
+import { ArchiveRestore, ChevronRight, Folder, FolderPlus, Pencil } from 'lucide-react'
 
 import { api } from '../protocol/api'
-import type { DirListing, FileEntry } from '../protocol/wire'
+import type { ArchivedProject, DirListing, FileEntry } from '../protocol/wire'
 import { safeText } from './text'
 import { t, useLang } from '../i18n'
 import {
   absOf,
+  archivedFor,
+  archivedMatches,
   classifyInput,
   crumbs,
   filterEntries,
@@ -65,6 +67,8 @@ import {
 export function DirectoryPicker({
   onPick,
   onClose,
+  archived = [],
+  onRestore,
 }: {
   /**
    * Take this directory. Rejecting keeps the picker open with the reason in it.
@@ -77,6 +81,14 @@ export function DirectoryPicker({
    */
   onPick: (absolutePath: string) => Promise<void>
   onClose: () => void
+  /**
+   * Projects that were archived. Listed over the directories, and choosing
+   * one's directory -- from the list, the crumbs or a typed path -- restores
+   * it rather than adding it again.
+   */
+  archived?: readonly ArchivedProject[]
+  /** Bring one back. Rejecting keeps the picker open, as onPick does. */
+  onRestore?: (project: ArchivedProject) => Promise<void>
 }) {
   useLang()
   const [listing, setListing] = useState<DirListing | null>(null)
@@ -202,6 +214,17 @@ export function DirectoryPicker({
     }
   }
 
+  const restore = async (project: ArchivedProject, at: 'locator' | 'confirm') => {
+    if (!onRestore) return
+    setBusy(true)
+    try {
+      await onRestore(project)
+    } catch (e) {
+      setError({ at, message: reason(e) })
+      setBusy(false)
+    }
+  }
+
   const create = async () => {
     const name = newName.trim()
     if (!name || !listing) return
@@ -251,8 +274,15 @@ export function DirectoryPicker({
       case 'go':
         if (typed.kind === 'path' && typed.inside !== null) void load(typed.inside, 'jump')
         break
-      case 'use':
-        void pick(typed.kind === 'path' ? typed.abs : here, at)
+      case 'use': {
+        const abs = typed.kind === 'path' ? typed.abs : here
+        const again = onRestore ? archivedFor(archived, abs) : null
+        if (again) void restore(again, at)
+        else void pick(abs, at)
+        break
+      }
+      case 'restore':
+        if (shelf.length === 1) void restore(shelf[0], at)
         break
       case 'createNamed':
         // What was typed becomes the name, because that is what somebody who
@@ -284,6 +314,7 @@ export function DirectoryPicker({
       count: rows.length,
       active,
       hasParent: parent !== null,
+      restorable: shelf.length === 1,
     })
     if (act.do === 'text') return
     ev.preventDefault()
@@ -311,7 +342,17 @@ export function DirectoryPicker({
    * is what keeps it out.
    */
   const primary: Act = { do: 'use' }
-  const primaryLabel = typed.kind === 'path' ? t('dir.usePath') : t('dir.use')
+  // Named rather than "use this directory", because what it does is not that:
+  // the project that lived here comes back, notes and sessions and all.
+  const again = onRestore ? archivedFor(archived, typed.kind === 'path' ? typed.abs : here) : null
+  const primaryLabel = again
+    ? t('archive.pickerRestore', { name: safeText(again.name) })
+    : typed.kind === 'path'
+      ? t('dir.usePath')
+      : t('dir.use')
+  // Over the directories, never in path mode: there the field is addressing a
+  // place, and the confirm button already says when that place is one.
+  const shelf = onRestore && typed.kind === 'filter' ? archivedMatches(archived, query) : []
 
   const startCreate = () => {
     setError(null)
@@ -542,6 +583,39 @@ export function DirectoryPicker({
               </p>
             )}
 
+            {shelf.length > 0 && (
+              <div data-testid="dir-archived" className="border-b border-hairline pb-1">
+                <p className="px-3 pb-0.5 pt-1 text-vp-xs text-ink-3">{t('archive.pickerHeading')}</p>
+                {shelf.map((p) => (
+                  // Reached with Tab, unlike the directory rows: those are
+                  // walked with the arrow keys through the field, and the
+                  // shelf is not in that list -- an index shared between two
+                  // lists is how Enter opens the wrong one.
+                  <button
+                    key={p.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void restore(p, 'locator')}
+                    data-testid="dir-archived-row"
+                    title={p.path}
+                    className="vp-press flex w-full items-center gap-2.5 px-3 py-1 text-left text-vp-md text-ink hover:bg-surface-2 disabled:opacity-50"
+                  >
+                    <span
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+                      style={{ background: 'var(--vp-surface-2)' }}
+                    >
+                      <ArchiveRestore size={13} style={{ color: 'var(--vp-ink-3)' }} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      <RowName name={p.name} query={query} />
+                      <span className="ml-2 font-mono text-vp-sm text-ink-3">{safeText(p.path)}</span>
+                    </span>
+                    <span className="shrink-0 text-vp-sm text-ink-2">{t('archive.restore')}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {busy && listing === null ? (
               <Skeleton />
             ) : (
@@ -647,6 +721,7 @@ export function DirectoryPicker({
               onClick={() => run(primary, 'confirm')}
               disabled={busy || (listing === null && typed.kind !== 'path')}
               data-testid="dir-confirm"
+              data-restores={again ? again.id : undefined}
               title={typed.kind === 'path' ? typed.abs : here}
               className="vp-press flex-[2] rounded-vp px-3 py-2 text-vp-md disabled:opacity-40"
               style={{ background: 'var(--vp-accent)', color: 'var(--vp-accent-ink)' }}

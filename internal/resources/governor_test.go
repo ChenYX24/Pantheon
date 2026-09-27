@@ -107,7 +107,7 @@ func (g *Governor) tickDecide(now time.Time, p Params, l Level, reason Reason, r
 // responsible, whatever the reason.
 var (
 	poolReading = Reading{Total: total48, Available: 30 * gib, PoolMax: 8 * gib, PoolCurrent: 8 * gib, PoolHeld: 4 * gib}
-	heavy       = []SessionView{{ID: "a", TmuxName: "vp_a", Held: 4 * gib, Memory: 4 * gib}}
+	heavy       = []SessionView{{ID: "a", TmuxName: "vp_a", Title: "agent a", Held: 4 * gib, Memory: 4 * gib}}
 )
 
 func TestAKillIsRefusedForAnythingButTheProcessShown(t *testing.T) {
@@ -163,6 +163,12 @@ func TestTheQuestionAsksThenActsOnlyWhenAllowed(t *testing.T) {
 	a := g.View().Alert
 	if a == nil || a.Level != "warn" || a.AutoAt != 0 || a.SessionID != "a" || a.Proc == nil || !a.CanBoost {
 		t.Fatalf("warn alert %+v", a)
+	}
+	// Named by the alert itself: a session in an archived project is not in
+	// the page's snapshot, and an alert that could not name it would lose its
+	// buttons at the one moment they matter.
+	if a.SessionTitle != "agent a" {
+		t.Errorf("alert names the session %q, want %q", a.SessionTitle, "agent a")
 	}
 	if w.emits() != 1 {
 		t.Fatalf("emitted %d", w.emits())

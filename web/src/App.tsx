@@ -12,7 +12,15 @@ import {
 import { api, UnauthorizedError } from './protocol/api'
 import { PanelSocket } from './protocol/socket'
 import type { SocketStatus } from './protocol/socket'
-import type { AuthState, PanelState, Project, ResourceAlert, Session, UpdateStatus } from './protocol/wire'
+import type {
+  ArchivedProject,
+  AuthState,
+  PanelState,
+  Project,
+  ResourceAlert,
+  Session,
+  UpdateStatus,
+} from './protocol/wire'
 import { TerminalView } from './components/Terminal'
 import { StateDot } from './components/StateDot'
 import { Sidebar } from './components/Sidebar'
@@ -48,6 +56,7 @@ import type { LaunchProfile } from './protocol/wire'
 import { safeText } from './components/text'
 import { formatBytes } from './components/bytes'
 import { DirectoryPicker } from './components/DirectoryPicker'
+import { ArchivedProjects } from './components/ArchivedProjects'
 import { ToastStack } from './components/ToastStack'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { askConfirm } from './components/ask'
@@ -57,7 +66,7 @@ import { RestoreDialog } from './components/RestoreDialog'
 import { LaunchPicker } from './components/LaunchPicker'
 import { filesFrom, uploadErrorText } from './components/upload'
 import { copyTextInGesture } from './clipboard'
-import { notifyOnResourceAlert, notifyOnWaiting } from './notify'
+import { notifyOnArchivedWaiting, notifyOnResourceAlert, notifyOnWaiting } from './notify'
 import { readSkipped, shouldNotice, writeSkipped } from './components/updateView'
 import { t, useLang } from './i18n'
 
@@ -255,6 +264,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     projects: [],
     sessions: [],
     live: [],
+    archived: [],
     fullscreen: [],
     frozen: [],
     projectOrder: 'auto',
@@ -379,6 +389,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     // whether this window is the one being looked at, and only the browser
     // knows that.
     notifyOnWaiting(next.sessions, document.hasFocus())
+    notifyOnArchivedWaiting(next.archived, document.hasFocus())
     setSelected((cur) => nextSelection(next.sessions, cur))
   }, [])
 
@@ -525,7 +536,11 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   // The panel is usually not the tab you are looking at, and the whole point of
   // the waiting state is that noticing it late costs you. A number in the title
   // is the one place a browser will show it to you from another tab.
-  const waiting = state.sessions.filter((s) => s.state === 'waiting').length
+  // Archived projects' sessions included: hiding a project is not asking to
+  // miss the agent in it that stopped for a decision.
+  const waiting =
+    state.sessions.filter((s) => s.state === 'waiting').length +
+    state.archived.reduce((n, p) => n + p.waiting, 0)
   useEffect(() => {
     document.title = waiting > 0 ? `(${waiting}) vibepanel` : 'vibepanel'
   }, [waiting])
@@ -1016,6 +1031,45 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     void guard(() => api.deleteProject(p.id))
   }
 
+  // Archiving asks nothing: it ends nothing, and the way back is the line that
+  // appears under the last project the moment it is done.
+  const archiveProject = (p: Project) => {
+    void guard(async () => {
+      await api.archiveProject(p.id)
+      showToast({ kind: 'success', key: 'archive.done', params: { name: projectLabel(p) } })
+    })
+  }
+
+  const [archivedOpen, setArchivedOpen] = useState(false)
+
+  const restoreArchived = async (p: ArchivedProject) => {
+    await guard(async () => {
+      await api.restoreProject(p.id)
+      showToast({ kind: 'success', key: 'archive.restored', params: { name: p.name } })
+    })
+  }
+
+  // The same question removeProject asks, counted from the archived list:
+  // this project's sessions are not in state.sessions, and a confirmation
+  // saying "no sessions" over three running agents is the one it must not be.
+  const removeArchived = async (p: ArchivedProject) => {
+    const body =
+      p.sessions === 0
+        ? t('ask.removeProjectNone')
+        : p.sessions === 1
+          ? t('ask.removeProjectOne')
+          : t('ask.removeProjectMany', { n: p.sessions })
+    const yes = await askConfirm({
+      title: t('ask.removeProjectTitle', { name: p.name }),
+      body,
+      confirm: t('ask.remove'),
+      cancel: t('ask.cancel'),
+      destructive: true,
+    })
+    if (!yes) return
+    await guard(() => api.deleteProject(p.id))
+  }
+
   const killSession = async (s: Session) => {
     const yes = await askConfirm({
       title: t('ask.killTitle', { name: labelOf(s) }),
@@ -1108,6 +1162,12 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           onNewSession={newSession}
           onRenameProject={(p, name) => void guard(() => api.patchProject(p.id, { name }))}
           onRemoveProject={(p) => void removeProject(p)}
+          onArchiveProject={archiveProject}
+          archived={state.archived}
+          onOpenArchived={() => {
+            setArchivedOpen(true)
+            if (narrow) setDrawerOpen(false)
+          }}
           onRenameSession={(s, title) => void guard(() => api.patchSession(s.id, { title }))}
           onPinSession={(s, pinned) => void guard(() => api.patchSession(s.id, { pinned }))}
           onSetSessionState={(s, st) => void guard(() => api.patchSession(s.id, { state: st }))}
@@ -1327,9 +1387,35 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             names, and an error is not one -- so a file whose name carries a
             directional override reverses the text around it, in the banner, at the
             moment you are deciding whether to rename and retry. */}
+        {archivedOpen && (
+          <ArchivedProjects
+            archived={state.archived}
+            onRestore={restoreArchived}
+            onRemove={removeArchived}
+            onClose={() => setArchivedOpen(false)}
+          />
+        )}
+
         {picking && (
           <DirectoryPicker
             onClose={() => setPicking(false)}
+            archived={state.archived}
+            onRestore={async (p) => {
+              // Straight to the endpoint, not through guard(), for the reason
+              // onPick gives below: the picker keeps a rejection to show it.
+              try {
+                await api.restoreProject(p.id)
+              } catch (e) {
+                if (e instanceof UnauthorizedError) {
+                  onSignOut()
+                  return
+                }
+                throw e
+              }
+              showToast({ kind: 'success', key: 'archive.restored', params: { name: p.name } })
+              setPicking(false)
+              setError(null)
+            }}
             onPick={async (path) => {
               // Not through guard(): the picker wants the rejection so it can
               // stay open and say why, and guard() swallows it into a banner

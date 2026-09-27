@@ -1083,6 +1083,31 @@ var migrations = []func(tx *sql.Tx) error{
 		}
 		return nil
 	},
+
+	// v31: a project can be archived.
+	//
+	// Archived means hidden and nothing else: its sessions keep running in
+	// tmux, its notes and todos stay, and restoring it puts it back exactly as
+	// it was. So it is a timestamp on the row rather than a move to another
+	// table -- every foreign key into projects keeps pointing at the same id.
+	//
+	// archived_auto records who did it, because the list of archived projects
+	// is where somebody goes looking for the project that vanished overnight,
+	// and "the panel did this, after 30 idle days" is the answer they need.
+	//
+	// Not sessions.archived_at, which is a different, unbuilt idea (a session
+	// whose tmux session is gone; see the build log) and is per session.
+	func(tx *sql.Tx) error {
+		for _, stmt := range []string{
+			`ALTER TABLE projects ADD COLUMN archived_at INTEGER`,
+			`ALTER TABLE projects ADD COLUMN archived_auto INTEGER NOT NULL DEFAULT 0`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("%s: %w", stmt, err)
+			}
+		}
+		return nil
+	},
 }
 
 // scanner is *sql.Row and *sql.Rows both, so one scan function serves a

@@ -12,6 +12,7 @@ import (
 
 	"github.com/jiangmuran/vibepanel/internal/id"
 	"github.com/jiangmuran/vibepanel/internal/notify"
+	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/store"
 )
 
@@ -159,6 +160,13 @@ func (s *Server) fireWebhooks(ctx context.Context, row store.Session, state stri
 	var project string
 	if p, perr := s.DB.GetProject(ctx, row.ProjectID); perr == nil {
 		project = p.Name
+		// An archived project's sessions are out of every list, and a
+		// webhook is one more place they would be reported. A session
+		// waiting for its person is the exception, as it is for the phone
+		// and the browser: hiding a project is not asking to miss that.
+		if p.ArchivedAt != nil && session.State(state) != session.StateWaiting {
+			return
+		}
 	}
 	ev := notify.Event{
 		State:   state,

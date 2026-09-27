@@ -261,6 +261,7 @@ Each of these exists because the alternative broke something real.
   |---|---|
   | `make panes-check` | the side panel's pane layout: drag, drop, merge, restore. No binary, no tmux, ~20s |
   | `make first-run-check` | the setup wizard and the first project — every other check reaches past them |
+  | `make archive-check` | archiving a project: the row, the archived list, the picker's shelf and restore-by-directory, the idle setting, a phone in both themes, and tmux asked that the session is still alive |
   | `make render-check` | the largest: layout, states, arbitration, panels, mobile, clipboard, passkeys |
   | `make stress-check` | wide characters, full-screen programs, scrollback, floods, dropped sockets |
   | `make restart-check` | kill the backend; the sessions and the login must outlive it |

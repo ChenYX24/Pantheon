@@ -166,7 +166,10 @@ func (s *Server) handleTokenUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	projects, err := s.DB.ListProjects(ctx)
+	// Archived ones too. Usage is history, and a project nested inside this
+	// one keeps its own spend whether or not it is in the sidebar today --
+	// leaving it out of nestedProjects would add it to its parent's.
+	projects, err := s.DB.ListAllProjects(ctx)
 	if err != nil {
 		s.writeStoreErr(w, err)
 		return

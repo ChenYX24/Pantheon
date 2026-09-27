@@ -58,6 +58,7 @@ func (g *Governor) decide(now time.Time, params Params, level Level, reason Reas
 	}
 	if culprit != nil && Named(culprit.Held, r) {
 		next.SessionID = culprit.ID
+		next.SessionTitle = culprit.Title
 		next.CanPause = l != nil
 		top := g.top(culprit.TmuxName, l, ro, procs, 3, g.t.unkillable)
 		next.Proc = pickTarget(top)

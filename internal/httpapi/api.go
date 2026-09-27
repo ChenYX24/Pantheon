@@ -464,6 +464,8 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/projects/reorder", s.handleReorderProjects)
 			r.Patch("/projects/{id}", s.handlePatchProject)
 			r.Delete("/projects/{id}", s.handleDeleteProject)
+			r.Post("/projects/{id}/archive", s.handleArchiveProject)
+			r.Post("/projects/{id}/restore", s.handleRestoreProject)
 
 			r.Post("/sessions", s.handleCreateSession)
 			r.Patch("/sessions/{id}", s.handlePatchSession)
@@ -1040,6 +1042,11 @@ type stateResponse struct {
 	Sessions []store.Session `json:"sessions"`
 	Live     []string        `json:"live"`
 
+	// Archived is the projects that are not in the sidebar. Their sessions
+	// are left out of Sessions -- hidden means not sent, so no view has to
+	// remember a filter -- and counted here instead. See archive.go.
+	Archived []archivedProject `json:"archived"`
+
 	// Fullscreen is the sessions with a full-screen program drawing in them.
 	//
 	// The browser cannot tell: tmux emulates the alternate screen per pane and
@@ -1101,10 +1108,15 @@ func (s *Server) buildState(ctx context.Context) (stateResponse, error) {
 	if err != nil {
 		return stateResponse{}, err
 	}
-	sessions, err := s.DB.ListSessions(ctx)
+	all, err := s.DB.ListSessions(ctx)
 	if err != nil {
 		return stateResponse{}, err
 	}
+	archivedProjects, err := s.DB.ListArchivedProjects(ctx)
+	if err != nil {
+		return stateResponse{}, err
+	}
+	sessions, archived := splitArchived(archivedProjects, all)
 	manual, err := s.DB.ProjectOrderIsManual(ctx)
 	if err != nil {
 		return stateResponse{}, err
@@ -1116,6 +1128,7 @@ func (s *Server) buildState(ctx context.Context) (stateResponse, error) {
 	return stateResponse{
 		Projects:        emptyIfNil(projects),
 		Sessions:        emptyIfNil(sessions),
+		Archived:        archived,
 		Live:            emptyIfNil(s.Manager.LiveIDs()),
 		Fullscreen:      emptyIfNil(fullscreenNow(&s.fullscreen)),
 		Frozen:          emptyIfNil(s.frozenNow()),
@@ -1376,6 +1389,19 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	// arguable rather than obviously wrong; somebody may want the same tree
 	// grouped two ways. If it is to be refused, the useful answer names the
 	// project already there rather than a UNIQUE constraint failure.
+	// An archived project on this directory comes back instead of being
+	// added again beside itself. This is the picker's "restore" and also what
+	// a script or the CLI gets, so the two cannot disagree about it. Answered
+	// 200 rather than 201, because nothing was created.
+	if old, err := s.DB.ArchivedProjectAt(r.Context(), abs); err == nil {
+		if p, ok := s.restoreProject(w, r, old.ID); ok {
+			writeJSON(w, http.StatusOK, p)
+		}
+		return
+	} else if !errors.Is(err, store.ErrNotFound) {
+		s.writeStoreErr(w, err)
+		return
+	}
 	p, err := s.DB.CreateProject(r.Context(), id.New(), req.Name, abs)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -1561,6 +1587,14 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	p, err := s.DB.GetProject(ctx, req.ProjectID)
 	if err != nil {
 		s.writeStoreErr(w, err)
+		return
+	}
+	// A session started in an archived project would be running somewhere
+	// no list shows, reachable only by whoever holds its id. Refused rather
+	// than quietly restoring the project: the caller is a script or a stale
+	// tab, not somebody who chose to bring it back.
+	if p.ArchivedAt != nil {
+		writeErr(w, http.StatusConflict, "project "+p.Name+" is archived; restore it first")
 		return
 	}
 	if req.Cols <= 0 {
@@ -2173,6 +2207,10 @@ func (s *Server) Poll(ctx context.Context) {
 	}
 	archive := time.NewTicker(arch)
 	defer archive.Stop()
+	// Archiving idle projects, which is not the archive above: that one is
+	// scrollback. Same loop for the same reason as the audit trim.
+	idle := time.NewTicker(archiveIdleInterval)
+	defer idle.Stop()
 	// The one thing here that is deliberately *not* in this loop. Everything
 	// else is periodic work; this is the drain for the session-event log, and
 	// putting it in the select would put a database write for a chart on the
@@ -2184,6 +2222,8 @@ func (s *Server) Poll(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-idle.C:
+			s.archiveIdleOnce(ctx, time.Now())
 		case <-archive.C:
 			// Here rather than in a goroutine of its own, for the same reason
 			// the audit trim is: this loop already exists to do periodic work

@@ -317,6 +317,27 @@ func (d *DB) ListSessions(ctx context.Context) ([]Session, error) {
 	return d.listSessions(ctx, "", nil)
 }
 
+// ListVisibleSessions is ListSessions without the sessions of archived
+// projects: what anything showing sessions to a person reads. The processes
+// are still running; archiving a project hides it, nothing more.
+func (d *DB) ListVisibleSessions(ctx context.Context) ([]Session, error) {
+	return d.listSessions(ctx,
+		"WHERE NOT EXISTS (SELECT 1 FROM projects p WHERE p.id = s.project_id AND p.archived_at IS NOT NULL)", nil)
+}
+
+// SessionHidden reports whether a session's project is archived. For the
+// paths that reach one session by id rather than through a list.
+func (d *DB) SessionHidden(ctx context.Context, sessionID string) (bool, error) {
+	var n int
+	err := d.sql.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM sessions s JOIN projects p ON p.id = s.project_id
+		WHERE s.id = ? AND p.archived_at IS NOT NULL`, sessionID).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("store: session hidden: %w", err)
+	}
+	return n > 0, nil
+}
+
 // ListProjectSessions returns the sessions of one project in display order.
 func (d *DB) ListProjectSessions(ctx context.Context, projectID string) ([]Session, error) {
 	return d.listSessions(ctx, "WHERE s.project_id = ?", []any{projectID})

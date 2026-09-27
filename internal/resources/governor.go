@@ -180,7 +180,11 @@ type ProcView struct {
 type SessionView struct {
 	ID       string `json:"id"`
 	TmuxName string `json:"-"`
-	Memory   uint64 `json:"memory"`
+	// Title is the session's name, for a row the page cannot name from its
+	// snapshot: a session in an archived project is not in the snapshot, and
+	// is still using exactly as much memory as it was before it was hidden.
+	Title  string `json:"title"`
+	Memory uint64 `json:"memory"`
 	// Held is the part of Memory that only leaves when a process does: anon
 	// and shmem. The rest is page cache. See Reading.PoolHeld.
 	Held       uint64  `json:"held"`
@@ -200,12 +204,16 @@ type Alert struct {
 	Reason Reason `json:"reason"`
 	// SessionID is the session named, or "" when no session holds enough to be
 	// the cause -- pressure from outside the sessions, or spread across them.
-	SessionID   string    `json:"sessionId,omitempty"`
-	Proc        *ProcView `json:"proc,omitempty"`
-	PoolCurrent uint64    `json:"poolCurrent"`
-	PoolMax     uint64    `json:"poolMax"`
-	Available   uint64    `json:"available"`
-	Total       uint64    `json:"total"`
+	SessionID string `json:"sessionId,omitempty"`
+	// SessionTitle is its name, for a page that cannot find the session in
+	// its snapshot: one in an archived project, which is hidden and still
+	// holding every byte it held before.
+	SessionTitle string    `json:"sessionTitle,omitempty"`
+	Proc         *ProcView `json:"proc,omitempty"`
+	PoolCurrent  uint64    `json:"poolCurrent"`
+	PoolMax      uint64    `json:"poolMax"`
+	Available    uint64    `json:"available"`
+	Total        uint64    `json:"total"`
 	// AutoAt is when the panel ends Proc on its own if nobody answers; 0 when
 	// it will not.
 	AutoAt int64 `json:"autoAt,omitempty"`
