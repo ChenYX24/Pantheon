@@ -24181,3 +24181,30 @@ the unconditional `ArchiveProject`. The predicate being re-asked is tested in
 the store; the race it closes needs a write landing between two statements of
 one function, and nothing here can hold it there.
 
+
+## 2026-09-26 — Merging #23 and #24: two things about the load bar
+
+Pull #24 carries #23 under it, and both went in with one merge. Reviewed
+against the one thing a resumed stream has to get right, that the browser's
+count of bytes and the ring's offsets are the same numbers: the pump writes
+the ring and broadcasts the same slice under one lock, a viewer that falls
+behind is dropped only after everything already queued for it has been
+delivered in order, and a new attachment gets a new stream id, so a count from
+before a restart can never splice onto a different ring.
+
+Two changes were made after the merge, both to #23's bar.
+
+Its colours were `bg-black/10 dark:bg-white/10` and `bg-emerald-500`. Tailwind's
+`dark:` follows `prefers-color-scheme`, and the panel's own theme toggle wins
+over the system -- red line 5 -- so a panel forced light on a dark machine drew
+a white track on a white page. Nothing on main had used `dark:` before. It
+reads surface, selection and accent tokens now.
+
+And `make verify` failed scale-check once: "[terminal-load-progress] is 19px too
+tall", on a phone with the drawer open. The label was absolutely placed under
+the one-pixel bar, so all of it was painted outside its container, and the
+check measures exactly that -- but only when a terminal is still loading at
+the moment it looks, which is why it passed on both branches before they were
+merged. The overlay is a column now with the label in it. Two scale-check runs
+after were clean; neither is proof the timing was hit, and the fix is argued
+from the layout rather than from a reproduction.
