@@ -4,9 +4,34 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
+
+// startGroup runs a shell script in a process group of its own and ends the
+// whole group when the test does.
+//
+// Killing the shell alone is what these tests used to do, and it leaked: in
+// "sleep 30 & (while :; do :; done) & wait" the subshell is its own process,
+// and with its parent gone it was handed to init and spun at a whole core for
+// as long as the machine stayed up. Three of them were found burning three
+// cores, two days after the runs that started them -- by the monitor this
+// package feeds, once it could see processes that had left their tree.
+func startGroup(t *testing.T, script string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_, _ = cmd.Process.Wait()
+	})
+	return cmd
+}
 
 // A process may be called anything. Chromium's renderers carry spaces; a
 // program can be called "(foo) bar)" on purpose. Splitting the whole line on
@@ -69,7 +94,7 @@ func TestWalkTerminatesOnAReparentingRace(t *testing.T) {
 	done := make(chan uint64, 1)
 	go func() {
 		var total uint64
-		walk(10, stats, children, func(_ int, st procStat) { total += st.ticks })
+		walkInto(10, stats, children, map[int]bool{}, func(pid int) { total += stats[pid].ticks })
 		done <- total
 	}()
 
@@ -92,14 +117,7 @@ func TestSampleCountsTheWholeTreeUnderThePane(t *testing.T) {
 
 	// A shell that does nothing but hold a child, which is the shape of a real
 	// pane: sh -> agent.
-	parent := exec.Command("sh", "-c", "sleep 30 & wait")
-	if err := parent.Start(); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = parent.Process.Kill()
-		_, _ = parent.Process.Wait()
-	})
+	parent := startGroup(t, "sleep 30 & wait")
 	// Give the shell time to fork.
 	deadline := time.Now().Add(5 * time.Second)
 	var ts TreeSampler
@@ -148,14 +166,7 @@ func TestCPUPercentNeedsTwoSamples(t *testing.T) {
 	if _, err := os.Stat("/proc/self/stat"); err != nil {
 		t.Skip("no /proc here")
 	}
-	spin := exec.Command("sh", "-c", "while :; do :; done")
-	if err := spin.Start(); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = spin.Process.Kill()
-		_, _ = spin.Process.Wait()
-	})
+	spin := startGroup(t, "while :; do :; done")
 	pane := map[string]int{"s1": spin.Process.Pid}
 
 	var ts TreeSampler
@@ -184,14 +195,7 @@ func TestTopNamesTheBusiestProcessInTheTree(t *testing.T) {
 	// A quiet parent holding one spinning child and one merely sleeping one,
 	// the shape of a pane where the aggregate is right but naming "the shell"
 	// as the culprit would be useless.
-	parent := exec.Command("sh", "-c", "sleep 30 & (while :; do :; done) & wait")
-	if err := parent.Start(); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = parent.Process.Kill()
-		_, _ = parent.Process.Wait()
-	})
+	parent := startGroup(t, "sleep 30 & (while :; do :; done) & wait")
 	pane := map[string]int{"s1": parent.Process.Pid}
 
 	var ts TreeSampler
@@ -245,5 +249,108 @@ func TestReadProcTableSeesThisProcess(t *testing.T) {
 	table := readProcTable()
 	if _, ok := table[os.Getpid()]; !ok {
 		t.Fatalf("pid %s missing from a table of %d", strconv.Itoa(os.Getpid()), len(table))
+	}
+}
+
+// A process that has left its pane's tree -- `cmd &` from a shell that then
+// exited, nohup, a dev server an agent started and moved on from -- is still
+// the session's. It is found by the session id its environment inherited, and
+// counted, and said to be detached.
+func TestADetachedProcessIsStillItsSessions(t *testing.T) {
+	if _, err := os.Stat("/proc/self/environ"); err != nil {
+		t.Skip("no /proc here")
+	}
+	pane := startGroup(t, "sleep 60")
+	other := startGroup(t, "sleep 60")
+	// The outer shell starts the spinner in the background and exits, so the
+	// spinner is reparented away from anything a pane walk would reach.
+	launcher := exec.Command("sh", "-c", "VIBEPANEL_SESSION_ID=s1 sh -c 'while :; do :; done' >/dev/null 2>&1 &")
+	launcher.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := launcher.Run(); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(-launcher.Process.Pid, syscall.SIGKILL) })
+
+	paneOf := map[string]int{"s1": pane.Process.Pid, "s2": other.Process.Pid}
+	var ts TreeSampler
+	ts.Sample(paneOf)
+	time.Sleep(1200 * time.Millisecond)
+	got := ts.Sample(paneOf)
+
+	var found *ProcUsage
+	for i, p := range got["s1"].Top {
+		if p.Detached {
+			found = &got["s1"].Top[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("s1's reading has no detached process: %+v", got["s1"])
+	}
+	// Named by what it runs, not by the kernel's "sh".
+	if !strings.Contains(found.Cmd, "while :") {
+		t.Errorf("the detached spinner's command line reads %q", found.Cmd)
+	}
+	if found.CPUPercent <= 0 || got["s1"].CPUPercent < found.CPUPercent {
+		t.Errorf("the detached spinner reads %.2f%% and the session %.2f%%; it is the session's",
+			found.CPUPercent, got["s1"].CPUPercent)
+	}
+	// The two panes are the same script, so whatever a shell does about
+	// exec'ing its last command, s1 is exactly one process more than s2.
+	if got["s1"].Procs != got["s2"].Procs+1 {
+		t.Errorf("s1 counts %d processes and s2 %d; s1 should have the spinner on top of the same pane",
+			got["s1"].Procs, got["s2"].Procs)
+	}
+
+	// A session id nothing is running under claims nothing: this is how a
+	// test harness's own panel, or a deleted session, stays out.
+	delete(paneOf, "s1")
+	time.Sleep(600 * time.Millisecond)
+	for id, u := range ts.Sample(paneOf) {
+		for _, p := range u.Top {
+			if p.Detached {
+				t.Errorf("%s claimed pid %d for a session that is not running", id, p.PID)
+			}
+		}
+	}
+}
+
+// A process that joins a reading between two samples is counted for what it
+// did in the window, not for its whole life. The tree-total difference this
+// replaced counted a long-running detached process's lifetime the first time
+// it was found, and read any window in which a process exited as zero.
+func TestTheSessionShareIsTheSumOfItsProcessesInTheWindow(t *testing.T) {
+	if _, err := os.Stat("/proc/self/stat"); err != nil {
+		t.Skip("no /proc here")
+	}
+	pane := startGroup(t, "while :; do :; done")
+	paneOf := map[string]int{"s1": pane.Process.Pid}
+	var ts TreeSampler
+	ts.Sample(paneOf)
+	time.Sleep(1200 * time.Millisecond)
+	u := ts.Sample(paneOf)["s1"]
+	var sum float64
+	for _, p := range u.Top {
+		sum += p.CPUPercent
+	}
+	if u.CPUPercent <= 0 || u.CPUPercent-sum > 0.01 || sum-u.CPUPercent > 0.01 {
+		t.Errorf("session %.3f%%, its processes %.3f%%", u.CPUPercent, sum)
+	}
+}
+
+// A process born between two samples is counted for everything it did, since
+// all of it happened inside the window. Per-process diffs alone would read it
+// as zero -- there is nothing earlier to diff against -- and a build is mostly
+// compilers that live for a second or two.
+func TestAProcessBornInsideTheWindowCounts(t *testing.T) {
+	if _, err := os.Stat("/proc/self/stat"); err != nil {
+		t.Skip("no /proc here")
+	}
+	pane := startGroup(t, "sleep 0.2; sh -c 'while :; do :; done'")
+	paneOf := map[string]int{"s1": pane.Process.Pid}
+	var ts TreeSampler
+	ts.Sample(paneOf) // before the spinner exists
+	time.Sleep(1200 * time.Millisecond)
+	if u := ts.Sample(paneOf)["s1"]; u.CPUPercent <= 0 {
+		t.Errorf("a spinner born after the first sample reads %.3f%% for the session", u.CPUPercent)
 	}
 }

@@ -553,10 +553,19 @@ try {
   // ...with a session of its own, so that switching *project* is reachable from
   // the sidebar. Without one, every session row belongs to the same project and
   // a mark that never updates looks exactly like one that does.
-  await authed('/api/sessions', {
+  //
+  // It also leaves a process behind that has left its tree: the inner shell
+  // backgrounds a sleep and exits, and the sleep is handed to init -- the
+  // shape of `cmd &`, nohup and a dev server an agent started. The monitor
+  // below has to still count it for this session, and name it.
+  const secondShell = await (await authed('/api/sessions', {
     method: 'POST',
-    body: JSON.stringify({ projectId: second.id, command: ['sh', '-c', 'exec sh'], title: 'second-shell' }),
-  })
+    body: JSON.stringify({
+      projectId: second.id,
+      command: ['sh', '-c', "sh -c 'sleep 901 >/dev/null 2>&1 &'; exec sh"],
+      title: 'second-shell',
+    }),
+  })).json()
   await sleep(2500) // let the poller derive titles
 
   const VIEWPORT = (() => {
@@ -1264,6 +1273,32 @@ browser = await chromium.launch({ headless: true })
         'no session was measured, so the panel cannot answer which one is running away: ' +
         JSON.stringify(monitorText.replace(/\s+/g, ' ').trim()))
     }
+    // A detached process is still its session's, and is named by its command
+    // line rather than the kernel's fifteen characters. Asked of the session
+    // that started a sleep and let its launcher exit; see second-shell.
+    if (process.platform === 'linux') {
+      const row = page.locator(`[data-testid="session-usage"][data-session="${secondShell.id}"]`)
+      if ((await row.count()) === 0) {
+        note('FAIL', 'panel/monitor', 'second-shell has no row in the per-session list')
+      } else {
+        await row.locator('[data-testid="session-usage-toggle"]').click()
+        await sleep(800)
+        const detached = row.locator('[data-testid="session-top-proc"]').filter({
+          has: page.locator('[data-testid="session-top-proc-detached"]'),
+        })
+        const text = (await detached.first().innerText().catch(() => '')).replace(/\s+/g, ' ')
+        if ((await detached.count()) === 0) {
+          note('FAIL', 'panel/monitor',
+            'a sleep started in second-shell and left behind by its launcher is not counted for it: ' +
+            JSON.stringify((await row.innerText().catch(() => '')).replace(/\s+/g, ' ')))
+        } else if (!text.includes('sleep 901')) {
+          note('FAIL', 'panel/monitor', `the detached process is not named by its command line: ${JSON.stringify(text)}`)
+        }
+        await row.locator('[data-testid="session-usage-toggle"]').click()
+        await sleep(300)
+      }
+    }
+
     // A percentage of the whole machine, never top's convention -- the machine
     // meter is an inch above it, and a session reading 310% beside a machine
     // reading 31% invites exactly one wrong conclusion.

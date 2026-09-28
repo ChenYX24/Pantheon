@@ -171,7 +171,11 @@ type ProcView struct {
 	PID   int    `json:"pid"`
 	Start uint64 `json:"start"`
 	Name  string `json:"name"`
-	RSS   uint64 `json:"rss"`
+	// Cmd is its command line, shortened; see sysmon.CommandOf. The name is
+	// fifteen characters of comm, and a question about ending a process
+	// that only says "bash" is one nobody can answer.
+	Cmd string `json:"cmd,omitempty"`
+	RSS uint64 `json:"rss"`
 	// Root marks the pane's own process: ending it ends the session.
 	Root bool `json:"root,omitempty"`
 }

@@ -610,8 +610,10 @@ function UsageRow({
         <div className="mt-2 ml-5 space-y-1" data-testid="resources-session-detail">
           {(row.top ?? []).map((p) => (
             <div key={`${p.pid}-${p.start}`} className="flex min-w-0 items-center gap-2 text-vp-sm">
-              <span className="min-w-0 flex-1 truncate text-ink">
-                {safeText(p.name)}
+              <span className="min-w-0 flex-1 truncate text-ink" title={safeText(p.cmd || p.name)}>
+                {/* What it runs: comm is "bash" for every command an agent
+                    starts, and this is where somebody decides which to end. */}
+                <span className="font-mono">{safeText(p.cmd || p.name)}</span>
                 <span className="ml-1.5 text-vp-xs text-ink-3">{p.root ? t('res.rootProc') : `pid ${p.pid}`}</span>
               </span>
               <span className="tabular shrink-0 text-ink-2">{formatBytes(p.rss)}</span>

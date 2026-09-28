@@ -236,6 +236,11 @@ func (g *Governor) top(tmuxName string, l *Layout, ro roster, procs Procs, n int
 	if len(out) > n {
 		out = out[:n]
 	}
+	// After the cut: one read for each process shown, not for every one in
+	// the leaf.
+	for i := range out {
+		out[i].Cmd = sysmon.CommandOf(out[i].PID)
+	}
 	return out
 }
 

@@ -369,6 +369,11 @@ const DICT = {
   'notes.lines': { zh: '{n} 行', en: '{n} lines' },
 
   'monitor.cpu': { zh: 'CPU', en: 'CPU' },
+  'monitor.detached': { zh: '已脱离', en: 'detached' },
+  'monitor.detachedWhy': {
+    zh: '启动它的进程已退出，它还在运行，按会话的环境变量找回',
+    en: 'Its parent has exited; still running, found by the session id it inherited',
+  },
   'monitor.memory': { zh: '内存', en: 'Memory' },
   'monitor.disk': { zh: '磁盘', en: 'Disk' },
   'monitor.swap': { zh: '交换', en: 'Swap' },

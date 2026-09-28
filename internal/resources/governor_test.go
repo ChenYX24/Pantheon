@@ -20,6 +20,9 @@ import (
 func spawnPane(t *testing.T) (pane, child int) {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", "sleep 300 & echo $!; wait")
+	// Its own process group, ended whole: killing the shell alone left the
+	// sleep to init for five minutes after every test that used this.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +31,7 @@ func spawnPane(t *testing.T) (pane, child int) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		_, _ = cmd.Process.Wait()
 	})
 	buf := make([]byte, 32)
@@ -163,6 +166,10 @@ func TestTheQuestionAsksThenActsOnlyWhenAllowed(t *testing.T) {
 	a := g.View().Alert
 	if a == nil || a.Level != "warn" || a.AutoAt != 0 || a.SessionID != "a" || a.Proc == nil || !a.CanBoost {
 		t.Fatalf("warn alert %+v", a)
+	}
+	// The question names the process by what it runs, not by comm alone.
+	if a.Proc.Cmd != "sleep 300" {
+		t.Errorf("the alert's process reads %q, want its command line", a.Proc.Cmd)
 	}
 	// Named by the alert itself: a session in an archived project is not in
 	// the page's snapshot, and an alert that could not name it would lose its
