@@ -24319,3 +24319,70 @@ is hand-written rather than read from the server, so it still offered three.
 The totals, the per-tool bar and the "By tool" rows picked the new sources up
 on their own; filtering to one of them did not exist until the menu got two
 more options. `docs/api.md` said three agents in two places and now says five.
+
+## The first `！` needed two presses
+
+Full-width punctuation typed with the macOS Chinese IME was dropped by xterm,
+once per keyboard focus: the first `！` after clicking into a terminal did
+nothing, the second landed, and `？` and `＋` behaved the same way. ASCII `?`,
+`!` and `+` were fine, which is what made it look like a character problem.
+
+It is an event-order problem. xterm 6.0.0's `_inputEvent` accepts a browser
+`insertText` event only when `!ev.composed || !this._keyDownSeen`; a
+browser-dispatched input event always has `composed === true`, so the real gate
+is `_keyDownSeen`. That flag is set at the top of every keydown and cleared in
+keyup — an assumption that `input` arrives after the keydown of the same
+keystroke. macOS IME punctuation inverts that order: `beforeinput` → `input` →
+`keydown(229)`, with no `composition*` events at all. `！` needs Shift, so
+Shift's keydown set the flag and its keyup had not yet happened, and the
+character was discarded. The next keystroke's keyup cleared the flag, which is
+why only the first one after each focus was lost. ASCII survived because
+xterm's keypress path had already sent it and `_keyPressHandled` rejects the
+input event regardless of the flag.
+
+`imeInput.ts` clears `_keyDownSeen` from a capture-phase `beforeinput`
+listener on the element containing the textarea, before xterm's own listener
+reads it. Two guards keep it from recreating a worse bug: it only acts outside
+composition state, because xterm's CompositionHelper sends real composition
+commits from a deferred callback and releasing the flag there would send the
+text twice; and every private field is optional, so an xterm upgrade that
+renames one makes the workaround go quiet instead of throwing inside a
+keyboard event. A test reads the installed xterm bundle and fails if those
+fields move, so the next upgrade is looked at rather than silently losing the
+fix. The unit tests pin the sequence itself — flag set, no composition, one
+`insertText` — and the composition cases that must be left alone.
+
+Not fixed here, because it is not this bug: the `？`-in-Safari reports where no
+`beforeinput` fires at all (xterm #3070) and the iOS emoji double-commit
+(#5614). This patch neither claims nor breaks them; the composition guards are
+what keep it from making the second one worse.
+
+## The visible scroll from the top, behind the load bar
+
+Every open of a session, and every page reload, replayed the ring from the
+top while the terminal was on screen. TerminalReplay parses the snapshot chunk
+by chunk with a paint boundary between chunks, so what a person saw was their
+history scrolling past before the prompt arrived. The yielding is load-bearing
+-- a phone that parses two megabytes of scrollback in one task freezes -- so the
+fix is not to remove it but to stop showing the half-parsed screen. The load
+bar says how far along the parse is; it sits over the top edge and did not
+hide the scroll underneath it.
+
+The terminal is now invisible from the snapshot's first replay-flagged chunk
+until `finishLoad`, which already knows when the snapshot is complete (the
+announced byte count, not an empty queue) and already scrolls to the bottom,
+so the reveal is one frame showing the live screen. `opacity`, not `visibility`
+or `display`: those drop the element from hit-testing and blur focus, so a
+reconnect during a replay would take the keyboard away from somebody typing.
+
+It stays down in two cases. On `onReset`, because that is armed before anybody
+knows whether a snapshot follows -- an empty ring sends no frames at all, and
+hiding there would blank a terminal over nothing. And for a resumed gap, which
+is appended below a screen that is already right; hiding that would blank the
+terminal somebody is reading for the length of a reconnect.
+
+This was first written against a queue with no end-of-snapshot signal, as an
+`onReplayEnd` callback on TerminalReplay. The load bar arrived with its own,
+and a second definition of "the snapshot is done" that could disagree with the
+first is how a terminal ends up invisible with its bar saying 100%, so the
+cover is released from the same place the bar is.
