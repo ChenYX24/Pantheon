@@ -3632,6 +3632,29 @@ browser = await chromium.launch({ headless: true })
     await plainCtx.close()
   }
 
+  // ── A terminal rebuilt by a layout change is shown again ─────────────────
+  //
+  // The phone sections above change touchSelect, which rebuilds every mounted
+  // terminal and subscribes it afresh. Its load state lived in refs that
+  // outlived the rebuild, so the new terminal was covered for its replay and
+  // never uncovered: invisible, and every click landing on the container. It
+  // surfaced here as a click timing out. Asked directly, after the load has
+  // had long enough to finish.
+  {
+    await page.locator('[data-testid="session-row"]', { hasText: 'scratchpad' }).first().click()
+    await sleep(4000)
+    const covered = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-testid="main-terminal"] .xterm')]
+        .filter((x) => x.getClientRects().length > 0)
+        .some((x) => getComputedStyle(x.parentElement).opacity === '0'))
+    const stuckBar = await page.locator('[data-testid="terminal-load-progress"]:visible').count()
+    if (covered || stuckBar > 0) {
+      note('FAIL', 'terminal',
+        `after the phone layouts, the terminal is ${covered ? 'still covered' : 'shown'} and ` +
+        `${stuckBar} load bar(s) are still up; a rebuilt terminal kept the last one's load state`)
+    }
+  }
+
   // ── ctrl+V, which the terminal was eating ────────────────────────────────
   //
   // xterm maps ctrl+letter to a control character and cancels the event, so

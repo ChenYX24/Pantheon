@@ -24386,3 +24386,32 @@ This was first written against a queue with no end-of-snapshot signal, as an
 and a second definition of "the snapshot is done" that could disagree with the
 first is how a terminal ends up invisible with its bar saying 100%, so the
 cover is released from the same place the bar is.
+
+## 2026-09-27 — Merging #25 and #26, and a terminal that never came back
+
+Pull #25 adds Hermes and pi to the token counts: two new readers, the
+existing three untouched, so `ReaderVersion` did not need to move. Hermes'
+database is opened as opencode's is, read-only with `query_only`, and only its
+two usage tables are named. Pull #26 fixes the first full-width `！` from the
+macOS IME, and covers a terminal while its snapshot is parsed so history no
+longer scrolls past from the top. Its IME release cannot double a character on
+iPad: the iOS path stops the input event before xterm's handler sees it.
+
+`make verify` after the merge failed render-check with a click that timed out
+on the terminal, "the container intercepts pointer events" -- the cover's
+`pointer-events: none` still on, long after the load. Reproduced on demand:
+open a session, narrow the window to phone width, widen it again, and the
+terminal is at opacity 0 with the load bar up, indefinitely.
+
+The cause predates #26 and was harmless until the cover. `touchSelect` is a
+dependency of the effect that builds the terminal, so a layout change rebuilds
+it and subscribes a new stream. The load state -- finished, snapshot done,
+sized, the byte counts -- was in refs, which belong to the component and
+outlive the effect. The new stream's first confirmation is not a reset, so
+`finishedRef` was still true from the old terminal and `finishLoad` returned
+before doing anything. Under #23 that left a load bar up over a working
+terminal; under #26 it left the terminal invisible and unclickable. The effect
+now resets that state when it starts, and its cleanup takes the cover down.
+
+render-check now asks the question directly after its phone sections, rather
+than leaving it to a later click to time out on.

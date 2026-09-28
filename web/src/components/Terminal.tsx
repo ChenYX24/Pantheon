@@ -310,6 +310,20 @@ export function TerminalView({
     const encoder = new TextEncoder()
 
     let disposed = false
+    // Every load's state belongs to this run of the effect, not to the
+    // component. The refs outlive a re-run -- readOnly or touchSelect
+    // changing rebuilds the terminal and subscribes a new stream, whose first
+    // confirmation is not a reset -- so a finishedRef left true by the last
+    // terminal made finishLoad return at once for this one. With the cover
+    // that meant a terminal invisible and unclickable for good: narrowing a
+    // window to phone width and back was enough, and render-check found it by
+    // timing out on a click.
+    finishedRef.current = false
+    replayDoneRef.current = false
+    sizedRef.current = false
+    replayTotalRef.current = 0
+    replayReceivedRef.current = 0
+    replayParsedRef.current = 0
     // A resumed gap is appended below a screen that is already right, so it
     // is the one replay the cover stays down for.
     let resuming = false
@@ -576,6 +590,10 @@ export function TerminalView({
 
     return () => {
       disposed = true
+      // The next terminal starts uncovered and connecting, not in whatever
+      // state this one was left. See the reset at the top.
+      setCovering(false)
+      setLoadPhase('connecting')
       liveTerminals.delete(sessionId)
       host.removeEventListener('keydown', bypassIOSKeydown, true)
       host.removeEventListener('input', forwardIOSInput, true)
