@@ -238,8 +238,15 @@ func TestOpencodeWalkFindsOneDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(refs) != 1 || refs[0].Path != path {
-		t.Fatalf("refs=%v, want exactly the database", refs)
+	// The walk reports the resolved root, and t.TempDir is a symlink on macOS
+	// (/var -> /private/var), so an unresolved comparison fails there and
+	// passes on Linux. Resolve the expectation, not the assertion.
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs[0].Path != resolved {
+		t.Fatalf("refs=%v, want exactly the database at %s", refs, resolved)
 	}
 	if refs[0].Size <= 0 || refs[0].ModifiedAt <= 0 {
 		t.Fatalf("ref carries no cursor: %+v", refs[0])
