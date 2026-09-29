@@ -24415,3 +24415,29 @@ now resets that state when it starts, and its cleanup takes the cover down.
 
 render-check now asks the question directly after its phone sections, rather
 than leaving it to a later click to time out on.
+
+## 2026-09-28 — "hermes: unknown (not found)" on a machine without Hermes
+
+After v1.24.0 the usage panel opened with two warnings, "hermes：不知道（not
+found）" and "pi：不知道（not found）", on a machine that has neither agent
+installed. Pull #25 read both correctly; the numbers were right. What was
+wrong was older and only now visible: the panel warned about every source it
+did not find, and "not installed" was one of those. Until then the three
+agents it read were all on this machine, so the rule had never fired here.
+
+The backend already said what "not found" usually means -- "the agent is not
+installed on this machine, or has never been run. Not an error" -- and the
+page did not listen. `Source` now carries `absent`, set when the root does not
+exist and when a database agent's directory is there without its database
+(installed, never run). The page warns only about sources that are missing and
+not absent: a directory it cannot enter, a database it cannot open. Checked
+end to end on a throwaway panel with only Claude Code's directory: the other
+four read `absent: true` and the page has nothing to say about them. Each of
+the three places that set or read it was removed once and turned a test red,
+including treating an unreadable directory as absent.
+
+Found on the way: `TokenUsageView.tsx` held a literal NUL byte, in a map key
+meant as a sentinel, which made every search tool here treat the file as
+binary and skip it. Searching for where the warning came from found nothing
+until the file was read directly. It is `'\u0000none'` now: the same string,
+written so the file is text.

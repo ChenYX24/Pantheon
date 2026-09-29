@@ -593,8 +593,15 @@ type Source struct {
 	Root    string `json:"root"`
 	Found   bool   `json:"found"`
 	Problem string `json:"problem"`
-	Files   int    `json:"files"`
-	Bytes   int64  `json:"bytes"`
+	// Absent means the agent is not here at all: its directory does not
+	// exist, or its database was never created. That is not a problem with
+	// the numbers -- there is nothing to count -- and the panel must not
+	// warn about it. A machine that has never run Hermes or pi was shown
+	// "hermes: unknown (not found)" and "pi: unknown (not found)" as soon as
+	// the two were added, above figures that were complete.
+	Absent bool  `json:"absent"`
+	Files  int   `json:"files"`
+	Bytes  int64 `json:"bytes"`
 	// Skipped is records the reader could not use. Non-zero means the totals
 	// below it are a lower bound.
 	Skipped int `json:"skipped"`
@@ -713,6 +720,9 @@ func statOne(path string, src *Source) ([]Ref, Source, error) {
 	if err != nil {
 		src.Found = false
 		src.Problem = "no " + filepath.Base(path)
+		// The directory is there and the ledger is not: installed, never
+		// run. Only a missing file is that; anything else is a real problem.
+		src.Absent = errors.Is(err, fs.ErrNotExist)
 		return nil, *src, nil
 	}
 	src.Files = 1
@@ -759,6 +769,7 @@ func (s *Scanner) Walk(tool Tool) ([]Ref, Source, error) {
 		// has never been run. Not an error — a Source that says so.
 		if errors.Is(err, fs.ErrNotExist) {
 			src.Problem = "not found"
+			src.Absent = true
 			return nil, src, nil
 		}
 		src.Problem = err.Error()

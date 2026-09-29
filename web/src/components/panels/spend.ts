@@ -40,6 +40,17 @@ function isoDay(d: Date): string {
  * An unparseable `today` returns the empty string, which every caller below
  * reads as "no window" rather than as a window starting in 1970.
  */
+/**
+ * The sources worth a warning over the figures: the ones that exist and could
+ * not be read. An agent that is simply not installed has nothing to count, so
+ * the totals are complete without it, and saying "unknown" about it reads as
+ * a fault. Every agent this panel learns to read is one more that most
+ * machines do not have.
+ */
+export function unreadableSources<T extends { found: boolean; absent: boolean }>(sources: readonly T[]): T[] {
+  return sources.filter((s) => !s.found && !s.absent)
+}
+
 export function dayBefore(today: string, back: number): string {
   const [y, m, d] = today.split('-').map(Number)
   if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return ''

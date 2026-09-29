@@ -153,7 +153,7 @@ project and by tool.
  "sources": [{"tool": "claude", "root": "/home/me/.claude/projects", "found": true,
               "files": 430, "bytes": 1257242624, "skipped": 0},
              {"tool": "codex", "root": "/home/me/.codex/sessions", "found": false,
-              "problem": "not found", "files": 0, "bytes": 0, "skipped": 0}],
+              "absent": true, "problem": "not found", "files": 0, "bytes": 0, "skipped": 0}],
  "today": "2026-08-27", "from": "2026-07-29", "to": "2026-08-27", "days": 30,
  "total": {"input": 91234, "output": 5954333, "cacheRead": 812004112,
            "cacheWrite": 44120983, "requests": 67339},
@@ -190,7 +190,10 @@ directory containment: `/home/me/api-v2` is not inside `/home/me/api`.
 
 `found: false` in `sources` means that agent contributed nothing **because
 nothing could be read**, with `problem` saying why. That is not the same claim as
-zero spend and must not be rendered as one. `skipped` counts records the reader
+zero spend and must not be rendered as one. `absent: true` narrows it: the agent
+is not on this machine at all -- no directory, or a database never created -- so
+there was nothing to read and the totals are complete without it. The panel
+warns only about `found: false` sources that are not absent. `skipped` counts records the reader
 could not use, so a non-zero value makes every total below it a lower bound.
 
 `scannedAt` is zero until the first pass over the transcripts has finished.
