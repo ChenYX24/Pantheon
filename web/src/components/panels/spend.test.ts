@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { TokenUsage, UsageDay } from '../../protocol/wire'
 import {
   axisTicks,
+  unreadableSources,
   dayBefore,
   dayPoints,
   dayValue,
@@ -276,5 +277,18 @@ describe('a ranking', () => {
     expect(out[0].share).toBeCloseTo(0.9)
     expect(out[1].share).toBeCloseTo(0.1)
     expect(out[0].total).toBe(109)
+  })
+})
+
+describe('unreadableSources', () => {
+  const src = (tool: string, found: boolean, absent: boolean) => ({ tool, found, absent })
+  it('warns about an agent that is there and could not be read, not one that is not installed', () => {
+    const got = unreadableSources([
+      src('claude', true, false),
+      src('hermes', false, true),
+      src('pi', false, true),
+      src('codex', false, false),
+    ])
+    expect(got.map((s) => s.tool)).toEqual(['codex'])
   })
 })

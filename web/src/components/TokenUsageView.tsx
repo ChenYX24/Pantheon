@@ -13,6 +13,7 @@ import {
   rank,
   shortDay,
   sinceFirst,
+  unreadableSources,
   windowValue,
   type DayPoint,
   type Metric,
@@ -261,7 +262,7 @@ function Body({
   onMetric: (m: Metric) => void
 }) {
   const known = data.scannedAt > 0
-  const missing = data.sources.filter((s) => !s.found)
+  const missing = unreadableSources(data.sources)
   const skipped = data.sources.reduce((n, s) => n + s.skipped, 0)
 
   if (!known) {
@@ -274,7 +275,7 @@ function Body({
 
   const projects = rank(
     data.projects.map((p) => ({
-      key: p.id || ' none',
+      key: p.id || '\u0000none',
       label: p.name || t('spend.notInAProject'),
       hint: p.id ? p.path : '',
       t: p,

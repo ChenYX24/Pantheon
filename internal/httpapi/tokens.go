@@ -50,9 +50,11 @@ type tokenUsageSource struct {
 	Root    string `json:"root"`
 	Found   bool   `json:"found"`
 	Problem string `json:"problem"`
-	Files   int    `json:"files"`
-	Bytes   int64  `json:"bytes"`
-	Skipped int    `json:"skipped"`
+	// Absent: the agent is not on this machine, which is not a warning.
+	Absent  bool  `json:"absent"`
+	Files   int   `json:"files"`
+	Bytes   int64 `json:"bytes"`
+	Skipped int   `json:"skipped"`
 }
 
 // tokenUsageSession is one agent session, with the panel project it can be
@@ -299,7 +301,7 @@ func (s *Server) handleTokenUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, src := range pass.Sources {
 		out.Sources = append(out.Sources, tokenUsageSource{
-			Tool: string(src.Tool), Root: src.Root, Found: src.Found,
+			Tool: string(src.Tool), Root: src.Root, Found: src.Found, Absent: src.Absent,
 			Problem: src.Problem, Files: src.Files, Bytes: src.Bytes, Skipped: src.Skipped,
 		})
 	}

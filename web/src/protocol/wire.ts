@@ -445,6 +445,11 @@ export interface TokenUsageSource {
    */
   found: boolean
   problem: string
+  /**
+   * The agent is not on this machine: no directory, or a database never
+   * created. Nothing to count, so nothing to warn about.
+   */
+  absent: boolean
   files: number
   bytes: number
   /** Records the reader could not use. Non-zero makes every total a lower bound. */
