@@ -14,7 +14,7 @@ describe('co-hosted development instance', () => {
     expect(HOME_PATH).toBe('/dev/panel/home')
     expect(routeFor('/dev/panel/home/')).toEqual({ kind: 'home' })
     expect(routeFor('/home')).toEqual({ kind: 'panel' })
-    expect(projectLink({ projectId: 'pantheon', taskId: 'A2' })).toBe('/dev/panel/home?project=pantheon&task=A2')
+    expect(projectLink({ projectId: 'pantheon', taskId: 'A2' })).toBe('/dev/panel/home/p/pantheon?tab=tasks&task=A2')
     expect(todoLink({ id: '1', kind: 'session_waiting', projectId: 'pantheon', title: '', detail: '', at: '', link: { projectId: 'pantheon', taskId: '', reportFile: '', sessionId: 'vp_123' } })).toBe('/dev/panel/?session=vp_123')
   })
 

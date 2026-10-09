@@ -3,6 +3,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { t } from '../../i18n'
 import { HOME_FIELD_COLORS, homeApi, type HomeField, type HomeFieldColor, type HomeFields, type HomeFieldSettings } from '../../protocol/home'
 import { askConfirm } from '../ask'
+import { safeText } from '../text'
 import { HomeDialog } from './HomeDialog'
 import { HomeChip } from './HomeField'
 import { useHomeMutation } from './useHomeMutation'
@@ -44,8 +45,8 @@ export function HomeFieldsDialog({ settings, onClose, onChanged }: { settings: H
           if (await askConfirm({ title: t('home.removeOption'), body: option.label || option.value, confirm: t('home.remove'), cancel: t('home.cancel'), destructive: true })) update((field) => { field.options.splice(index, 1) })
         }}><Trash2 size={14} /></button>}</div>
         <div className="grid min-w-0 gap-2 @lg:grid-cols-3">
-          <label className="min-w-0 text-vp-xs">{t('home.optionValue')}<input className="home-input mt-1" value={option.value} disabled={busy || fixed} required onChange={(event) => update((field) => { field.options[index].value = event.target.value })} /></label>
-          <label className="min-w-0 text-vp-xs">{t('home.optionLabel')}<input className="home-input mt-1" value={option.label ?? ''} disabled={busy} onChange={(event) => update((field) => { field.options[index].label = event.target.value })} /></label>
+          <label className="min-w-0 text-vp-xs">{t('home.optionValue')}<input className="home-input mt-1" value={safeText(option.value)} disabled={busy || fixed} required onChange={(event) => update((field) => { field.options[index].value = event.target.value })} /></label>
+          <label className="min-w-0 text-vp-xs">{t('home.optionLabel')}<input className="home-input mt-1" value={safeText(option.label ?? '')} disabled={busy} onChange={(event) => update((field) => { field.options[index].label = event.target.value })} /></label>
           <label className="min-w-0 text-vp-xs">{t('home.optionColor')}<select className="home-input mt-1" value={option.color} disabled={busy} onChange={(event) => update((field) => { field.options[index].color = event.target.value as HomeFieldColor })}>{HOME_FIELD_COLORS.map((color) => <option key={color} value={color}>{t(`home.color.${color}`)}</option>)}</select></label>
         </div>
       </div>)}</div>

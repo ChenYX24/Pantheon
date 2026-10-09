@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'reac
 import { ArrowLeft, Bell, ClipboardList, LogOut, RefreshCw, Search } from 'lucide-react'
 import { t, useLang } from '../i18n'
 import { homeApi, type HomeTodo } from '../protocol/home'
-import { HOME_PATH, PANEL_PATH, homeSelection, legacyHomeRedirect, routeFor, type HomeTab } from '../routes'
+import { PANEL_PATH, homeOverviewLink, homeSelection, legacyHomeRedirect, routeFor, type HomeTab } from '../routes'
 import { ConfirmDialog } from './ConfirmDialog'
 import { LanguageSwitch } from './LanguageSwitch'
 import { ThemeToggle } from './ThemeToggle'
@@ -13,7 +13,7 @@ import { HomeCard, HomeTime } from './home/HomeCard'
 import { HomeNotifications } from './home/HomeNotifications'
 import { HomeProjectPage } from './home/HomeProjectPage'
 import { HomeTable } from './home/HomeTable'
-import { filterProjects, filterTasks, HOME_VIEWS, sortProjects, viewFromSearch, viewToSearch, type HomeViewState } from './home/board'
+import { filterProjects, filterTasks, HOME_VIEWS, viewFromSearch, viewToSearch, type HomeViewState } from './home/board'
 import { sortTodos, todoLabelKey, todoLink } from './home/helpers'
 import { useHomeResource } from './home/useHomeResource'
 import { useHomeMutation } from './home/useHomeMutation'
@@ -85,9 +85,9 @@ export function HomePage({ onSignOut }: { onSignOut: () => void }) {
     go(`${address.pathname}?${query}`)
   }
   const previous = new URLSearchParams(address.search).get('from')
-  const back = `${HOME_PATH}${previous ? `?${previous}` : ''}`
+  const back = homeOverviewLink(address.search)
   const matchingTasks = filterTasks(tasks.data ?? [], view)
-  const projects = sortProjects(filterProjects(data?.projects ?? [], view, view.q ? matchingTasks : []), view.sort)
+  const projects = filterProjects(data?.projects ?? [], view, view.q ? matchingTasks : [])
   const todos = sortTodos(data?.todos ?? []).filter((todo) => `${todo.projectId} ${todo.title} ${todo.detail}`.toLocaleLowerCase().includes(view.q.trim().toLocaleLowerCase()))
   const error = index.error || settings.error || (needTasks ? tasks.error : '')
 
@@ -107,7 +107,7 @@ export function HomePage({ onSignOut }: { onSignOut: () => void }) {
         {!selection && <label className="flex w-full min-w-0 items-center gap-2"><Search size={16} className="shrink-0 text-ink-2" /><input className="home-input" type="search" value={view.q} onChange={(event) => setView({ ...view, q: event.target.value })} placeholder={t('home.search')} aria-label={t('home.search')} /></label>}
       </div>
     </header>
-    {selection ? <HomeProjectPage key={selection.projectId} selection={selection} settings={settings.data} state={view} onState={setView} onChanged={changed} onNavigate={navigate} onTab={(tab) => setProjectQuery({ tab })} onThread={(thread) => setProjectQuery({ thread, tab: 'chat' })} /> : <main className="vp-safe-bottom min-h-0 min-w-0 flex-1 overflow-y-auto p-3 [--vp-safe-pad:2rem]">
+    {selection ? <HomeProjectPage key={selection.projectId} selection={selection} settings={settings.data} state={view} onState={setView} onChanged={changed} onNavigate={navigate} onTab={(tab) => setProjectQuery({ tab })} onThread={(thread) => setProjectQuery({ thread })} returnSearch={previous ?? ''} /> : <main className="vp-safe-bottom min-h-0 min-w-0 flex-1 overflow-y-auto p-3 [--vp-safe-pad:2rem]">
       <div className="mx-auto max-w-[1500px] space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 text-vp-xs text-ink-2">{data && <span>{t('home.generated', { time: '' })}<HomeTime at={data.generatedAt} /></span>}<label className="flex items-center gap-2"><input type="checkbox" checked={view.all} onChange={(event) => setView({ ...view, all: event.target.checked })} />{t('home.allProjects')}</label></div>
         {error && <p role="alert" className="rounded-vp border border-hairline bg-surface p-3">{safeText(error)}</p>}
@@ -115,14 +115,14 @@ export function HomePage({ onSignOut }: { onSignOut: () => void }) {
         {index.data && !index.data.available && <section className="rounded-vp-lg border border-hairline bg-surface p-4"><h2 className="font-semibold">{t('home.unavailable')}</h2><p className="mt-2 text-ink-2">{safeText(index.data.reason)}</p></section>}
         {data && <>
           {view.view === 'cards' && <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,18rem)]">
-            <aside className="min-w-0 md:col-start-2 md:row-start-1"><details open className="rounded-vp-lg border border-hairline bg-surface p-3"><summary className="cursor-pointer text-vp-md font-semibold">{t('home.todos', { count: todos.length })}</summary><div className="mt-3"><HomeTodos todos={todos} onNavigate={navigate} /></div></details></aside>
+            <aside className="min-w-0 md:col-start-2 md:row-start-1"><details open className="rounded-vp-lg border border-hairline bg-surface p-3"><summary className="cursor-pointer text-vp-md font-semibold">{t('home.todos', { count: todos.length })}</summary><div className="mt-3"><HomeTodos todos={todos} onNavigate={navigate} returnSearch={address.search} /></div></details></aside>
             <section className="@container min-w-0 md:col-start-1 md:row-start-1" aria-label={t('home.projects')}>
               {!projects.length && <p className="rounded-vp border border-hairline bg-surface p-4 text-ink-2">{t(data.projects.length ? 'home.noMatches' : 'home.emptyProjects')}</p>}
-              <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">{projects.map((project) => <HomeCard key={project.id} project={project} fields={settings.data?.fields} onNavigate={navigate} busy={mutation.busy} onPin={() => void mutation.run(() => homeApi.patchMeta(project.id, { rev: project.metaRev, pinned: !project.meta.pinned }))} />)}</div>
+              <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">{projects.map((project) => <HomeCard key={project.id} project={project} fields={settings.data?.fields} returnSearch={address.search} onNavigate={navigate} busy={mutation.busy} onPin={() => void mutation.run(() => homeApi.patchMeta(project.id, { rev: project.metaRev, pinned: !project.meta.pinned }))} />)}</div>
             </section>
           </div>}
-          {view.view === 'table' && <HomeTable projects={data.projects} tasks={tasks.data ?? []} todos={data.todos} settings={settings.data} state={view} onState={setView} onChanged={changed} onNavigate={navigate} />}
-          {view.view === 'todo' && <section className="rounded-vp-lg border border-hairline bg-surface p-4"><h1 className="mb-4 flex items-center gap-2 text-vp-md font-semibold"><ClipboardList size={18} />{t('home.todos', { count: todos.length })}</h1><HomeTodos todos={todos} onNavigate={navigate} /></section>}
+          {view.view === 'table' && <HomeTable projects={data.projects} tasks={tasks.data ?? []} todos={data.todos} settings={settings.data} state={view} onState={setView} onChanged={changed} onNavigate={navigate} returnSearch={address.search} />}
+          {view.view === 'todo' && <section className="rounded-vp-lg border border-hairline bg-surface p-4"><h1 className="mb-4 flex items-center gap-2 text-vp-md font-semibold"><ClipboardList size={18} />{t('home.todos', { count: todos.length })}</h1><HomeTodos todos={todos} onNavigate={navigate} returnSearch={address.search} /></section>}
           {data.warnings.length > 0 && <details className="rounded-vp border border-hairline bg-surface p-3 text-vp-sm"><summary className="cursor-pointer">{t('home.warnings', { count: data.warnings.length })}</summary><ul className="mt-2 space-y-2 text-ink-2">{data.warnings.map((warning, i) => <li key={i}>{safeText(warning.projectId)} · {safeText(warning.file)}<p>{safeText(warning.message)}</p></li>)}</ul></details>}
         </>}
       </div>
@@ -133,10 +133,10 @@ export function HomePage({ onSignOut }: { onSignOut: () => void }) {
   </div>
 }
 
-function HomeTodos({ todos, onNavigate }: { todos: HomeTodo[]; onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void }) {
+function HomeTodos({ todos, onNavigate, returnSearch }: { todos: HomeTodo[]; onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void; returnSearch: string }) {
   if (!todos.length) return <p className="text-vp-sm text-ink-2">{t('home.noTodos')}</p>
   const kinds = [...new Set(todos.map((todo) => todo.kind))]
   return <div className="space-y-4">{kinds.map((kind) => <section key={kind}><h2 className="mb-2 text-vp-sm font-semibold">{t(todoLabelKey(kind))}</h2><ul className="space-y-2">{todos.filter((todo) => todo.kind === kind).map((todo) => <li key={todo.id} className="min-w-0 border-t border-hairline pt-2">
-    <a href={todoLink(todo)} onClick={onNavigate} className="block rounded-vp px-2 py-1.5 hover:bg-surface-2"><p className="text-vp-xs text-ink-2">{safeText(todo.projectId)}</p><p className="mt-1 text-vp-base font-medium">{safeText(todo.title)}</p>{todo.detail && <p className="mt-1 text-vp-sm text-ink-2">{safeText(todo.detail)}</p>}<p className="mt-1 text-vp-xs text-ink-3"><HomeTime at={todo.at} /></p></a>
+    <a href={todoLink(todo, returnSearch)} onClick={onNavigate} className="block rounded-vp px-2 py-1.5 hover:bg-surface-2"><p className="text-vp-xs text-ink-2">{safeText(todo.projectId)}</p><p className="mt-1 text-vp-base font-medium">{safeText(todo.title)}</p>{todo.detail && <p className="mt-1 text-vp-sm text-ink-2">{safeText(todo.detail)}</p>}<p className="mt-1 text-vp-xs text-ink-3"><HomeTime at={todo.at} /></p></a>
   </li>)}</ul></section>)}</div>
 }

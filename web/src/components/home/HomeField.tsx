@@ -27,7 +27,7 @@ export function HomeField(props: FieldProps) {
   const [editing, setEditing] = useState<(FieldProps & { anchor: { top: number; left: number } }) | null>(null)
   const values = Array.isArray(props.value) ? props.value : [props.value]
   return <>
-    <button ref={button} type="button" className="vp-control h-auto max-w-full flex-wrap justify-start py-1 text-left" title={t('home.editField', { field: props.label })} disabled={props.disabled} onClick={() => {
+    <button ref={button} type="button" className="vp-control home-wrap-control home-field max-w-full text-left" title={t('home.editField', { field: props.label })} disabled={props.disabled} onClick={() => {
       const rect = button.current!.getBoundingClientRect()
       // Keep the callback as well as the value: it holds the revision that
       // was visible when editing began, even if a poll replaces the row.
@@ -40,7 +40,7 @@ export function HomeField(props: FieldProps) {
 }
 
 function FieldEditor({ label, value, options, type, required, onSave, onClose, anchor }: FieldProps & { onClose: () => void; anchor: { top: number; left: number } }) {
-  const [draft, setDraft] = useState(value)
+  const [draft, setDraft] = useState(typeof value === 'string' && !options ? safeText(value) : value)
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const multiple = Array.isArray(draft)

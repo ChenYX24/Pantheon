@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { HOME_PATH, homeProjectLink, homeSelection, legacyHomeRedirect, routeFor } from './routes'
+import { HOME_PATH, homeOverviewLink, homeProjectLink, homeSelection, legacyHomeRedirect, routeFor } from './routes'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.resetModules() })
 
@@ -25,9 +25,17 @@ describe('Stage A.2 project routes', () => {
     expect(url.searchParams.get('tab')).toBe('tasks')
     expect(url.searchParams.get('task')).toBe('A2')
     expect(url.searchParams.get('priority')).toBe('P1')
+    expect(homeOverviewLink(url.search)).toBe(`${HOME_PATH}?view=table&priority=P1`)
     expect(legacyHomeRedirect(HOME_PATH, '?project=pantheon&report=x.md')).toContain('tab=reports')
     expect(legacyHomeRedirect(HOME_PATH, '?project=../x')).toBeNull()
     expect(legacyHomeRedirect(`${HOME_PATH}/p/pantheon`, '?project=other')).toBeNull()
+  })
+  it('carries the overview query in the href, including links opened in another tab', () => {
+    const from = '?view=table&table=tasks&q=前端&tags=a%2Cb&group=priority'
+    const url = new URL(homeProjectLink({ projectId: 'pantheon', taskId: 'A2' }, from), 'https://panel.test')
+    expect(new URLSearchParams(homeOverviewLink(url.search).split('?')[1])).toEqual(new URLSearchParams(from))
+    expect(homeOverviewLink('?tab=chat')).toBe(HOME_PATH)
+    expect(homeOverviewLink('?from=%2F%2Fevil.test')).toBe(`${HOME_PATH}?%2F%2Fevil.test=`)
   })
   it('uses the configured base path for parsing, building and legacy redirects', async () => {
     vi.resetModules()

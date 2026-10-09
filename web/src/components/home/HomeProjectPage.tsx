@@ -18,7 +18,7 @@ import { useHomeMutation } from './useHomeMutation'
 
 const tabs = [['chat', MessageSquare], ['tasks', CheckSquare], ['reports', FileText], ['sessions', Terminal], ['info', Info]] as const
 
-export function HomeProjectPage({ selection, settings, state, onState, onTab, onThread, onChanged, onNavigate }: {
+export function HomeProjectPage({ selection, settings, state, onState, onTab, onThread, onChanged, onNavigate, returnSearch }: {
   selection: HomeSelection
   settings: HomeFieldSettings | null
   state: HomeViewState
@@ -27,6 +27,7 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
   onThread: (thread: string) => void
   onChanged: () => Promise<unknown> | void
   onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void
+  returnSearch?: string
 }) {
   const { projectId, taskId, reportFile } = selection
   const wide = useMediaQuery('(min-width: 768px)')
@@ -68,7 +69,7 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
       }
     }
   })
-  const nav = <nav className="vp-safe-bottom shrink-0 border-t border-hairline bg-surface p-2 md:border-t-0 md:border-b" aria-label={t('home.navigation')}>
+  const nav = <nav className="home-project-tabs vp-safe-bottom shrink-0 border-t border-hairline bg-surface p-2 md:border-t-0 md:border-b" aria-label={t('home.navigation')}>
     <div className="vp-segmented" role="tablist">{visibleTabs.map(([id, Icon], index) => <button key={id} id={`home-tab-${id}`} type="button" role="tab" aria-selected={activeTab === id} aria-controls={`home-panel-${id}`} tabIndex={activeTab === id ? 0 : -1} className="vp-tab h-auto flex-col gap-1 px-1 py-2 text-vp-xs" onClick={() => onTab(id)} onKeyDown={(event) => {
       const next = event.key === 'ArrowRight' ? (index + 1) % visibleTabs.length : event.key === 'ArrowLeft' ? (index + visibleTabs.length - 1) % visibleTabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? visibleTabs.length - 1 : null
       if (next !== null) { event.preventDefault(); onTab(visibleTabs[next][0]); document.getElementById(`home-tab-${visibleTabs[next][0]}`)?.focus() }
@@ -85,8 +86,8 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
       <div className={`${wide || tab !== 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-[2] flex-col border-hairline md:border-l`}>
         {wide && nav}
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3">
-          <div id="home-panel-tasks" role="tabpanel" aria-labelledby="home-tab-tasks" hidden={rightTab !== 'tasks'}>{rightTab === 'tasks' && <HomeTable projects={[data.project]} tasks={data.tasks.map((task) => ({ ...task, projectId }))} todos={data.todos} settings={settings} state={state} onState={onState} onChanged={changed} onNavigate={onNavigate} projectId={projectId} target={taskId} />}</div>
-          <div id="home-panel-reports" role="tabpanel" aria-labelledby="home-tab-reports" hidden={rightTab !== 'reports'}><HomeReports projectId={projectId} reports={data.reports} target={reportFile} active={rightTab === 'reports'} busy={busy} onNavigate={onNavigate} onReply={(report, text) => run(async () => {
+          <div id="home-panel-tasks" role="tabpanel" aria-labelledby="home-tab-tasks" hidden={rightTab !== 'tasks'}>{rightTab === 'tasks' && <HomeTable projects={[data.project]} tasks={data.tasks.map((task) => ({ ...task, projectId }))} todos={data.todos} settings={settings} state={state} onState={onState} onChanged={changed} onNavigate={onNavigate} projectId={projectId} target={taskId} returnSearch={returnSearch} />}</div>
+          <div id="home-panel-reports" role="tabpanel" aria-labelledby="home-tab-reports" hidden={rightTab !== 'reports'}><HomeReports projectId={projectId} reports={data.reports} target={reportFile} active={rightTab === 'reports'} busy={busy} onNavigate={onNavigate} returnSearch={returnSearch} onReply={(report, text) => run(async () => {
             await homeApi.replyReport(projectId, report.file, text, report.rev)
             showToast({ kind: 'success', key: 'home.replySaved' })
           })} /></div>

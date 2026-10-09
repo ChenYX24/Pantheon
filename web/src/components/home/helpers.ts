@@ -43,11 +43,11 @@ export function selectionFromSearch(search: string): HomeSelection | null {
   }
 }
 
-export function todoLink(todo: HomeTodo): string {
+export function todoLink(todo: HomeTodo, returnSearch = ''): string {
   if (todo.kind === 'session_waiting' && todo.link.sessionId) return panelOpeningSession(todo.link.sessionId)
   return projectLink({
     projectId: todo.link.projectId || todo.projectId,
     taskId: todo.link.taskId,
     reportFile: todo.link.reportFile,
-  })
+  }, returnSearch)
 }

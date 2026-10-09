@@ -52,7 +52,7 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     }
     case 'snapshot': {
       const pending = event.messages.find((entry) => entry.role === 'assistant' && entry.status === 'pending')
-      const olderRead = state.run?.thread === event.thread && !event.messages.some((entry) => entry.id === state.run?.id)
+      const olderRead = !pending && state.run?.thread === event.thread && !event.messages.some((entry) => entry.id === state.run?.id)
       return {
         ...state,
         messages: event.thread === state.thread && !state.sending && !olderRead ? event.messages : state.messages,

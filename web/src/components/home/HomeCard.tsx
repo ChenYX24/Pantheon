@@ -15,13 +15,13 @@ export function HomeTime({ at }: { at: string }) {
   return <time dateTime={at} title={safeText(at)}>{relativeTime(at, now, lang) || '—'}</time>
 }
 
-export function HomeCard({ project, onNavigate, fields, onPin, busy }: { project: HomeProject; onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void; fields?: HomeFields; onPin?: () => void; busy?: boolean }) {
+export function HomeCard({ project, onNavigate, fields, onPin, busy, returnSearch }: { project: HomeProject; onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void; fields?: HomeFields; onPin?: () => void; busy?: boolean; returnSearch?: string }) {
   return (
     <article data-testid="home-project-card" className="relative min-w-0 rounded-vp-lg border border-hairline bg-surface p-4 [overflow-wrap:anywhere]">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <h3 className="text-vp-md font-semibold">
-            <a className="hover:text-accent after:absolute after:inset-0" href={projectLink({ projectId: project.id })} onClick={onNavigate}>{safeText(project.id)} <ArrowUpRight size={14} className="inline" /></a>
+            <a className="hover:text-accent after:absolute after:inset-0" href={projectLink({ projectId: project.id }, returnSearch)} onClick={onNavigate}>{safeText(project.id)} <ArrowUpRight size={14} className="inline" /></a>
           </h3>
           {project.aliases.length > 0 && <p className="mt-1 text-vp-sm text-ink-2">{safeText(project.aliases.join(' · '))}</p>}
         </div>
@@ -46,7 +46,7 @@ export function HomeCard({ project, onNavigate, fields, onPin, busy }: { project
       <div className="mt-4 border-t border-hairline pt-3">
         <p className="mb-1 flex items-center gap-1 text-vp-xs text-ink-2"><FileText size={13} />{t('home.latestReport')}</p>
         {project.latestReport ? <>
-          <a className="relative z-10 text-vp-base font-medium hover:text-accent" href={projectLink({ projectId: project.id, reportFile: project.latestReport.file })} onClick={onNavigate}>{safeText(project.latestReport.title)}</a>
+          <a className="relative z-10 text-vp-base font-medium hover:text-accent" href={projectLink({ projectId: project.id, reportFile: project.latestReport.file }, returnSearch)} onClick={onNavigate}>{safeText(project.latestReport.title)}</a>
           <p className="mt-1 text-vp-base text-ink-2">{safeText(project.latestReport.summary)}</p>
           <p className="mt-1 text-vp-xs text-ink-3"><HomeTime at={project.latestReport.at} /></p>
         </> : <p className="text-vp-sm text-ink-3">{t('home.noReports')}</p>}

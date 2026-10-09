@@ -25,9 +25,10 @@ export interface HomeTableProps {
   onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void
   projectId?: string
   target?: string
+  returnSearch?: string
 }
 
-export function HomeTable({ projects, tasks, todos, settings, state, onState, onChanged, onNavigate, projectId, target }: HomeTableProps) {
+export function HomeTable({ projects, tasks, todos, settings, state, onState, onChanged, onNavigate, projectId, target, returnSearch }: HomeTableProps) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [fieldsOpen, setFieldsOpen] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -52,8 +53,8 @@ export function HomeTable({ projects, tasks, todos, settings, state, onState, on
     return value ? safeText(optionFor(value, options).label || value) : t('home.groupEmpty')
   }
   const taskCells = (row: HomeTaskRow): ReactNode[] => [
-    <a className="vp-control" href={homeProjectLink({ projectId: row.projectId, taskId: row.id })} onClick={onNavigate}>{safeText(row.projectId)}</a>,
-    <div><a className="text-vp-xs text-ink-2 hover:text-accent" href={homeProjectLink({ projectId: row.projectId, taskId: row.id })} onClick={onNavigate}>{safeText(row.id)}</a><div><HomeField label={t('home.table.title')} value={row.title} required disabled={busy} onSave={(value) => patch(row, { title: String(value) })} /></div></div>,
+    <a className="vp-control" href={homeProjectLink({ projectId: row.projectId, taskId: row.id }, returnSearch)} onClick={onNavigate}>{safeText(row.projectId)}</a>,
+    <div><a className="text-vp-xs text-ink-2 hover:text-accent" href={homeProjectLink({ projectId: row.projectId, taskId: row.id }, returnSearch)} onClick={onNavigate}>{safeText(row.id)}</a><div><HomeField label={t('home.table.title')} value={row.title} required disabled={busy} onSave={(value) => patch(row, { title: String(value) })} /></div></div>,
     <HomeField label={t('home.status')} value={row.status} options={fields?.task.status.options} required disabled={busy || !fields} onSave={(value) => patch(row, { status: value as HomeTaskRow['status'] })} />,
     <HomeField label={t('home.table.priority')} value={row.priority} options={fields?.task.priority.options} disabled={busy || !fields} onSave={(value) => patch(row, { priority: String(value) })} />,
     <HomeField label={t('home.table.tags')} value={row.tags} options={fields?.task.tags.options} disabled={busy || !fields} onSave={(value) => patch(row, { tags: value as string[] })} />,
@@ -64,7 +65,7 @@ export function HomeTable({ projects, tasks, todos, settings, state, onState, on
     <HomeTime at={row.updated} />,
   ]
   const projectCells = (row: HomeProject): ReactNode[] => [
-    <a className="vp-control" href={homeProjectLink({ projectId: row.id })} onClick={onNavigate}>{safeText(row.id)}</a>,
+    <a className="vp-control" href={homeProjectLink({ projectId: row.id }, returnSearch)} onClick={onNavigate}>{safeText(row.id)}</a>,
     safeText(row.goal) || t('home.noGoal'),
     <HomeField label={t('home.table.labels')} value={row.meta.labels} options={fields?.project.labels.options} disabled={busy || !fields} onSave={(value) => meta(row, { labels: value as string[] })} />,
     <HomeField label={t('home.table.priority')} value={row.meta.priority} options={fields?.project.priority.options} disabled={busy || !fields} onSave={(value) => meta(row, { priority: String(value) })} />,

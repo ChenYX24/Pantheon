@@ -7,7 +7,7 @@ import { safeText } from '../text'
 import { HomeTime } from './HomeCard'
 import { projectLink } from './helpers'
 
-export function HomeReports({ projectId, reports, target, active, onNavigate, onReply, busy }: {
+export function HomeReports({ projectId, reports, target, active, onNavigate, onReply, busy, returnSearch }: {
   projectId: string
   reports: HomeReport[]
   target?: string
@@ -15,6 +15,7 @@ export function HomeReports({ projectId, reports, target, active, onNavigate, on
   onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void
   onReply: (report: HomeReport, text: string) => Promise<boolean>
   busy: boolean
+  returnSearch?: string
 }) {
   useEffect(() => {
     if (active && target) {
@@ -26,17 +27,18 @@ export function HomeReports({ projectId, reports, target, active, onNavigate, on
 
   return <section className="space-y-4" aria-label={t('home.tab.reports')}>
     {!reports.length && <p className="text-ink-2">{t('home.noReports')}</p>}
-    {reports.map((report) => <ReportCard key={report.file} projectId={projectId} report={report} selected={target === report.file} onNavigate={onNavigate} onReply={onReply} busy={busy} />)}
+    {reports.map((report) => <ReportCard key={report.file} projectId={projectId} report={report} selected={target === report.file} onNavigate={onNavigate} onReply={onReply} busy={busy} returnSearch={returnSearch} />)}
   </section>
 }
 
-function ReportCard({ projectId, report, selected, onNavigate, onReply, busy }: {
+function ReportCard({ projectId, report, selected, onNavigate, onReply, busy, returnSearch }: {
   projectId: string
   report: HomeReport
   selected: boolean
   onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void
   onReply: (report: HomeReport, text: string) => Promise<boolean>
   busy: boolean
+  returnSearch?: string
 }) {
   const [text, setText] = useState('')
   const original = useRef<HomeReport | null>(null)
@@ -49,7 +51,7 @@ function ReportCard({ projectId, report, selected, onNavigate, onReply, busy }: 
       </div>
       <h3 className="text-vp-md font-semibold">{safeText(report.title)}</h3>
       <p className="mt-2 text-vp-base text-ink-2">{safeText(report.summary)}</p>
-      {report.task && <a href={projectLink({ projectId, taskId: report.task })} onClick={onNavigate} className="vp-control mt-2">{t('home.reportTask', { id: safeText(report.task) })}</a>}
+      {report.task && <a href={projectLink({ projectId, taskId: report.task }, returnSearch)} onClick={onNavigate} className="vp-control mt-2">{t('home.reportTask', { id: safeText(report.task) })}</a>}
       <div className="mt-2 min-w-0 overflow-hidden"><Markdown text={report.body} /></div>
       {report.replies.length > 0 && <section className="mt-3 space-y-2 border-t border-hairline pt-3" aria-label={t('home.replies')}>{report.replies.map((reply, index) => <div key={`${reply.at}:${index}`} className="rounded-vp bg-surface-2 p-3"><p className="text-vp-xs text-ink-2"><HomeTime at={reply.at} /></p><Markdown text={reply.text} /></div>)}</section>}
       {(report.needsUser || text) && <form className="mt-3 space-y-2" onSubmit={async (event) => {

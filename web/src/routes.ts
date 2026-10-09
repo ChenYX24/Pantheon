@@ -52,13 +52,20 @@ export function routeFor(pathname: string): Route {
 export type HomeTab = 'chat' | 'tasks' | 'reports' | 'sessions' | 'info'
 export interface HomeSelection { projectId: string; taskId?: string; reportFile?: string; thread?: string; tab?: HomeTab }
 
-export function homeProjectLink({ projectId, taskId, reportFile, thread, tab }: HomeSelection): string {
+export function homeProjectLink({ projectId, taskId, reportFile, thread, tab }: HomeSelection, returnSearch = ''): string {
   const query = new URLSearchParams()
   if (tab || reportFile || taskId) query.set('tab', tab ?? (reportFile ? 'reports' : 'tasks'))
   if (thread && thread !== 'main') query.set('thread', thread)
   if (taskId) query.set('task', taskId)
   if (reportFile) query.set('report', reportFile)
+  if (returnSearch) query.set('from', returnSearch.replace(/^\?/, ''))
   return `${HOME_PATH}/p/${encodeURIComponent(projectId)}${query.size ? `?${query}` : ''}`
+}
+
+export function homeOverviewLink(projectSearch: string): string {
+  const from = new URLSearchParams(projectSearch).get('from')
+  const query = new URLSearchParams(from ?? '')
+  return `${HOME_PATH}${query.size ? `?${query}` : ''}`
 }
 
 export function homeSelection(projectId: string, search: string): HomeSelection {
@@ -81,6 +88,9 @@ export function legacyHomeRedirect(pathname: string, search: string): string | n
   const projectId = query.get('project') ?? ''
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(projectId)) return null
   query.delete('project')
+  const overview = new URLSearchParams(query)
+  for (const key of ['tab', 'thread', 'task', 'report', 'from']) overview.delete(key)
+  if (overview.size && !query.has('from')) query.set('from', overview.toString())
   if (!query.has('tab')) query.set('tab', query.has('report') ? 'reports' : query.has('task') ? 'tasks' : 'chat')
   return `${homeProjectLink({ projectId })}?${query}`
 }

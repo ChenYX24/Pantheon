@@ -4,7 +4,7 @@ import { t, type Key } from '../../i18n'
 import { HomeAPIError, homeApi, type HomeExecutor, type HomeSuggestion, type HomeThread } from '../../protocol/home'
 import { askConfirm, askText } from '../ask'
 import { Markdown } from '../panels/Rendered'
-import { safeBody, safeText } from '../text'
+import { safeText } from '../text'
 import { chatPending, chatPollInterval, chatReducer, enterSends, initialChat, loadHomeModel, modelDefault, saveHomeModel } from './chat'
 import { HomeDialog } from './HomeDialog'
 import { HomeTime } from './HomeCard'
@@ -83,11 +83,13 @@ export function HomeChat({ projectId, thread, onThread, busy, onSuggestion, revi
         const list = await homeApi.threads(projectId, controller.signal)
         if (controller.signal.aborted) return
         setThreads(list.threads)
+        const knownRun = current.current.run
+        const run = knownRun && list.threads.some((item) => item.id === knownRun.thread) ? knownRun : null
+        if (knownRun && !run) dispatch({ type: 'delete', thread: knownRun.thread })
         const active = await homeApi.discussion(projectId, thread, controller.signal)
         if (controller.signal.aborted) return
         dispatch({ type: 'snapshot', thread, messages: active.messages })
         setLoadedThread(thread)
-        const run = current.current.run
         // Thread summaries do not carry run status. Inspect other threads so
         // a reload or another browser cannot enable a second project run.
         const others = run && run.thread !== thread ? [run.thread] : active.messages.some((entry) => entry.status === 'pending') ? [] : list.threads.map((item) => item.id).filter((id) => id !== thread)
@@ -165,11 +167,11 @@ export function HomeChat({ projectId, thread, onThread, busy, onSuggestion, revi
       {loadedThread !== thread && !state.messages.length && <p role="status" className="text-ink-2">{t('home.loading')}</p>}
       {loadedThread === thread && !state.messages.length && <div className="flex h-full min-h-48 flex-col items-start justify-center gap-3">
         <p className="text-vp-md font-medium">{t('home.noMessages')}</p>
-        {(['progress', 'next', 'blockers'] as const).map((key) => <button type="button" className="vp-control h-auto whitespace-normal border border-hairline px-3 py-2 text-left" key={key} onClick={() => { setMessage(t(`home.starter.${key}`)); textarea.current?.focus() }}>{t(`home.starter.${key}`)}</button>)}
+        {(['progress', 'next', 'blockers'] as const).map((key) => <button type="button" className="vp-control home-wrap-control whitespace-normal border border-hairline px-3 py-2 text-left" key={key} onClick={() => { setMessage(t(`home.starter.${key}`)); textarea.current?.focus() }}>{t(`home.starter.${key}`)}</button>)}
       </div>}
       <div role="log" aria-label={t('home.tab.chat')} aria-live="polite" className="space-y-4">{state.messages.map((entry) => <article key={entry.id} className={`min-w-0 rounded-vp-lg p-3 ${entry.role === 'user' ? 'ml-auto max-w-[85%] border border-hairline bg-surface-2' : 'mr-auto max-w-[95%] bg-surface'}`}>
         <div className="mb-1 flex flex-wrap items-center gap-2 text-vp-xs text-ink-2"><strong>{t(entry.role === 'user' ? 'home.you' : 'home.manager')}</strong><HomeTime at={entry.at} /></div>
-        {entry.role === 'user' ? <p className="whitespace-pre-wrap text-vp-base">{safeBody(entry.text)}</p> : <div className="min-w-0 overflow-hidden"><Markdown text={entry.text} /></div>}
+        {entry.role === 'user' ? <p className="whitespace-pre-wrap text-vp-base">{entry.text.replace(/\r\n?/g, '\n').split(/(\n|\t)/).map((part, index) => <span key={index}>{part === '\n' || part === '\t' ? part : safeText(part)}</span>)}</p> : <div className="min-w-0 overflow-hidden"><Markdown text={entry.text} /></div>}
         {entry.status === 'pending' && <p role="status" className="flex items-center gap-2 text-vp-sm text-ink-2"><RotateCw size={14} className="animate-spin" />{t('home.thinkingElapsed', { seconds: Math.max(0, Math.floor((now - (Date.parse(entry.at) || now)) / 1000)) })}</p>}
         {entry.status === 'failed' && <div role="alert" className="mt-2 text-vp-sm"><p>{safeText(entry.error || t('home.replyFailed'))}</p><button type="button" className="vp-control mt-2" disabled={pending || retrying} onClick={async () => {
           if (posting.current) return
@@ -181,12 +183,12 @@ export function HomeChat({ projectId, thread, onThread, busy, onSuggestion, revi
           } catch (error) { dispatch({ type: 'error', error: error instanceof Error ? error.message : String(error) }); refreshThreads() }
           finally { posting.current = false; setRetrying(false) }
         }}><RotateCw size={14} />{t('home.retry')}</button></div>}
-        {entry.suggestedModel && <button type="button" className="vp-control mt-2 h-auto max-w-full whitespace-normal text-left" title={safeText(entry.suggestedModel.reason)} disabled={!models.data?.harnesses.some((item) => item.harness === entry.suggestedModel?.harness && item.installed)} onClick={() => { if (entry.suggestedModel) choose(entry.suggestedModel) }}>{t('home.switchModel', { model: safeText(entry.suggestedModel.model) })}</button>}
+        {entry.suggestedModel && <button type="button" className="vp-control home-wrap-control mt-2 max-w-full whitespace-normal text-left" title={safeText(entry.suggestedModel.reason)} disabled={!models.data?.harnesses.some((item) => item.harness === entry.suggestedModel?.harness && item.installed)} onClick={() => { if (entry.suggestedModel) choose(entry.suggestedModel) }}>{t('home.switchModel', { model: safeText(entry.suggestedModel.model) })}</button>}
         {entry.status === 'done' && entry.suggestions?.map((suggestion, index) => {
           const key = `${entry.id}:${index}`
           return <div key={key} className="mt-2 min-w-0 space-y-1 rounded-vp border border-hairline p-2">
             <SuggestionDetails suggestion={suggestion} />
-            <button type="button" className="vp-control h-auto max-w-full whitespace-normal text-left" disabled={busy || !!applying || applied.has(key)} onClick={async () => {
+            <button type="button" className="vp-control home-wrap-control max-w-full whitespace-normal text-left" disabled={busy || !!applying || applied.has(key)} onClick={async () => {
               if (applyingRef.current) return
               applyingRef.current = true; setApplying(key)
               try { if (await onSuggestion(suggestion)) { setApplied((old) => new Set([...old, key])); refreshThreads() } }
@@ -220,7 +222,7 @@ export function HomeChat({ projectId, thread, onThread, busy, onSuggestion, revi
     {menu && <HomeDialog title={t('home.threads')} onClose={() => setMenu(false)}><div className="space-y-2">
       <button type="button" className="vp-control" disabled={mutation.busy} onClick={() => void mutation.run(async () => { const item = await homeApi.createThread(projectId); onThread(item.id); setMenu(false) })}><Plus size={14} />{t('home.newThread')}</button>
       {threads.map((item) => <div key={item.id} className="flex min-w-0 items-center gap-1 rounded-vp border border-hairline p-2">
-        <button type="button" className="vp-control h-auto min-w-0 flex-1 justify-start whitespace-normal text-left" aria-current={item.id === thread ? 'page' : undefined} onClick={() => { onThread(item.id); setMenu(false) }}><span className="min-w-0">{safeText(item.title)} <span className="text-ink-3">({item.messageCount})</span></span></button>
+        <button type="button" className="vp-control home-wrap-control min-w-0 flex-1 justify-start whitespace-normal text-left" aria-current={item.id === thread ? 'page' : undefined} onClick={() => { onThread(item.id); setMenu(false) }}><span className="min-w-0">{safeText(item.title)} <span className="text-ink-3">({item.messageCount})</span></span></button>
         <button type="button" className="vp-control" disabled={mutation.busy} title={t('home.renameThread')} onClick={() => void mutation.run(async () => {
           const title = await askText({ title: t('home.renameThread'), confirm: t('home.save'), cancel: t('home.cancel'), field: { label: t('home.threadTitle'), value: item.title } })
           if (!title?.trim()) return false
