@@ -118,6 +118,11 @@ board-check: build    ## Project planning, approvals and capabilities on desktop
 workflow-check: build ## Real tmux/worktree worker recovery using fixture model executors
 	node web/scripts/workflow-check.mjs
 
+.PHONY: home-check
+home-check: build     ## Pantheon home from a temporary cyx registry, desktop/phone, DB rebuild
+	node web/scripts/home-check.mjs
+	CHECK_BASE_PATH=/dev node web/scripts/home-check.mjs
+
 .PHONY: verify
 verify:               ## Every check there is (~20 min)
 	scripts/verify.sh
