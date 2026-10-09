@@ -7,6 +7,7 @@ import { App } from './App'
 import { AuthGate } from './components/AuthGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { ChatPage } from './components/ChatPage'
+import { HomePage } from './components/HomePage'
 import { SharingPage } from './components/SharingPage'
 import { routeFor } from './routes'
 import { watchSystemTheme } from './components/theme'
@@ -33,7 +34,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 // routes.ts selects the authenticated application page. The terminal, project
-// workspace, chat and sharing pages use the same AuthGate and cookie.
+// workspace, home, chat and sharing pages use the same AuthGate and cookie.
 // `/share/<token>` never reaches this bundle: the server answers it
 // with the page the link draws, or with a page of its own saying the link no
 // longer works, so a stranger holding a share address is never one click from
@@ -42,7 +43,9 @@ const route = routeFor(location.pathname)
 
 createRoot(root).render(
   <StrictMode>
-    {route.kind === 'projects' ? (
+    {route.kind === 'home' ? (
+      <ErrorBoundary label="Project home"><AuthGate>{(_auth, signOut) => <HomePage onSignOut={signOut} />}</AuthGate></ErrorBoundary>
+    ) : route.kind === 'projects' ? (
       <ErrorBoundary label="Project workspace"><AuthGate>{(_auth, signOut) => <ProjectWorkspace onSignOut={signOut} />}</AuthGate></ErrorBoundary>
     ) : route.kind === 'sharing' ? (
       <ErrorBoundary label="The sharing page">

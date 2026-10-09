@@ -124,6 +124,13 @@ describe('who spells the sharing path', () => {
     expect(linking.length).toBeGreaterThan(0)
   })
 
+  it('makes Home reachable from both the sidebar and project workspace', () => {
+    for (const file of ['components/Sidebar.tsx', 'components/ProjectWorkspace.tsx']) {
+      expect(readFileSync(join(SRC, file), 'utf8')).toContain('href={HOME_PATH}')
+    }
+    expect(readFileSync(join(SRC, 'main.tsx'), 'utf8')).toContain("route.kind === 'home'")
+  })
+
   it('is what the panel is handed a page through', () => {
     // Both ends of the hand-over go through routes.ts: the page navigates
     // with panelOpeningPage and the panel reads with pageToOpen. One end

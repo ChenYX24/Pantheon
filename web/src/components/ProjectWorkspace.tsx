@@ -5,10 +5,10 @@ import { confirmProjectAction } from './projectConfirm'
 import { t, useLang } from '../i18n'
 import { workflowRequest as request } from '../protocol/workflow'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowLeft, CheckCircle2, CircleDot, Layers3, MessageSquare, RefreshCw, ShieldCheck, Workflow } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, CircleDot, House, Layers3, MessageSquare, RefreshCw, ShieldCheck, Workflow } from 'lucide-react'
 import { api } from '../protocol/api'
 import type { Project, Session } from '../protocol/wire'
-import { PANEL_PATH, panelOpeningSession } from '../routes'
+import { HOME_PATH, PANEL_PATH, panelOpeningSession } from '../routes'
 import { ProjectBoard } from './ProjectBoard'
 import { CapabilityInventory, StageNotifications, ProposalChanges } from './ProjectWorkflowDetails'
 import type { Assignment, Board } from './ProjectBoard'
@@ -89,6 +89,7 @@ export function ProjectWorkspace({ onSignOut }: { onSignOut: () => void }) {
     <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-hairline bg-surface px-4 py-3">
       <a className="vp-control" href={PANEL_PATH} aria-label={t('pm.back')} onClick={async (event) => { event.preventDefault(); if (await discard()) location.assign(PANEL_PATH) }}><ArrowLeft size={17} /></a>
       <Layers3 size={21} /><span className="text-vp-md font-semibold tracking-tight">Parthenon</span><span className="text-vp-base text-ink-2">{t('pm.workspace')}</span>
+      <a className="vp-control" href={HOME_PATH} onClick={async (event) => { event.preventDefault(); if (await discard()) location.assign(HOME_PATH) }}><House size={16} />{t('home.title')}</a>
       <button className="vp-control ml-auto" type="button" onClick={() => void act(refresh)} aria-label={t('pm.refresh')}><RefreshCw size={16} /></button>
       <button className="vp-control" type="button" onClick={async () => { if (await discard()) onSignOut() }}>{t('pm.signOut')}</button>
       <LanguageSwitch testid="projects" />

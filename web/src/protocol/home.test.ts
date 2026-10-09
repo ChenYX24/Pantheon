@@ -56,4 +56,16 @@ describe('the Stage A HTTP contract', () => {
     mockAPI({ available: false, reason: 'Harness missing' })
     expect(await homeApi.index()).toEqual({ available: false, reason: 'Harness missing' })
   })
+
+  it('reports an unreadable response instead of drawing an empty home', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>proxy error</html>', { status: 502 })))
+    await expect(homeApi.index()).rejects.toMatchObject({ status: 502, message: 'HTTP 502' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not JSON', { status: 200 })))
+    await expect(homeApi.index()).rejects.toThrow()
+  })
+
+  it('does not require a response body from sending a discussion message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    expect(await homeApi.sendMessage('pantheon', 'Hello', { harness: 'claude', model: 'model' })).toBeNull()
+  })
 })

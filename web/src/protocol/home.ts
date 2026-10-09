@@ -147,7 +147,10 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   })
-  const data = await response.json().catch(() => null)
+  const data = response.status === 204 ? null : await response.json().catch(() => {
+    if (response.ok) throw new Error(t('home.invalidResponse'))
+    return null
+  })
   if (!response.ok) {
     const reason = typeof data?.error === 'string' ? data.error : `HTTP ${response.status}`
     throw new HomeAPIError(response.status, reason === 'stale' ? t('home.conflict') : reason, data?.rev)

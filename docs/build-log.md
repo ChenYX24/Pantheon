@@ -24548,3 +24548,35 @@ verified binary was installed only in the development runtime; projects and
 roadmap revision 5 persisted. Public HTTPS smoke checks passed again, and the
 unrelated live Caddy configuration and production process remained unchanged.
 The default full verify matrix and a committed-release check remain later gates.
+
+## 2026-10-09 — Stage A project home frontend
+
+The authenticated `/home` page follows `docs/pantheon/stage-a-contract.md`:
+file-backed project cards and to-dos lead to a project sheet with Chat, Tasks,
+Reports and Sessions. The same components fill the screen below 768px. The
+to-do list moves above the cards and can collapse there; forms and tab actions
+remain available at either width. The sidebar and project workspace link to
+the new route, including when the panel is mounted under a base path.
+
+Task status changes submit the revision that was displayed, with the shared
+confirmation dialog before completion or cancellation. A stale response reloads
+the task data without repeating the write or clearing a rejected draft. Chat
+suggestions run only from their buttons, and suggested models only change the
+executor picker. Sessions use the existing launch-profile catalogue and picker.
+The home index and open project refresh every ten seconds while visible;
+reads are cancelled when their view closes or its request changes.
+
+The discussion POST has no specified response shape, so the frontend reloads
+messages through GET after sending. Report links use an optional `report` query
+alongside the specified `project` and `task` queries. Notification types include
+the baseline status required by contract §7; notifications have a typed fetch
+helper but no new UI surface in §8.
+
+The focused single-worker Vitest pass covers 62 tests in 14 files, including
+the existing i18n and design-scale checks, HTTP payloads and mount paths, pure
+helpers, visibility polling, confirmation gates and static rendering. TypeScript
+passed with a 400 MiB heap (593 MiB peak RSS); the 900 and 600 MiB attempts were
+killed with exit 137 on the shared host. Every check ran at nice level 19.
+Browser layout checks, backend integration and the embedded bundle build are
+left to integration; this work does not change Go, `internal/webui/dist`,
+deployments or running panels.
