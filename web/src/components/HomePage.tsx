@@ -79,7 +79,7 @@ export function HomePage({ onSignOut }: { onSignOut: () => void }) {
                 <div id="home-todos" hidden={!wide && !todosOpen} className="mt-3">
                   {!todos.length && <p className="text-vp-base text-ink-2">{t('home.noTodos')}</p>}
                   <ul className="space-y-2">{todos.map((todo) => <li key={todo.id} className="min-w-0 border-t border-hairline pt-2 first:border-0 first:pt-0">
-                    <a href={todoLink(todo)} onClick={navigate} className="block rounded-vp p-1 hover:bg-surface-2">
+                    <a href={todoLink(todo)} onClick={navigate} className="block rounded-vp px-2 py-1.5 hover:bg-surface-2">
                       <p className="text-vp-xs text-ink-2">{t(todoLabelKey(todo.kind))} · {safeText(todo.projectId)}</p>
                       <p className="mt-1 text-vp-base font-medium">{safeText(todo.title)}</p>
                       {todo.detail && <p className="mt-1 text-vp-sm text-ink-2">{safeText(todo.detail)}</p>}
