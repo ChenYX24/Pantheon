@@ -24548,3 +24548,18 @@ verified binary was installed only in the development runtime; projects and
 roadmap revision 5 persisted. Public HTTPS smoke checks passed again, and the
 unrelated live Caddy configuration and production process remained unchanged.
 The default full verify matrix and a committed-release check remain later gates.
+
+## A file-backed home for Pantheon (2026-10-09)
+
+The Stage A home index reads the cyx registry and Harness manifests, active
+context, tasks and reports. It derives review, approval, blocker, question and
+session to-dos without storing project work in SQLite. Reads are capped and
+cached by path, mtime and size; malformed files produce warnings. Filesystem
+operations stay inside an opened Harness root, including symlinks changed during
+a read or write. Task creation reserves its directory, and status patches compare
+the file revision before an atomic rename while preserving unrelated bytes.
+
+The targeted home tests cover parsing, warning recovery, file limits, symlink
+escapes, stable to-do identities and byte-preserving writes. Checks run serially
+at nice 19 with one Go worker on the shared host; deployment and browser checks
+are outside this worker's assignment.
