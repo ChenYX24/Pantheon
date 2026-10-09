@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jiangmuran/vibepanel/internal/id"
@@ -374,30 +375,62 @@ func (d *DB) ClaimNext(ctx context.Context, pid string) (WorkflowRun, ProjectBoa
 	return r, b, stage, task, tx.Commit()
 }
 func (d *DB) UpdateWorkflowRun(ctx context.Context, r WorkflowRun) error {
-	raw, _ := json.Marshal(r)
-	result, err := d.sql.ExecContext(ctx, `UPDATE pm_runs SET content=?,state=?,finished_at=? WHERE id=? AND state!='stopping'`, string(raw), r.State, r.FinishedAt, r.ID)
-	if err != nil {
-		return err
-	}
-	n, _ := result.RowsAffected()
-	if n != 1 {
+	if r.State != "running" || r.FinishedAt != 0 {
 		return ErrWorkflowBusy
 	}
-	return nil
-}
-func (d *DB) FinishWorkflowRun(ctx context.Context, r WorkflowRun) error {
 	tx, err := d.sql.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE pm_runs SET state=?,content=?,finished_at=? WHERE id=? AND state IN ('claimed','running','stopping')`, r.State, mustJSON(r), now(), r.ID)
+	saved, err := lockWorkflowRun(ctx, tx, r.ID)
 	if err != nil {
 		return err
 	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
+	// A delayed progress receipt must never reopen a finished run or release a
+	// pause. Session/workspace can be bound at launch, but cannot be rebound.
+	if (saved.State != "claimed" && saved.State != "running") || !sameWorkflowRun(saved, r) {
+		return ErrWorkflowBusy
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE pm_runs SET content=?,state=? WHERE id=?`, mustJSON(r), r.State, r.ID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (d *DB) FinishWorkflowRun(ctx context.Context, r WorkflowRun) error {
+	if r.State != "done" && r.State != "review" && r.State != "blocked" {
+		return ErrWorkflowBusy
+	}
+	tx, err := d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	saved, err := lockWorkflowRun(ctx, tx, r.ID)
+	if err != nil {
+		return err
+	}
+	if !sameWorkflowRun(saved, r) {
+		return ErrWorkflowBusy
+	}
+	if saved.State != "claimed" && saved.State != "running" && saved.State != "stopping" {
+		// Reconciliation may receive the same result again after reconnecting.
+		// The first terminal receipt owns the task evidence and history.
 		return nil
+	}
+	if saved.State == "stopping" {
+		// PauseStage can commit after the reconciler reads its snapshot. Decide
+		// against the locked database state, not that earlier in-memory state.
+		r.State = "blocked"
+		if !strings.HasPrefix(r.Summary, "Paused. ") {
+			r.Summary = "Paused. " + r.Summary
+		}
+	}
+	if r.FinishedAt <= 0 {
+		r.FinishedAt = now()
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE pm_runs SET state=?,content=?,finished_at=? WHERE id=?`, r.State, mustJSON(r), r.FinishedAt, r.ID); err != nil {
+		return err
 	}
 	var raw string
 	if err = tx.QueryRowContext(ctx, `SELECT content FROM pm_tasks WHERE project_id=? AND id=?`, r.ProjectID, r.TaskID).Scan(&raw); err != nil {
@@ -424,6 +457,41 @@ func (d *DB) FinishWorkflowRun(ctx context.Context, r WorkflowRun) error {
 	}
 	return tx.Commit()
 }
+
+// Take SQLite's write lock before reading state: a deferred read followed by a
+// write can fail with SQLITE_BUSY_SNAPSHOT while another connection pauses or
+// completes the run. The no-op UPDATE serializes those decisions without a new
+// lease system. SQL columns, not a receipt's copy, own the run's identity/state.
+func lockWorkflowRun(ctx context.Context, tx *sql.Tx, runID string) (WorkflowRun, error) {
+	var saved WorkflowRun
+	var raw, state, project, task, stage, approval string
+	var started, finished int64
+	err := tx.QueryRowContext(ctx, `UPDATE pm_runs SET id=id WHERE id=? RETURNING content,state,project_id,task_id,stage_id,approval_id,started_at,finished_at`, runID).
+		Scan(&raw, &state, &project, &task, &stage, &approval, &started, &finished)
+	if errors.Is(err, sql.ErrNoRows) {
+		return saved, ErrNotFound
+	}
+	if err != nil {
+		return saved, err
+	}
+	if err = json.Unmarshal([]byte(raw), &saved); err != nil {
+		return saved, err
+	}
+	saved.ID, saved.ProjectID, saved.TaskID = runID, project, task
+	saved.StageID, saved.ApprovalID, saved.State = stage, approval, state
+	saved.StartedAt, saved.FinishedAt = started, finished
+	return saved, nil
+}
+
+func sameWorkflowRun(saved, receipt WorkflowRun) bool {
+	return saved.ID == receipt.ID && saved.ProjectID == receipt.ProjectID &&
+		saved.TaskID == receipt.TaskID && saved.StageID == receipt.StageID &&
+		saved.ApprovalID == receipt.ApprovalID && saved.StartedAt == receipt.StartedAt &&
+		saved.Deadline == receipt.Deadline &&
+		(saved.SessionID == "" || saved.SessionID == receipt.SessionID) &&
+		(saved.Workspace == "" || saved.Workspace == receipt.Workspace)
+}
+
 func (d *DB) ActiveWorkflowRuns(ctx context.Context) ([]WorkflowRun, error) {
 	rows, err := d.sql.QueryContext(ctx, `SELECT content,state FROM pm_runs WHERE state IN ('claimed','running','stopping')`)
 	if err != nil {
