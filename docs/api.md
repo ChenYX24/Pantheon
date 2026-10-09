@@ -1866,3 +1866,109 @@ There is no way to attach to a session's terminal over plain HTTP: that is the
 WebSocket's job, and a polling shim would be a worse version of it. There is no
 API for the setup token; it is printed to the panel's own log on first run and
 consumed once.
+
+
+## Parthenon project workflow
+
+These routes require the owner's existing authentication. Planning and development
+instances allow project state changes but disable host settings, channel startup
+and ordinary session launches. Automatic execution is separately enabled with
+`--workflow-execute`; saving or proposing a plan does not enable it.
+
+### `GET /api/workflow/settings`
+
+Returns `executionEnabled`, `notificationsEnabled` and `development` booleans.
+
+### `GET /api/workflow/executors`
+
+Returns installed Claude/Codex harnesses and the model IDs configured locally,
+including the configuration source. Installation does not prove provider access.
+
+### `GET /api/workflow/recipients`
+
+Returns paired chat recipients as `channel`, `peerId`, `name`. No channel secrets.
+
+### `GET /api/projects/{id}/board`
+
+Returns `projectId`, `goal`, `rev`, `planVersion`, `stages` and `tasks`. Each stage
+has primary/secondary `{harness,model}`, rationale and time/attempt budgets. Tasks
+carry phase, status, dependencies, acceptance criteria, verification commands,
+evidence and optional session association. An empty board has revision zero.
+
+### `PUT /api/projects/{id}/board`
+
+Accepts the full board with the last observed `rev`. Returns the saved board.
+Rejects invalid dependencies/cycles, unknown phases and completion without
+acceptance evidence (`400`); stale revisions or active execution return `409`.
+Plan edits create a new plan version and invalidate existing stage authorizations.
+
+### `GET /api/projects/{id}/workflow`
+
+Returns approvals, runs, recent project-manager messages, events and capability
+revisions. Runs distinguish execution state from terminal state and expose
+attempts, switch status, workspace, session, evidence and optional partial cost.
+
+### `POST /api/projects/{id}/discussion`
+
+Body: `message` and `executor: {harness,model}`. Persists the user turn and a
+read-only project-manager response; an optional full-board proposal is returned
+as a draft. Applying it requires the board endpoint with the proposal revision.
+This endpoint never approves or executes the proposed stage.
+
+### `POST /api/projects/{id}/stages/{stage}/approve`
+
+Body: `{rev}`. Atomically authorizes the current stage's models, tasks, checks
+and budgets for 24 hours. Repeating the same decision is idempotent. A stale
+version returns `409`. An enabled scheduler may subsequently claim ready tasks.
+
+### `POST /api/projects/{id}/stages/{stage}/pause`
+
+Pauses stage authorization and requests cancellation of active work. Preserve
+work and wait for its checkpoint before editing the plan. Replanning a failed
+task creates a new version that requires a fresh stage confirmation.
+
+### `POST /api/projects/{id}/capabilities`
+
+Body: `name`, `kind`, `content`. Kinds: `skill`, `rule`, `mcp`, `handoff`, `remote`.
+Creates an immutable numbered draft. This is project guidance, not a write to a
+global Skill or MCP configuration file.
+
+### `POST /api/projects/{id}/capabilities/{cap}/activate`
+
+Body: `{revision}`. Activates the chosen draft and supersedes the previous
+version of that capability. Active execution blocks this mutation. Activation
+changes the plan version and invalidates previous stage approvals.
+
+### `GET /api/projects/{id}/capability-inventory`
+
+Returns discoverable local/project/plugin Skills with content fingerprints and
+configured MCP server names. MCP credentials and transport values are omitted.
+
+### `GET /api/projects/{id}/handoff`
+
+Returns schema version, current board and shared workflow state for a handoff,
+plus generation time and whether automatic execution is enabled. It does not
+export external Claude/Codex private transcripts or channel credentials.
+
+### `GET /api/projects/{id}/notifications`
+
+Returns recent stage confirmation deliveries and their pending/sent/failed or
+resolved states. A successful delivery is not stage authorization.
+
+### `POST /api/projects/{id}/stages/{stage}/notify`
+
+Body: `revision`, `channel`, `peerId`. Queues a deduplicated confirmation for an
+already paired recipient. Returns `409` when delivery is unavailable in preview.
+Callbacks use the existing channel adapter's identity checks and atomically
+bind the decision to that recipient, plan version, digest and expiry. Panel
+approval and remote confirmation resolve the same authorization.
+
+### Development mount
+
+With `--development --base-path /dev`, every route documented above is relative
+to that mount: `/api/state` is reached at `/dev/api/state`, the project workspace
+at `/dev/projects`, and the socket at `/dev/ws`. The reverse proxy preserves the
+prefix; unprefixed backend paths return 404. `/dev` redirects to the workspace.
+Session/challenge cookie names and paths, browser storage keys, static assets
+and PWA scope belong to this instance. Only the trusted local proxy may assert
+HTTPS through forwarded headers. The root deployment behavior is unchanged.

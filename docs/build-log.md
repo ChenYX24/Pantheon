@@ -24441,3 +24441,110 @@ meant as a sentinel, which made every search tool here treat the file as
 binary and skip it. Searching for where the warning came from found nothing
 until the file was read directly. It is `'\u0000none'` now: the same string,
 written so the file is text.
+
+
+## 2026-10-02 — Parthenon development workspace
+
+The new `/projects` workspace keeps project discussions, task acceptance,
+stage model assignments and capability revisions together. Claude and Codex
+models are read from local configuration; each stage records the recommended
+pair and a bounded execution budget. Generated plans remain proposals until
+applied, and stage authorization is a separate version-bound decision.
+
+SQLite owns task claims and the single-writer invariant. Workers run under the
+configured tmux socket in detached Git worktrees, with durable job, checkpoint
+and result receipts. A task is accepted only after its declared checks and an
+independent review; unavailable review becomes awaiting acceptance. Failover
+uses the approved pair, preserves changes and cannot bypass required user
+input. Each turn starts fresh with shared plan and bounded handoff context.
+Threshold-based token rollover and remote executor leases remain planned.
+
+Skill and MCP inventory is read-only; project capabilities are immutable draft
+revisions that can be applied to this project. This does not rewrite global
+skills, MCP connections or credentials. The packaged project-manager skill
+contains the shared planning and handoff conventions. Existing Feishu/Weixin
+adapters can deliver version-bound confirmations to paired recipients; a
+transaction resolves conflicting callbacks and panel decisions consistently.
+
+`--development` disables shared hook upgrades, history ingestion, resource
+control, channel startup and host-mutating API routes. Automatic dispatch is
+a separate opt-in `--workflow-execute`; the managed preview starts with it off.
+`scripts/panel-dev.py` runs the preview without sudo and imports only project
+metadata through the API. Prepared proxy/service templates are not installed
+by the script. Production retains its binary, database, socket and service.
+
+Focused store/API/config/worker tests and the initial browser save/reload check
+passed. No real provider run or external message was used in these checks.
+The broader validation report and remaining delivery gates live with the
+project's Harness plan rather than being represented as completed features.
+
+
+## 2026-10-02 — Uninstall checks must identify the instance
+
+The upstream install-check teardown selected every `vibepanel serve` process
+through `pgrep -f`, even though its HOME, data and socket were temporary. Running
+that suite beside production sent SIGTERM to the real service twice; systemd
+restarted it and all seven tmux sessions remained available. Verification was
+stopped immediately when the PID change was detected. The binary and schema
+were not upgraded.
+
+Standalone teardown now reads Linux process argv/environment and requires both
+the configured data directory and tmux socket to match. A binary name alone
+never authorizes a signal. Platforms without reliable ownership evidence leave
+standalone termination to the operator. Developer-leftover discovery reports
+orphan candidates instead of killing unrelated live test servers. A dedicated
+fixture regression exercises concurrent instances, inherited defaults and
+arguments containing spaces before any uninstall integration can run.
+
+The corrected installer matrix passed with the production PID and restart count
+unchanged. Package-serial `make check` then passed every Go race test and all
+687 frontend tests; the earlier concurrent verification had timed out. Panes
+checks now bind Vite explicitly to the loopback address their probe uses.
+
+The project workspace uses the existing bilingual dictionary, type/radius
+tokens and confirmation component. Long acceptance commands wrap and scroll
+inside the confirmation. The browser check covers both languages on a phone,
+cancelling approval without granting it, preserving a cancelled draft switch,
+capability import/activation and approval invalidation. The real tmux/worktree
+fixture also passed primary failure, secondary completion, independent review
+and backend restart recovery. Full release verification remains incomplete;
+Docker-dependent matrices require a usable Docker daemon.
+
+## A development release at /dev (2026-10-02)
+
+The requested public entry shares the live hostname, so the development server
+now supports a validated `--base-path` in development mode. The server mounts the
+API and frontend under that prefix and rewrites its HTML/manifest bootstrap.
+The frontend scopes requests, links, downloads, uploads and WebSocket URLs without
+patching global browser APIs. Session and passkey challenge cookies have separate
+names and paths; storage keys and service-worker/manifest scope are per instance.
+Root mode keeps its existing contracts. Same-origin paths are not an XSS boundary.
+
+The launcher publishes only its named Caddy route, using an ETag transaction to
+preserve other services' live configuration. A user-cron reconciler restores only
+the installed private binary and that route. Stop/withdraw disable its recovery;
+all unrelated cron entries and production resources remain intact. Private login,
+backups and process records remain outside the repositories.
+
+The mounted browser flow and actual public HTTPS login/logout passed desktop
+and mobile layouts, cookie/storage/PWA separation and zero escaped requests.
+Public board editing persisted revision 5 with 14 accepted tasks. The full serial
+fast gate passed with 690 frontend tests and all Go race tests. Automatic execution
+and external messaging remain disabled; provider, remote, session rollover and
+production-promotion gates remain explicit backlog items.
+
+Broader regression exposed an existing storage-health omission: project creation
+returned a raw 500 on a failed insert, without marking the storage stale. It now
+uses writeStoreErr. A real query-only SQLite regression exercises that branch;
+the restart browser harness also injects a file-size failure. Its absent-banner
+poll now has a bounded lookup instead of accumulating forty 30-second timeouts.
+The TLS harness resolves Playwright from web/package.json, where it is installed.
+The mounted board harness reports its own basepath summary so verify can correctly
+account for the executed target.
+
+The follow-up targeted HTTP race tests and lint passed. The corrected basepath,
+restart and TLS verify subset passed with zero failures/warnings in 3m09s. Its
+verified binary was installed only in the development runtime; projects and
+roadmap revision 5 persisted. Public HTTPS smoke checks passed again, and the
+unrelated live Caddy configuration and production process remained unchanged.
+The default full verify matrix and a committed-release check remain later gates.
