@@ -31,6 +31,7 @@ import (
 	"github.com/jiangmuran/vibepanel/internal/git"
 	"github.com/jiangmuran/vibepanel/internal/hooks"
 	"github.com/jiangmuran/vibepanel/internal/id"
+	"github.com/jiangmuran/vibepanel/internal/parthenon"
 	"github.com/jiangmuran/vibepanel/internal/resources"
 	"github.com/jiangmuran/vibepanel/internal/selfupdate"
 	"github.com/jiangmuran/vibepanel/internal/session"
@@ -45,12 +46,13 @@ import (
 
 // Server holds everything the HTTP layer needs.
 type Server struct {
-	Cfg      config.Config
-	DB       *store.DB
-	Tmux     *tmux.Client
-	Manager  *session.Manager
-	Hub      *ws.Hub
-	Detector *session.Detector
+	WorkflowRunner parthenon.Runner
+	Cfg            config.Config
+	DB             *store.DB
+	Tmux           *tmux.Client
+	Manager        *session.Manager
+	Hub            *ws.Hub
+	Detector       *session.Detector
 
 	// codexLogs follows the rollout file of each Codex session, for the ones
 	// no hook is reporting. The zero value reads the real /proc.
@@ -454,6 +456,7 @@ func (s *Server) Routes() http.Handler {
 		// endpoint here.
 		r.Group(func(r chi.Router) {
 			r.Use(s.RequireAuth)
+			r.Use(s.planningOnlyGate)
 
 			r.Get("/state", s.handleState)
 			r.Get("/settings/previews", s.handleListPreviews)
@@ -479,6 +482,8 @@ func (s *Server) Routes() http.Handler {
 
 			s.registerLaunchProfileRoutes(r)
 			s.registerClaudeAccountRoutes(r)
+			s.registerProjectBoardRoutes(r)
+			s.registerWorkflowRoutes(r)
 			s.registerPanelRoutes(r)
 			s.registerGitRoutes(r)
 			s.registerUpdateRoutes(r)
@@ -552,8 +557,20 @@ func (s *Server) Routes() http.Handler {
 	// serves the page. Before the catch-all for the same reason.
 	s.registerAdminPageRoutes(r)
 
-	r.Handle("/*", webui.Handler(s.Cfg.StaticDir))
-	return r
+	r.Handle("/*", webui.HandlerAt(s.Cfg.StaticDir, s.Cfg.BasePath))
+	if s.Cfg.BasePath == "" {
+		return r
+	}
+	outer := chi.NewRouter()
+	outer.Get(s.Cfg.BasePath, func(w http.ResponseWriter, req *http.Request) {
+		to := s.Cfg.BasePath + "/projects"
+		if req.URL.RawQuery != "" {
+			to += "?" + req.URL.RawQuery
+		}
+		http.Redirect(w, req, to, http.StatusTemporaryRedirect)
+	})
+	outer.Mount(s.Cfg.BasePath+"/", http.StripPrefix(s.Cfg.BasePath, r))
+	return outer
 }
 
 // ─── resolver ─────────────────────────────────────────────────────────────
@@ -1404,7 +1421,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := s.DB.CreateProject(r.Context(), id.New(), req.Name, abs)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		s.writeStoreErr(w, err)
 		return
 	}
 	s.notifyState()

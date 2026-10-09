@@ -32,6 +32,7 @@ import (
 	"github.com/jiangmuran/vibepanel/internal/hooks"
 	"github.com/jiangmuran/vibepanel/internal/httpapi"
 	"github.com/jiangmuran/vibepanel/internal/id"
+	"github.com/jiangmuran/vibepanel/internal/parthenon"
 	"github.com/jiangmuran/vibepanel/internal/resources"
 	"github.com/jiangmuran/vibepanel/internal/secret"
 	sessionpkg "github.com/jiangmuran/vibepanel/internal/session"
@@ -104,6 +105,14 @@ func commandNames() []string {
 
 func init() {
 	commands = map[string]func([]string) error{
+		"workflow-worker": func(args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("workflow-worker requires a job path")
+			}
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+			defer stop()
+			return parthenon.Worker(ctx, args[0], nil)
+		},
 		"serve":   cmdServe,
 		"project": cmdProject,
 		"session": cmdSession,
@@ -255,7 +264,7 @@ func cmdServe(args []string) error {
 	// agents, because the panel starts them. Under the system unit that is a
 	// different user with no transcripts, and the panel says so on screen
 	// rather than reporting zero.
-	if home, herr := os.UserHomeDir(); herr == nil {
+	if home, herr := os.UserHomeDir(); herr == nil && !a.cfg.Development {
 		scanner := usage.DefaultScanner(home)
 		// The zone the day labels are written in, which has to be the same one
 		// the queries ask about.
@@ -286,7 +295,7 @@ func cmdServe(args []string) error {
 		// connections while it reads somebody's history is a panel that looks
 		// broken on every restart.
 		srv.Tokens.Ensure(true)
-	} else {
+	} else if herr != nil {
 		logger.Warn("no home directory, so token usage has nothing to read", "err", herr)
 	}
 
@@ -317,17 +326,21 @@ func cmdServe(args []string) error {
 	// server is in the sessions' own scope before any session is created in it
 	// -- see internal/resources for why that is the whole fix for a panel that
 	// stalled with the session that ran out of memory.
-	srv.Resources = startResources(ctx, a, srv, logger, restartCh)
+	if !a.cfg.Development {
+		srv.Resources = startResources(ctx, a, srv, logger, restartCh)
+	}
 
 	// Claude Code hooks installed by an older build are missing the events
 	// added since, and nothing else would add them: the settings page counted
 	// a partial install as installed. Only an install that exists is touched.
-	if script, serr := hooks.InstallScript(filepath.Join(a.cfg.DataDir, "hooks")); serr == nil {
-		if added, uerr := hooks.UpgradeClaude(script); uerr != nil {
-			logger.Warn("claude code hooks were not upgraded", "err", uerr)
-		} else if len(added) > 0 {
-			logger.Info("claude code hooks upgraded; sessions started before this pick them up when restarted",
-				"added", strings.Join(added, ","))
+	if !a.cfg.Development {
+		if script, serr := hooks.InstallScript(filepath.Join(a.cfg.DataDir, "hooks")); serr == nil {
+			if added, uerr := hooks.UpgradeClaude(script); uerr != nil {
+				logger.Warn("claude code hooks were not upgraded", "err", uerr)
+			} else if len(added) > 0 {
+				logger.Info("claude code hooks upgraded; sessions started before this pick them up when restarted",
+					"added", strings.Join(added, ","))
+			}
 		}
 	}
 	// The pump reports output and bells straight into the server, which is how
@@ -350,10 +363,13 @@ func cmdServe(args []string) error {
 	// runs as before and the Chat page says the bridge is off.
 	srv.Shooter = shot.Render
 	srv.NewAssistant = newAssistant(a.cfg, srv)
-	if cerr := srv.StartChat(ctx); cerr != nil {
-		logger.Warn("chat bridge not started", "err", cerr)
-	}
+	if !a.cfg.Development {
+		if cerr := srv.StartChat(ctx); cerr != nil {
+			logger.Warn("chat bridge not started", "err", cerr)
+		}
 
+	}
+	go srv.RunWorkflow(ctx)
 	httpServer := &http.Server{
 		Addr:    a.cfg.Addr,
 		Handler: srv.Routes(),

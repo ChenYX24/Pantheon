@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,6 +39,12 @@ const (
 
 // Config is the fully resolved runtime configuration.
 type Config struct {
+	// PlanningOnly isolates the development board from host-wide agent settings.
+	PlanningOnly    bool
+	Development     bool
+	WorkflowExecute bool
+	BasePath        string
+
 	// DataDir holds the database, the generated tmux config and ACME state.
 	DataDir string
 
@@ -197,6 +204,7 @@ func (c *Config) envOverlay() {
 	str(&c.DataDir, "VIBEPANEL_DATA_DIR")
 	str(&c.Addr, "VIBEPANEL_ADDR")
 	str(&c.Domain, "VIBEPANEL_DOMAIN")
+	str(&c.BasePath, "VIBEPANEL_BASE_PATH")
 	str(&c.CertFile, "VIBEPANEL_CERT_FILE", "VIBEPANEL_TLS_CERT")
 	str(&c.KeyFile, "VIBEPANEL_KEY_FILE", "VIBEPANEL_TLS_KEY")
 	str(&c.ACMEEmail, "VIBEPANEL_ACME_EMAIL")
@@ -347,6 +355,9 @@ func (c Config) PasskeyBlocker() string {
 // Validate checks for combinations that cannot work, so the process fails at
 // startup with a clear message instead of at first request with a vague one.
 func (c Config) Validate() error {
+	if c.BasePath != "" && (!regexp.MustCompile(`^/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*$`).MatchString(c.BasePath) || !(c.Development || c.PlanningOnly)) {
+		return fmt.Errorf("base-path requires development mode and a path such as /dev without a trailing slash")
+	}
 	if c.DataDir == "" {
 		return errors.New("config: data dir must not be empty")
 	}

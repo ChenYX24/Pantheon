@@ -84,7 +84,7 @@ func (s *Server) handleOpenAdminPage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "not allowed from this address")
 		return
 	}
-	token := auth.TokenFromRequest(r)
+	token := auth.TokenFromRequestAt(r, s.Cfg.BasePath)
 	user, ok, err := s.currentUserBySessionOnly(r)
 	if err != nil {
 		s.noteStale(err)
@@ -129,7 +129,7 @@ func (s *Server) handleOpenAdminPage(w http.ResponseWriter, r *http.Request) {
 // currentUserBySessionOnly is currentUser with a cookie and never a bearer
 // token.
 func (s *Server) currentUserBySessionOnly(r *http.Request) (store.User, bool, error) {
-	if bearerToken(r) != "" || auth.TokenFromRequest(r) == "" {
+	if bearerToken(r) != "" || auth.TokenFromRequestAt(r, s.Cfg.BasePath) == "" {
 		return store.User{}, false, nil
 	}
 	return s.currentUser(r)

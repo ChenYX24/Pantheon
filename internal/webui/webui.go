@@ -2,8 +2,11 @@
 package webui
 
 import (
+	"bytes"
 	"embed"
+	"encoding/json"
 	"errors"
+	"html"
 	"io"
 	"io/fs"
 	"net/http"
@@ -11,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // dist holds the built frontend.
@@ -26,6 +30,12 @@ var dist embed.FS
 // disk instead, which is what `npm run dev` output is served through — an
 // embedded build would need a Go rebuild for every CSS change.
 func Handler(staticDir string) http.Handler {
+	return HandlerAt(staticDir, "")
+}
+
+// HandlerAt serves one build at the configured development mount. The prefix
+// comes from validated configuration, never a request header or query string.
+func HandlerAt(staticDir, basePath string) http.Handler {
 	if staticDir != "" {
 		// Absolute, once, here: the containment check below compares against a
 		// path that filepath.Abs has already resolved, and a relative --static-dir
@@ -35,7 +45,7 @@ func Handler(staticDir string) http.Handler {
 		if err != nil {
 			root = filepath.Clean(staticDir)
 		}
-		return spaHandler{fsys: os.DirFS(staticDir), root: root}
+		return spaHandler{fsys: os.DirFS(staticDir), root: root, basePath: basePath}
 	}
 	sub, err := fs.Sub(dist, "dist")
 	if err != nil {
@@ -43,7 +53,7 @@ func Handler(staticDir string) http.Handler {
 		// time mistake rather than something a deployment can hit.
 		panic("webui: embedded dist missing: " + err.Error())
 	}
-	return spaHandler{fsys: sub}
+	return spaHandler{fsys: sub, basePath: basePath}
 }
 
 // Built reports whether a frontend build is actually embedded.
@@ -61,7 +71,8 @@ func Built() bool {
 }
 
 type spaHandler struct {
-	fsys fs.FS
+	fsys     fs.FS
+	basePath string
 	// root is the absolute, cleaned directory being served, and is empty when
 	// serving the embedded build. Absolute because the containment check
 	// compares it against a resolved path; anything else silently rejects
@@ -73,6 +84,10 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
 	if name == "" {
 		name = "index.html"
+	}
+	if h.basePath != "" && (name == "index.html" || name == "manifest.webmanifest") {
+		h.serveMounted(w, r, name)
+		return
 	}
 
 	// Reject anything that escapes the root. path.Clean above already collapses
@@ -157,6 +172,10 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h spaHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
+	if h.basePath != "" {
+		h.serveMounted(w, r, "index.html")
+		return
+	}
 	f, err := h.fsys.Open("index.html")
 	if err != nil {
 		http.Error(w, "frontend not built; run `npm run build` in web/ or pass --static-dir",
@@ -176,6 +195,46 @@ func (h spaHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	setCacheHeaders(w, "index.html")
 	http.ServeContent(w, r, "index.html", st.ModTime(), rs)
+}
+
+func (h spaHandler) serveMounted(w http.ResponseWriter, r *http.Request, name string) {
+	raw, err := fs.ReadFile(h.fsys, name)
+	if err != nil {
+		http.Error(w, "frontend unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if name == "index.html" {
+		markup := string(raw)
+		prefix := html.EscapeString(h.basePath)
+		markup = strings.ReplaceAll(markup, `href="/`, `href="`+prefix+`/`)
+		markup = strings.ReplaceAll(markup, `src="/`, `src="`+prefix+`/`)
+		markup = strings.Replace(markup, "<head>", `<head><meta name="vibepanel-base" content="`+prefix+`">`, 1)
+		key, _ := json.Marshal("vibepanel:" + h.basePath + ":vibepanel.theme")
+		markup = strings.ReplaceAll(markup, "localStorage.getItem('vibepanel.theme')", "localStorage.getItem("+string(key)+")")
+		raw = []byte(markup)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	} else {
+		var manifest map[string]any
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			http.Error(w, "invalid web manifest", http.StatusInternalServerError)
+			return
+		}
+		manifest["id"], manifest["start_url"], manifest["scope"] = h.basePath+"/", h.basePath+"/projects", h.basePath+"/"
+		manifest["name"], manifest["short_name"] = "Parthenon Dev", "Parthenon Dev"
+		if icons, ok := manifest["icons"].([]any); ok {
+			for _, item := range icons {
+				if icon, ok := item.(map[string]any); ok {
+					if src, ok := icon["src"].(string); ok && strings.HasPrefix(src, "/") {
+						icon["src"] = h.basePath + src
+					}
+				}
+			}
+		}
+		raw, _ = json.Marshal(manifest)
+		w.Header().Set("Content-Type", "application/manifest+json")
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(raw))
 }
 
 // setCacheHeaders caches fingerprinted assets hard and index.html not at all.

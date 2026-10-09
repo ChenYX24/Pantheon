@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -390,5 +392,48 @@ func TestPlaintextOnANetworkIsNoticed(t *testing.T) {
 			t.Errorf("Addr=%q TLSMode=%q: PlaintextOnANetwork() = %v, want %v",
 				tc.addr, tc.tls, got, tc.want)
 		}
+	}
+}
+
+func TestDevelopmentCannotReuseProductionResources(t *testing.T) {
+	defaults := Default()
+	for _, args := range [][]string{
+		{"--planning-only", "--addr", "127.0.0.1:18443", "--data-dir", t.TempDir(), "--tmux-socket", "preview-test", "--isolation", "off"},
+		{"--planning-only", "--addr", "127.0.0.1:19443", "--data-dir", defaults.DataDir + "/preview", "--tmux-socket", "preview-test", "--isolation", "off"},
+		{"--planning-only", "--workflow-execute", "--addr", "127.0.0.1:19443", "--data-dir", t.TempDir(), "--tmux-socket", "preview-test", "--isolation", "off"},
+	} {
+		if _, err := Load(args, io.Discard); err == nil {
+			t.Fatalf("accepted unsafe development arguments: %v", args)
+		}
+	}
+}
+
+func TestDevelopmentRejectsUncreatedChildOfProductionSymlink(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	production := Default().DataDir
+	if err := os.MkdirAll(production, 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(production, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load([]string{"--development", "--addr", "127.0.0.1:19444", "--data-dir", filepath.Join(link, "new-child"), "--tmux-socket", "preview-fixture", "--isolation", "off"}, io.Discard)
+	if err == nil {
+		t.Fatal("accepted a new directory inside production through a symlink")
+	}
+}
+
+func TestDevelopmentBasePathValidation(t *testing.T) {
+	for _, prefix := range []string{"/dev", "/team/dev", "", "/", "/dev/", "//dev", "/..", "/dev?x", "/dev#x"} {
+		args := []string{"--development", "--base-path", prefix, "--addr", "127.0.0.1:19444", "--data-dir", t.TempDir(), "--tmux-socket", "preview-fixture", "--isolation", "off"}
+		_, err := Load(args, io.Discard)
+		valid := prefix == "/dev" || prefix == "/team/dev" || prefix == ""
+		if (err == nil) != valid {
+			t.Errorf("base path %q: %v", prefix, err)
+		}
+	}
+	if _, err := Load([]string{"--base-path", "/dev"}, io.Discard); err == nil {
+		t.Fatal("root production mode accepted a base path")
 	}
 }

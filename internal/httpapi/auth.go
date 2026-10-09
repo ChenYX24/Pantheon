@@ -339,7 +339,7 @@ func (s *Server) currentUser(r *http.Request) (store.User, bool, error) {
 		return user, true, nil
 	}
 
-	token := auth.TokenFromRequest(r)
+	token := auth.TokenFromRequestAt(r, s.Cfg.BasePath)
 	if token == "" {
 		return store.User{}, false, nil
 	}
@@ -736,12 +736,12 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if s.refuseBlockedWrite(r.Context(), w, r) {
 		return
 	}
-	if token := auth.TokenFromRequest(r); token != "" {
+	if token := auth.TokenFromRequestAt(r, s.Cfg.BasePath); token != "" {
 		if err := s.DB.DeleteAuthSession(r.Context(), auth.HashToken(token)); err != nil {
 			s.Log.Warn("delete auth session", "err", err)
 		}
 	}
-	auth.ClearCookie(w, s.cookieSecureFor(r))
+	auth.ClearCookieAt(w, s.cookieSecureFor(r), s.Cfg.BasePath)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -761,7 +761,7 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, user store
 		writeErr(w, http.StatusInternalServerError, "could not create a session")
 		return
 	}
-	auth.SetCookie(w, token, s.cookieSecureFor(r))
+	auth.SetCookieAt(w, token, s.cookieSecureFor(r), s.Cfg.BasePath)
 }
 
 // validateCredentials delegates to internal/auth, which is where the rules

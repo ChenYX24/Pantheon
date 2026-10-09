@@ -45,10 +45,23 @@ func HashToken(token string) []byte {
 
 // SetCookie writes the session cookie.
 func SetCookie(w http.ResponseWriter, token string, secure bool) {
+	SetCookieAt(w, token, secure, "")
+}
+
+// CookieNameAt separates co-hosted instances without accepting the root login.
+func CookieNameAt(name, basePath string) string {
+	if basePath == "" {
+		return name
+	}
+	sum := sha256.Sum256([]byte(basePath))
+	return fmt.Sprintf("%s_%x", name, sum[:6])
+}
+
+func SetCookieAt(w http.ResponseWriter, token string, secure bool, basePath string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:  CookieName,
+		Name:  CookieNameAt(CookieName, basePath),
 		Value: token,
-		Path:  "/",
+		Path:  basePath + "/",
 		// HttpOnly: script must not be able to read a token that opens a
 		// terminal. SameSite=Strict: no cross-site request should ever carry
 		// it, and this panel is never embedded anywhere.
@@ -62,10 +75,14 @@ func SetCookie(w http.ResponseWriter, token string, secure bool) {
 
 // ClearCookie removes the session cookie.
 func ClearCookie(w http.ResponseWriter, secure bool) {
+	ClearCookieAt(w, secure, "")
+}
+
+func ClearCookieAt(w http.ResponseWriter, secure bool, basePath string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName,
+		Name:     CookieNameAt(CookieName, basePath),
 		Value:    "",
-		Path:     "/",
+		Path:     basePath + "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 		Secure:   secure,
@@ -76,7 +93,11 @@ func ClearCookie(w http.ResponseWriter, secure bool) {
 
 // TokenFromRequest reads the session token, if there is one.
 func TokenFromRequest(r *http.Request) string {
-	c, err := r.Cookie(CookieName)
+	return TokenFromRequestAt(r, "")
+}
+
+func TokenFromRequestAt(r *http.Request, basePath string) string {
+	c, err := r.Cookie(CookieNameAt(CookieName, basePath))
 	if err != nil {
 		return ""
 	}

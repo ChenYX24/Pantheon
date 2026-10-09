@@ -14,6 +14,7 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 
+	"github.com/jiangmuran/vibepanel/internal/auth"
 	"github.com/jiangmuran/vibepanel/internal/id"
 	"github.com/jiangmuran/vibepanel/internal/store"
 )
@@ -212,9 +213,9 @@ func (s *Server) registerPasskeyRoutes(r chi.Router) {
 // authentication in progress.
 func (s *Server) setChallengeCookie(w http.ResponseWriter, r *http.Request, key string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     challengeCookie,
+		Name:     auth.CookieNameAt(challengeCookie, s.Cfg.BasePath),
 		Value:    key,
-		Path:     "/api/auth",
+		Path:     s.Cfg.BasePath + "/api/auth",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 		Secure:   s.cookieSecureFor(r),
@@ -223,7 +224,7 @@ func (s *Server) setChallengeCookie(w http.ResponseWriter, r *http.Request, key 
 }
 
 func (s *Server) takeChallenge(r *http.Request) (*challengeEntry, bool) {
-	c, err := r.Cookie(challengeCookie)
+	c, err := r.Cookie(auth.CookieNameAt(challengeCookie, s.Cfg.BasePath))
 	if err != nil || c.Value == "" {
 		return nil, false
 	}

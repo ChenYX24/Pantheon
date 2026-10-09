@@ -113,6 +113,9 @@ func (b *Bridge) handle(ctx context.Context, ch *channel, in Inbound) {
 	if in.Text != "" {
 		b.d.Audit(ctx, "chat.in", fmt.Sprintf("%s (%s): %s", who(peer), key, preview(in.Text)))
 	}
+	if b.workflowDecision(ctx, ch, peer, in) {
+		return
+	}
 	_, isCommand := Parse(in.Text)
 	_, _, addressed := SplitHandle(in.Text)
 	if b.catchUp(ctx, ch, peer, in.Action != nil || isCommand || addressed, lang) {

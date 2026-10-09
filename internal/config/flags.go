@@ -4,6 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"path/filepath"
+	"strings"
 )
 
 // Load resolves configuration from defaults, then environment, then flags.
@@ -26,7 +29,8 @@ import (
 //
 // Here rather than in main because this is the only place that prints usage,
 // and a second copy of the list is how the two stop agreeing.
-const Commands = `  serve      run the panel (the default with no command)
+const Commands = `  workflow-worker execute one approved task (internal tmux worker)
+  serve      run the panel (the default with no command)
   project    add, list and remove projects
   session    create, list and kill sessions
   hook       install or remove the agent state reporter
@@ -49,9 +53,13 @@ func Load(args []string, out io.Writer) (Config, error) {
 		fmt.Fprintf(out, "Usage:\n  vibepanel [command] [flags]\n\nCommands:\n%s\n", Commands)
 		fmt.Fprintf(out, "Flags (for serve, which is what runs with no command):\n")
 		fs.PrintDefaults()
-		fmt.Fprintf(out, "\nEvery flag has a VIBEPANEL_<UPPER_SNAKE> environment equivalent.\n")
+		fmt.Fprintf(out, "\nExcept development, planning-only and workflow-execute, every flag has a VIBEPANEL_<UPPER_SNAKE> environment equivalent.\n")
 	}
 
+	fs.BoolVar(&c.Development, "development", false, "isolated development instance; disable host-wide configuration writes (flag only)")
+	fs.BoolVar(&c.WorkflowExecute, "workflow-execute", false, "execute approved project stages in isolated worktrees (flag only)")
+	fs.BoolVar(&c.PlanningOnly, "planning-only", false, "development board: disable session launches and host configuration writes (flag only)")
+	fs.StringVar(&c.BasePath, "base-path", c.BasePath, "development URL prefix, e.g. /dev; the proxy must preserve this prefix")
 	var tlsMode string
 	fs.StringVar(&c.DataDir, "data-dir", c.DataDir, "directory for the database, tmux config and ACME state")
 	fs.StringVar(&c.Addr, "addr", c.Addr, "listen address")
@@ -95,5 +103,45 @@ func Load(args []string, out io.Writer) (Config, error) {
 	if err := c.Validate(); err != nil {
 		return Config{}, err
 	}
+	if c.PlanningOnly {
+		c.Development = true
+	}
+	if c.Development {
+		if c.PlanningOnly && c.WorkflowExecute {
+			return Config{}, fmt.Errorf("planning-only cannot enable workflow execution")
+		}
+		defaults := Default()
+		data := isolationPath(c.DataDir)
+		_, port, _ := net.SplitHostPort(c.Addr)
+		_, defaultPort, _ := net.SplitHostPort(defaults.Addr)
+		production := isolationPath(defaults.DataDir)
+		relative, _ := filepath.Rel(production, data)
+		sharesData := relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
+		if c.BindHost() != "127.0.0.1" || port == defaultPort || c.TmuxSocket == defaults.TmuxSocket || sharesData || c.Isolation != "off" {
+			return Config{}, fmt.Errorf("development requires a separate loopback port, data directory, tmux socket and --isolation off")
+		}
+	}
 	return c, nil
+}
+
+// Resolve existing parents too: a new child under a symlink must not make a
+// production data directory appear to be a separate development directory.
+func isolationPath(path string) string {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	parent := absolute
+	suffix := ""
+	for {
+		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+			return filepath.Join(resolved, suffix)
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return absolute
+		}
+		suffix = filepath.Join(filepath.Base(parent), suffix)
+		parent = next
+	}
 }
