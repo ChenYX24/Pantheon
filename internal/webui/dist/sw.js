@@ -37,12 +37,12 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
       for (const client of list) {
-        if ('focus' in client) {
+        if (client.url.startsWith(self.registration.scope) && 'focus' in client) {
           if (sessionId) client.postMessage({ t: 'focus-session', sessionId })
           return client.focus()
         }
       }
-      return self.clients.openWindow(sessionId ? `/?session=${encodeURIComponent(sessionId)}` : '/')
+      return self.clients.openWindow(self.registration.scope + (sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''))
     }),
   )
 })
