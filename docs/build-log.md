@@ -24636,3 +24636,11 @@ killed with exit 137 on the shared host. Every check ran at nice level 19.
 Browser layout checks, backend integration and the embedded bundle build are
 left to integration; this work does not change Go, `internal/webui/dist`,
 deployments or running panels.
+
+## 2026-10-10 — Stage A.2: agent scopes and model choices
+
+Home model choices now include built-in defaults when agent settings omit a
+model, without changing the workflow executor response. Headless agent runs
+use a separate user scope when available, so the panel unit’s memory cap does
+not kill an otherwise valid discussion. `--agent-scope off` keeps direct exec;
+the fallback and argv are tested without contacting systemd.

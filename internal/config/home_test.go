@@ -45,3 +45,21 @@ func TestHomeConfigDefaultsAndPrecedence(t *testing.T) {
 		}
 	}
 }
+
+func TestHomeAgentScopeConfig(t *testing.T) {
+	if Default().AgentScope != "auto" {
+		t.Fatal("default")
+	}
+	t.Setenv("VIBEPANEL_AGENT_SCOPE", "off")
+	c, err := Load(nil, io.Discard)
+	if err != nil || c.AgentScope != "off" {
+		t.Fatalf("env: %s %v", c.AgentScope, err)
+	}
+	c, err = Load([]string{"--agent-scope", "auto"}, io.Discard)
+	if err != nil || c.AgentScope != "auto" {
+		t.Fatalf("flag: %s %v", c.AgentScope, err)
+	}
+	if _, err = Load([]string{"--agent-scope", "invalid"}, io.Discard); err == nil {
+		t.Fatal("invalid scope")
+	}
+}

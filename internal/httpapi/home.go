@@ -19,6 +19,9 @@ import (
 
 func (s *Server) registerHomeRoutes(r chi.Router) {
 	r.Get("/home", s.handleHome)
+	r.Get("/home/models", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"harnesses": parthenon.Models()})
+	})
 	r.Get("/home/projects/{id}", s.handleHomeProject)
 	r.Post("/home/projects/{id}/tasks", s.handleHomeCreateTask)
 	r.Patch("/home/projects/{id}/tasks/{taskId}", s.handleHomePatchTask)
@@ -34,7 +37,7 @@ func homeSessionRoute(method, path string) bool {
 }
 
 func homePlanningRoute(method, path string) bool {
-	if method == http.MethodGet && (path == "/api/home" || path == "/api/home/notifications") {
+	if method == http.MethodGet && (path == "/api/home" || path == "/api/home/notifications" || path == "/api/home/models") {
 		return true
 	}
 	parts := strings.Split(strings.TrimPrefix(path, "/api/"), "/")
@@ -313,7 +316,7 @@ func (s *Server) handleHomeDiscussion(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
 	executor, _ := json.Marshal(req.Executor)
-	answer, err := runner(ctx, req.Executor, dir, homeDiscussionPrompt(detail, messages, req.Message)+"\nEXECUTOR: "+string(executor), false)
+	answer, err := runner(parthenon.WithAgentScope(ctx, s.Cfg.AgentScope), req.Executor, dir, homeDiscussionPrompt(detail, messages, req.Message)+"\nEXECUTOR: "+string(executor), false)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())
 		return

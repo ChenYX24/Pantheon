@@ -192,7 +192,7 @@ func (s *Server) handleProjectDiscussion(w http.ResponseWriter, r *http.Request)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
-	reply, err := parthenon.Discuss(ctx, s.WorkflowRunner, req.Executor, p.Path, req.Message, b, v)
+	reply, err := parthenon.Discuss(parthenon.WithAgentScope(ctx, s.Cfg.AgentScope), s.WorkflowRunner, req.Executor, p.Path, req.Message, b, v)
 	if err != nil {
 		_, _ = s.DB.AddWorkflowMessage(context.WithoutCancel(r.Context()), pid, "system", "项目经理暂未完成本轮："+err.Error(), nil)
 		writeErr(w, 502, err.Error())
@@ -342,7 +342,7 @@ func (s *Server) launchWorkflow(ctx context.Context, r *store.WorkflowRun, p sto
 	if err != nil {
 		return err
 	}
-	j := parthenon.Job{Run: *r, Stage: stage, Task: task, Goal: b.Goal, Capabilities: v.Capabilities, Board: &b, ResultPath: filepath.Join(runDir, "result.json")}
+	j := parthenon.Job{AgentScope: s.Cfg.AgentScope, Run: *r, Stage: stage, Task: task, Goal: b.Goal, Capabilities: v.Capabilities, Board: &b, ResultPath: filepath.Join(runDir, "result.json")}
 	data, err := json.Marshal(j)
 	if err != nil {
 		return err

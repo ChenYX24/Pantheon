@@ -1979,6 +1979,16 @@ Query `all=1` includes archived and merged projects. Returns `available`,
 returns `200` with `available: false` and a `reason`. Unreadable files become
 warnings and never fail the request.
 
+### `GET /api/home/models`
+
+Returns `harnesses`, each with `harness`, `installed`, `default`, `source` and
+`models`. Configured models precede the built-in defaults and Codex availability
+keys; duplicates are removed. Discussion still accepts a free-text model.
+`/api/workflow/executors` keeps its existing behavior. Agent runs use
+`--agent-scope auto` (`VIBEPANEL_AGENT_SCOPE`): a user systemd scope with
+`MemoryMax=1200M`, `CPUQuota=100%` and nice 10 when a user bus is available;
+otherwise direct execution. `off` forces direct execution.
+
 ### `GET /api/home/projects/{id}`
 
 Returns `project`, `tasks` (each with its `rev`), `reports` and `todos` for one
