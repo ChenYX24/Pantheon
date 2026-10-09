@@ -138,7 +138,7 @@ export function TokenUsageView({
             type="button"
             data-testid="token-view-refresh"
             onClick={() => void refresh()}
-            disabled={busy}
+            disabled={busy || !!data?.unavailableReason}
             title={busy ? t('spend.refreshing') : t('spend.refresh')}
             aria-label={busy ? t('spend.refreshing') : t('spend.refresh')}
             className="vp-control disabled:opacity-50"
@@ -171,6 +171,8 @@ export function TokenUsageView({
           {error && <Warning text={error} />}
           {!data ? (
             <p className="py-16 text-center text-vp-base text-ink-2">{t('spend.scanning')}</p>
+          ) : data.unavailableReason === 'development' ? (
+            <p className="py-16 text-center text-vp-base text-ink-2">{t('spend.developmentDisabled')}</p>
           ) : (
             <Body data={data} days={days} metric={metric} onMetric={setMetric} />
           )}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { attachTouchSelection } from './mobile/touchSelect'
+import { attachTouchSelection, wheelReport, WHEEL_NOTCH_ROWS } from './mobile/touchSelect'
 import { iosInputText, shouldBypassXtermKeydown } from './iosInput'
 import { liveTerminals } from './terminals'
 import { copyText, copyTextInGesture } from '../clipboard'
@@ -7,6 +7,8 @@ import { isBrowserCopy, isBrowserPaste } from './clipboardKeys'
 import { attachImeCommitFix } from './imeInput'
 import { rendererPreference } from './renderer'
 import { TerminalReplay } from './terminalReplay'
+import { fullscreenWheel } from './terminalWheel'
+import { TerminalScrollBar } from './TerminalScrollBar'
 import { LoadTimer, formatLoadBytes, loadPercents } from './terminalLoad'
 import { Terminal as Xterm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -51,12 +53,9 @@ interface Props {
   /**
    * A full-screen program is drawing in this pane -- tmux's `#{alternate_on}`.
    *
-   * It opens the view at the live screen and nothing more. It used to *pin* it
-   * there, which is what stopped anybody reading Claude Code's own history:
-   * Claude sets alternate_on and Codex does not, so one agent could be
-   * scrolled back and the other could not, on the same panel, with the same
-   * gesture. The history was never missing -- 2011 lines of it, measured, in
-   * tmux's normal buffer behind the alternate screen.
+   * Opens at the live screen and routes unmodified wheel input to page keys
+   * when the application does not request mouse reports. tmux keeps xterm in
+   * its normal buffer, so xterm cannot infer the pane's alternate-screen mode.
    */
   fullscreen?: boolean
   /** Fires with the selected text, or '' when the selection is dropped. */
@@ -156,10 +155,13 @@ export function TerminalView({
   // resubscribes every mounted terminal, and a hidden one must not arrive as a
   // viewer claiming the grid.
   const hiddenRef = useRef(hidden)
+  const fullscreenRef = useRef(fullscreen)
+  const scrollInputRef = useRef<(data: string) => void>(() => {})
   useEffect(() => {
     onSelectionRef.current = onSelectionChange
     onClipboardRef.current = onClipboard
     hiddenRef.current = hidden
+    fullscreenRef.current = fullscreen
   })
 
   // Terminal lifetime is tied to the session, never to the theme or to
@@ -588,8 +590,31 @@ export function TerminalView({
       ? attachTouchSelection(host, term, (data) => socket.write(sessionId, encoder.encode(data)))
       : undefined
 
+    const onWheel = fullscreenWheel(
+      () => ({ fullscreen: fullscreenRef.current, mouseTracking: term.modes.mouseTrackingMode,
+        replaying: replayQueue.replaying || !finishedRef.current }),
+      (data) => socket.write(sessionId, encoder.encode(data)),
+    )
+    host.addEventListener('wheel', onWheel, { capture: true, passive: false })
+
+    scrollInputRef.current = (data) => {
+      if (disposed || hiddenRef.current || !fullscreenRef.current
+        || replayQueue.replaying || !finishedRef.current) return
+      term.scrollToBottom()
+      if (term.modes.mouseTrackingMode !== 'none') {
+        // The control asks to page; keep the mouse protocol for apps that own
+        // scrolling that way. Send at the transcript's center, not a composer
+        // or the scrollbar's position outside the terminal grid.
+        const notches = Math.min(20, Math.max(1, Math.ceil(term.rows / WHEEL_NOTCH_ROWS)))
+        data = wheelReport(data.startsWith('\x1b[5~'), Math.floor(term.cols / 2), Math.floor(term.rows / 2))
+          .repeat(notches * Math.min(3, data.length / 4))
+      }
+      socket.write(sessionId, encoder.encode(data))
+    }
+
     return () => {
       disposed = true
+      scrollInputRef.current = () => {}
       // The next terminal starts uncovered and connecting, not in whatever
       // state this one was left. See the reset at the top.
       setCovering(false)
@@ -600,6 +625,7 @@ export function TerminalView({
       host.removeEventListener('keyup', finishIOSInput, true)
       detachIme()
       detachTouch?.()
+      host.removeEventListener('wheel', onWheel, true)
       host.removeEventListener('pointerup', copyOnSelect)
       selSub.dispose()
       dataSub.dispose()
@@ -615,31 +641,8 @@ export function TerminalView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, sessionId, readOnly, touchSelect])
 
-  // While a full-screen program is drawing, the scrollback is still yours.
-  //
-  // This used to snap every scroll straight back to the bottom, and the
-  // original reason was real: scrolling up inside a running agent landed the
-  // reader in whatever was on screen *before* it started -- 「滚动条一滑就滑到
-  // 在执行 claude 之前的记录了」.
-  //
-  // The cure was worse. `fullscreen` is tmux's `#{alternate_on}`, and Claude
-  // Code sets it while Codex does not, so the panel forcibly pinned one agent
-  // to its last screen and left the other alone. Measured on a live panel,
-  // which is how this was finally settled:
-  //
-  //   claude  alt=1  history_size=2011
-  //   codex   alt=0  history_size=1984
-  //
-  // The history is there. It is in tmux's normal buffer, behind the alternate
-  // screen, and the manager primes the ring with it at attach -- so the only
-  // thing between a reader and 2011 lines of their own conversation was this
-  // effect. 「tui理论上Claude有历史啊 可以看Claude的历史」, and there was.
-  //
-  // What stays is the part that was actually needed: come back to the live
-  // screen when the reader does something that means they are back. Typing is
-  // that signal, and xterm already scrolls to the bottom on input. Arriving
-  // output is not: a repaint pulling the view out from under somebody reading
-  // is the same rudeness in the other direction.
+  // Entering a fullscreen program opens at the live screen. Do not pin later
+  // output to the bottom: Shift+wheel can still inspect the local scrollback.
   useEffect(() => {
     const term = termRef.current
     if (!term || !fullscreen) return
@@ -756,7 +759,7 @@ export function TerminalView({
     const ro = new ResizeObserver(apply)
     ro.observe(wrap)
     return () => ro.disconnect()
-  }, [socket, sessionId, controlling, grid.cols, grid.rows, hidden])
+  }, [socket, sessionId, controlling, grid.cols, grid.rows, hidden, fullscreen])
 
   // Offer to take the grid only when this window would actually render a
   // different one. Two windows the same size see an identical picture, so a
@@ -878,6 +881,9 @@ export function TerminalView({
           pointerEvents: covering ? 'none' : undefined,
         }}
       />
+      {fullscreen && !hidden && !covering && loadPhase === 'ready' && (
+        <TerminalScrollBar onInput={(data) => scrollInputRef.current(data)} />
+      )}
       {offerControl && (
         <button
           type="button"

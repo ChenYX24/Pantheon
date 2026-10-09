@@ -40,10 +40,11 @@ const (
 // Config is the fully resolved runtime configuration.
 type Config struct {
 	// PlanningOnly isolates the development board from host-wide agent settings.
-	PlanningOnly    bool
-	Development     bool
-	WorkflowExecute bool
-	BasePath        string
+	PlanningOnly        bool
+	Development         bool
+	DevelopmentTerminal bool
+	WorkflowExecute     bool
+	BasePath            string
 
 	// DataDir holds the database, the generated tmux config and ACME state.
 	DataDir string

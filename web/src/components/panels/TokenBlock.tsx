@@ -72,6 +72,10 @@ export function TokenBlock({
 }) {
   useLang()
 
+  if (data.unavailableReason === 'development') {
+    return <p className="px-3 py-2 text-vp-sm text-ink-2" data-testid="token-unavailable">{t('spend.developmentDisabled')}</p>
+  }
+
   // Never read is not zero, and the difference is the whole feature. Until a
   // pass has finished there is no figure to show at all — so every one of them
   // is null rather than the arithmetic's honest 0.

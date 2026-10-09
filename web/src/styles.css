@@ -1542,12 +1542,90 @@ body {
   }
 }
 
-/* No scrollbar while a full-screen program is drawing.
-   There is nothing above the screen worth offering: everything the reader would
-   reach belongs to whatever was running before the TUI opened, and the TUI is
-   repainting the screen underneath them the whole time they are looking at it. */
+/* A fullscreen app owns its history. Replace xterm's unrelated buffer slider
+   with the relative paging control; no fabricated transcript position. */
 [data-fullscreen='true'] .xterm .xterm-scrollable-element > .scrollbar {
   display: none;
+}
+
+[data-fullscreen='true'] .xterm {
+  padding-right: 12px;
+}
+
+.vp-terminal-scroll {
+  position: absolute;
+  top: 8px;
+  right: 0;
+  bottom: 8px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  width: 12px;
+  color: var(--vp-ink-2);
+  touch-action: none;
+  user-select: none;
+}
+
+.vp-terminal-scroll-arrow {
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.vp-terminal-scroll-track {
+  position: relative;
+  flex: 1;
+  min-height: 44px;
+}
+
+.vp-terminal-scroll-track::before {
+  position: absolute;
+  inset: 0 4px;
+  border-radius: 999px;
+  background: var(--vp-hairline);
+  content: '';
+}
+
+.vp-terminal-scroll-handle {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: calc(100% - 4px);
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: var(--vp-ink-3);
+  cursor: grab;
+}
+
+.vp-terminal-scroll-handle:hover,
+.vp-terminal-scroll-handle[data-dragging='true'] {
+  background: var(--vp-ink-2);
+}
+
+.vp-terminal-scroll-handle[data-dragging='true'] {
+  cursor: grabbing;
+}
+
+.vp-terminal-scroll-arrow:hover {
+  background: var(--vp-selection);
+}
+
+.vp-terminal-scroll button:focus-visible {
+  outline: 2px solid var(--vp-accent);
+  outline-offset: -2px;
+}
+
+@media (pointer: coarse) {
+  .vp-terminal-scroll { width: 20px; }
+  [data-fullscreen='true'] .xterm { padding-right: 20px; }
 }
 
 /* The real scrollbar, which is a div rather than a native one.
@@ -1563,6 +1641,12 @@ body {
 .xterm .xterm-scrollable-element > .scrollbar.vertical,
 .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
   width: var(--vp-scrollbar) !important;
+}
+
+/* Keep the normal-buffer slider discoverable after the pointer leaves. */
+.xterm .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 1 !important;
+  pointer-events: auto;
 }
 
 .xterm .xterm-scrollable-element > .scrollbar > .slider {

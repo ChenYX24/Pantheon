@@ -82,6 +82,10 @@ type Client struct {
 	// Bin is the tmux executable; overridable for tests and odd installs.
 	Bin string
 
+	// ExternallyManaged keeps a supervised server in its dedicated process
+	// group. Client requests must never recreate it inside the backend group.
+	ExternallyManaged bool
+
 	// AfterStart runs once a server this client started is up, before any
 	// session is created in it. It is where the server is moved into the
 	// sessions' own cgroup (internal/resources): a pane forked before the move
@@ -124,6 +128,9 @@ func New(socket, dir string) *Client {
 func (c *Client) args(rest ...string) []string {
 	a := make([]string, 0, len(rest)+5)
 	a = append(a, "-u", "-L", c.Socket)
+	if c.ExternallyManaged {
+		a = append(a, "-N")
+	}
 	if c.ConfigPath != "" {
 		a = append(a, "-f", c.ConfigPath)
 	}
@@ -289,6 +296,9 @@ func (c *Client) EnsureServer(ctx context.Context) error {
 		c.advertiseTruecolor(ctx)
 		c.watchBells(ctx)
 		return nil
+	}
+	if c.ExternallyManaged {
+		return fmt.Errorf("tmux: supervised server on socket %q is unavailable", c.Socket)
 	}
 	if err := c.startServerWithProfile(ctx); err != nil {
 		return err

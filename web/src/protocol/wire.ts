@@ -510,6 +510,7 @@ export interface TokenUsageSession {
 }
 
 export interface TokenUsage {
+  unavailableReason?: 'development'
   /** Zero until a pass has finished. Not the same as "nothing was spent". */
   scannedAt: number
   scanning: boolean

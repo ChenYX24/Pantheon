@@ -53,10 +53,11 @@ func Load(args []string, out io.Writer) (Config, error) {
 		fmt.Fprintf(out, "Usage:\n  vibepanel [command] [flags]\n\nCommands:\n%s\n", Commands)
 		fmt.Fprintf(out, "Flags (for serve, which is what runs with no command):\n")
 		fs.PrintDefaults()
-		fmt.Fprintf(out, "\nExcept development, planning-only and workflow-execute, every flag has a VIBEPANEL_<UPPER_SNAKE> environment equivalent.\n")
+		fmt.Fprintf(out, "\nExcept development, development-terminal, planning-only and workflow-execute, every flag has a VIBEPANEL_<UPPER_SNAKE> environment equivalent.\n")
 	}
 
 	fs.BoolVar(&c.Development, "development", false, "isolated development instance; disable host-wide configuration writes (flag only)")
+	fs.BoolVar(&c.DevelopmentTerminal, "development-terminal", false, "enable authenticated manual terminal testing with an externally supervised tmux server (flag only)")
 	fs.BoolVar(&c.WorkflowExecute, "workflow-execute", false, "execute approved project stages in isolated worktrees (flag only)")
 	fs.BoolVar(&c.PlanningOnly, "planning-only", false, "development board: disable session launches and host configuration writes (flag only)")
 	fs.StringVar(&c.BasePath, "base-path", c.BasePath, "development URL prefix, e.g. /dev; the proxy must preserve this prefix")
@@ -105,6 +106,9 @@ func Load(args []string, out io.Writer) (Config, error) {
 	}
 	if c.PlanningOnly {
 		c.Development = true
+	}
+	if c.DevelopmentTerminal && (!c.Development || c.PlanningOnly || c.WorkflowExecute) {
+		return Config{}, fmt.Errorf("development-terminal requires --development and cannot enable planning-only or workflow-execute")
 	}
 	if c.Development {
 		if c.PlanningOnly && c.WorkflowExecute {

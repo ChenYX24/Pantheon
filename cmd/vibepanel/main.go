@@ -166,6 +166,7 @@ func openApp(ctx context.Context, args []string) (*app, error) {
 		return nil, err
 	}
 	tm := tmux.New(cfg.TmuxSocket, cfg.TmuxDir())
+	tm.ExternallyManaged = cfg.DevelopmentTerminal
 	if err := tm.EnsureServer(ctx); err != nil {
 		db.Close()
 		return nil, err
@@ -1123,6 +1124,7 @@ func cmdDoctor(args []string) error {
 	fmt.Printf("vibepanel %s\n\n", version.String())
 
 	tm := tmux.New(cfg.TmuxSocket, cfg.TmuxDir())
+	tm.ExternallyManaged = cfg.DevelopmentTerminal
 	tv, tErr := tm.Version(ctx)
 	// Three outcomes, not two: missing is fatal, too old is a real degradation
 	// that is not worth refusing to run over, and neither should look like the

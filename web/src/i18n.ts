@@ -1340,6 +1340,10 @@ const DICT = {
   },
   'term.loadingConnecting': { zh: '连接终端', en: 'Connecting terminal' },
   'term.loadingReplay': { zh: '加载终端内容', en: 'Loading terminal content' },
+  'term.scrollControls': { zh: '终端滚动', en: 'Terminal scrolling' },
+  'term.scrollUp': { zh: '向上滚动', en: 'Scroll up' },
+  'term.scrollDown': { zh: '向下滚动', en: 'Scroll down' },
+  'term.scrollDrag': { zh: '上下拖动翻页，也可使用方向键', en: 'Drag up or down to page, or use the arrow keys' },
 
   'notify.waitingTitle': { zh: '有 agent 在等你', en: 'An agent is waiting' },
   'notify.waitingBody': { zh: '{name} 停下来等你处理了', en: '{name} has stopped and needs you' },
@@ -1899,6 +1903,10 @@ const DICT = {
   'spend.scanning': {
     zh: '正在统计…',
     en: 'Counting…',
+  },
+  'spend.developmentDisabled': {
+    zh: '开发版未启用用量采集',
+    en: 'Usage collection is disabled in this development instance.',
   },
   'spend.neverScanned': {
     zh: '暂无数据 —— 不是 0。',

@@ -80,6 +80,8 @@ type tokenUsageProject struct {
 }
 
 type tokenUsageResponse struct {
+	// Empty when available. Disabled collection must not look like zero spend.
+	UnavailableReason string `json:"unavailableReason,omitempty"`
 	// ScannedAt is zero until a pass has finished. The browser must render
 	// "still reading" rather than a total while it is, because a zero here
 	// means "nothing has been counted yet" and looks exactly like "nothing was
@@ -126,6 +128,15 @@ type tokenUsageResponse struct {
 // so, so the first load of a machine with a year of history renders "reading
 // transcripts" and then fills in — rather than rendering a confident zero.
 func (s *Server) handleTokenUsage(w http.ResponseWriter, r *http.Request) {
+	if s.Cfg.Development && s.Tokens == nil {
+		writeJSON(w, http.StatusOK, tokenUsageResponse{
+			UnavailableReason: "development", Sources: []tokenUsageSource{},
+			ByDay: []store.UsageDay{}, Heatmap: []store.UsageDay{}, ByMonth: []store.UsageDay{},
+			ByTool: []store.UsageToolTotals{}, ByModel: []store.UsageModel{},
+			Projects: []tokenUsageProject{}, Sessions: []tokenUsageSession{},
+		})
+		return
+	}
 	in := s.tokens()
 	if in == nil {
 		writeErr(w, http.StatusServiceUnavailable, "token usage is not configured")
