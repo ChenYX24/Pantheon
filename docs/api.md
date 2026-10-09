@@ -1970,7 +1970,8 @@ The home view is read from files: the cyx registry (`--cyx-home`, default
 `ACTIVE_CONTEXT.md`, `agent-docs/tasks/<id>/task.md`, `agent-docs/reports/*.md`).
 The database keeps only chat history and notification receipts, so a new
 database yields the same projects, tasks and to-dos. The full contract, file
-formats and to-do rules are in `docs/pantheon/stage-a-contract.md`.
+formats and to-do rules are in `docs/pantheon/stage-a-contract.md` and
+`docs/pantheon/stage-a2-contract.md`.
 
 ### `GET /api/home`
 
@@ -2001,9 +2002,43 @@ Body: `title` and optional `id`, `stage`, `status`, `primary`, `secondary`,
 
 ### `PATCH /api/home/projects/{id}/tasks/{taskId}`
 
-Body: `rev` and any of `status`, `blockedReason`, `sessionStatus`, `session`.
+Body: `rev` and any of `status`, `blockedReason`, `sessionStatus`, `session`,
+`title`, `stage`, `priority`, `tags` (array), `owner`, `due` (YYYY-MM-DD or empty),
+`primary`, `secondary`, `dependsOn` (array).
 Rewrites only those frontmatter keys plus `updated`. `409` with the current
 `rev` when the file changed since it was read.
+
+### `GET /api/home/fields`
+
+Returns `{fields, rev}` from the optional global `pantheon/fields.json` in the
+Harness. Missing files return the contract defaults with `rev: ""`. Status values
+are fixed; labels and colors may change. Unknown task/project values remain intact.
+
+### `PUT /api/home/fields`
+
+Body: `{rev, fields}`. Validates the task and project option definitions, unique
+values and allowed colors, then atomically writes the file. Returns `{fields, rev}`;
+`409 {error:"stale", rev}` if it changed.
+
+### `PATCH /api/home/projects/{id}/meta`
+
+Body: `rev`, optional `labels` (array), `priority`, `owner`, `phase`, `pinned`.
+Atomically creates or patches the optional project `pantheon.json`; creation uses
+`rev: ""`. Returns `{meta, metaRev}`; `409` on a stale revision. Projects include
+these same keys, and pinned projects sort before all other home projects.
+
+### `GET /api/home/tasks`
+
+Returns `{tasks, fields}` across listed projects, with at most 2000 task rows.
+Each task includes `projectId`, `priority`, `tags`, `owner`, `due` and its `rev`.
+Query `all=1` also includes archived and merged projects.
+
+### `POST /api/home/projects/{id}/reports/{file}/reply`
+
+Body: `{text, rev?}`. Appends a timestamped reply section and changes only
+`needs_user` in the frontmatter, atomically. Returns the report with `rev` and
+`replies` (`at`, `text`); `409` when an optional revision is stale. The question
+leaves the to-do list, and a user message mirrors the reply in the main thread.
 
 ### `POST /api/home/projects/{id}/sessions`
 

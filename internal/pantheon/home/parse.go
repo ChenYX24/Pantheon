@@ -166,7 +166,11 @@ func parseTask(data []byte, id, file string, mtime time.Time) (Task, []string, e
 	if err != nil {
 		return Task{}, nil, err
 	}
-	t := Task{ID: id, Title: v["title"], Status: v["status"], Stage: v["stage"], Primary: v["primary"], Secondary: v["secondary"], DependsOn: depends, Session: v["session"], BlockedReason: v["blocked_reason"], SessionStatus: v["session_status"], Updated: v["updated"], Body: string(f.body), Rev: Revision(data), File: file, mtime: mtime}
+	tags, err := stringList(v["tags"])
+	if err != nil {
+		return Task{}, nil, fmt.Errorf("tags: %w", err)
+	}
+	t := Task{Priority: v["priority"], Tags: tags, Owner: v["owner"], Due: v["due"], ID: id, Title: v["title"], Status: v["status"], Stage: v["stage"], Primary: v["primary"], Secondary: v["secondary"], DependsOn: depends, Session: v["session"], BlockedReason: v["blocked_reason"], SessionStatus: v["session_status"], Updated: v["updated"], Body: string(f.body), Rev: Revision(data), File: file, mtime: mtime}
 	warnings := []string{}
 	if !ValidStatus(t.Status) {
 		warnings = append(warnings, "unknown status; treated as planned")
@@ -206,7 +210,7 @@ func parseReport(data []byte, file string, mtime time.Time) (Report, []string, e
 		return Report{}, nil, err
 	}
 	v := f.values
-	r := Report{ReportSummary: ReportSummary{File: file, Title: v["title"], Summary: v["summary"], Kind: v["kind"]}, Task: v["task"], Body: capBytes(string(f.body), 16<<10), rev: Revision(data), at: mtime}
+	r := Report{ReportSummary: ReportSummary{File: file, Title: v["title"], Summary: v["summary"], Kind: v["kind"]}, Task: v["task"], Body: capBytes(string(f.body), 16<<10), Rev: Revision(data), at: mtime}
 	warnings := []string{}
 	if r.Kind != "report" && r.Kind != "question" {
 		return r, warnings, errors.New("kind must be report or question")
@@ -224,6 +228,7 @@ func parseReport(data []byte, file string, mtime time.Time) (Report, []string, e
 			warnings = append(warnings, "invalid at timestamp; using file mtime")
 		}
 	}
+	r.Replies = reportReplies(string(f.body))
 	r.At = r.at.Format(time.RFC3339Nano)
 	return r, warnings, nil
 }

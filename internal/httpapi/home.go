@@ -22,6 +22,11 @@ func (s *Server) registerHomeRoutes(r chi.Router) {
 	r.Get("/home/models", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"harnesses": parthenon.Models()})
 	})
+	r.Get("/home/tasks", s.handleHomeTasks)
+	r.Get("/home/fields", s.handleHomeFields)
+	r.Put("/home/fields", s.handleHomeFields)
+	r.Patch("/home/projects/{id}/meta", s.handleHomeMeta)
+	r.Post("/home/projects/{id}/reports/{file}/reply", s.handleHomeReportReply)
 	r.Get("/home/projects/{id}", s.handleHomeProject)
 	r.Post("/home/projects/{id}/tasks", s.handleHomeCreateTask)
 	r.Patch("/home/projects/{id}/tasks/{taskId}", s.handleHomePatchTask)
@@ -37,7 +42,10 @@ func homeSessionRoute(method, path string) bool {
 }
 
 func homePlanningRoute(method, path string) bool {
-	if method == http.MethodGet && (path == "/api/home" || path == "/api/home/notifications" || path == "/api/home/models") {
+	if method == http.MethodGet && (path == "/api/home" || path == "/api/home/notifications" || path == "/api/home/models" || path == "/api/home/fields" || path == "/api/home/tasks") {
+		return true
+	}
+	if path == "/api/home/fields" && method == http.MethodPut {
 		return true
 	}
 	parts := strings.Split(strings.TrimPrefix(path, "/api/"), "/")
@@ -48,10 +56,16 @@ func homePlanningRoute(method, path string) bool {
 		return method == http.MethodGet
 	}
 	if len(parts) == 4 {
+		if parts[3] == "meta" {
+			return method == http.MethodPatch
+		}
 		if parts[3] == "discussion" {
 			return method == http.MethodGet || method == http.MethodPost
 		}
 		return parts[3] == "tasks" && method == http.MethodPost
+	}
+	if len(parts) == 6 && parts[3] == "reports" && parts[4] != "" && parts[5] == "reply" {
+		return method == http.MethodPost
 	}
 	return len(parts) == 5 && parts[3] == "tasks" && parts[4] != "" && method == http.MethodPatch
 }

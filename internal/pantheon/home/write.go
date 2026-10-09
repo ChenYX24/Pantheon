@@ -33,11 +33,20 @@ type CreateTask struct {
 }
 
 type PatchTask struct {
-	Rev           string  `json:"rev"`
-	Status        *string `json:"status"`
-	BlockedReason *string `json:"blockedReason"`
-	SessionStatus *string `json:"sessionStatus"`
-	Session       *string `json:"session"`
+	Rev           string    `json:"rev"`
+	Title         *string   `json:"title"`
+	Stage         *string   `json:"stage"`
+	Priority      *string   `json:"priority"`
+	Tags          *[]string `json:"tags"`
+	Owner         *string   `json:"owner"`
+	Due           *string   `json:"due"`
+	Primary       *string   `json:"primary"`
+	Secondary     *string   `json:"secondary"`
+	DependsOn     *[]string `json:"dependsOn"`
+	Status        *string   `json:"status"`
+	BlockedReason *string   `json:"blockedReason"`
+	SessionStatus *string   `json:"sessionStatus"`
+	Session       *string   `json:"session"`
 }
 
 func (i *Index) writableProject(cyxHome, project string) (*harnessFS, string, error) {
@@ -185,7 +194,7 @@ func rewrite(f frontmatter, values map[string]string) []byte {
 		key, _, _ := strings.Cut(string(line), ":")
 		key = strings.TrimSpace(key)
 		if value, ok := values[key]; ok {
-			out.WriteString(key + ": " + encodeScalar(value) + f.newline)
+			out.WriteString(key + ": " + encodeField(key, value) + f.newline)
 			delete(values, key)
 		} else {
 			out.Write(line)
@@ -197,7 +206,7 @@ func rewrite(f frontmatter, values map[string]string) []byte {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		out.WriteString(key + ": " + encodeScalar(values[key]) + f.newline)
+		out.WriteString(key + ": " + encodeField(key, values[key]) + f.newline)
 	}
 	out.Write(f.lines[f.end])
 	out.Write(f.body)
@@ -209,6 +218,9 @@ func (i *Index) Patch(cyxHome, project, task string, req PatchTask) (Task, error
 	defer i.mu.Unlock()
 	if !taskID.MatchString(task) {
 		return Task{}, ErrNotFound
+	}
+	if err := validateTaskPatch(req); err != nil {
+		return Task{}, err
 	}
 	if req.Status != nil && !ValidStatus(*req.Status) {
 		return Task{}, errors.New("invalid status")
@@ -248,9 +260,14 @@ func (i *Index) Patch(cyxHome, project, task string, req PatchTask) (Task, error
 		return Task{}, err
 	}
 	values := map[string]string{"updated": time.Now().Format(time.RFC3339Nano)}
-	for key, value := range map[string]*string{"status": req.Status, "blocked_reason": req.BlockedReason, "session_status": req.SessionStatus, "session": req.Session} {
+	for key, value := range map[string]*string{"status": req.Status, "blocked_reason": req.BlockedReason, "session_status": req.SessionStatus, "session": req.Session, "title": req.Title, "stage": req.Stage, "priority": req.Priority, "owner": req.Owner, "due": req.Due, "primary": req.Primary, "secondary": req.Secondary} {
 		if value != nil {
 			values[key] = *value
+		}
+	}
+	for key, value := range map[string]*[]string{"tags": req.Tags, "depends_on": req.DependsOn} {
+		if value != nil {
+			values[key] = encodeList(*value)
 		}
 	}
 	data = rewrite(fm, values)

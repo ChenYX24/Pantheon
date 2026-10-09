@@ -24644,3 +24644,11 @@ model, without changing the workflow executor response. Headless agent runs
 use a separate user scope when available, so the panel unit’s memory cap does
 not kill an otherwise valid discussion. `--agent-scope off` keeps direct exec;
 the fallback and argv are tested without contacting systemd.
+
+Stage A.2 field options, task dimensions and project metadata stay in Harness
+files. Optional JSON files use an empty revision until created, then the same
+SHA-256 revision check as tasks; pinned projects sort first. Task patches retain
+unrelated frontmatter and body bytes, including CRLF and comments. Report replies
+append a local timestamped section and clear `needs_user`, then mirror the text
+into the manager history. Tests cover conflicts, fields validation, list round
+trips, the symlink boundary and the disappearing question to-do.
