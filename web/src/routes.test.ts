@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CHAT_PATH,
+  HOME_PATH,
   PANEL_PATH,
   SHARING_PATH,
   pageToOpen,
@@ -24,6 +25,13 @@ import {
  * than a query somebody spells at each end.
  */
 describe('what the address bar decides', () => {
+  it('builds the project home only for its exact path', () => {
+    expect(routeFor(HOME_PATH)).toEqual({ kind: 'home' })
+    expect(routeFor(`${HOME_PATH}/`)).toEqual({ kind: 'home' })
+    expect(routeFor(`${HOME_PATH}x`)).toEqual({ kind: 'panel' })
+    expect(routeFor(`${HOME_PATH}/pantheon`)).toEqual({ kind: 'panel' })
+  })
+
   it('builds the panel for the root and for anything it does not know', () => {
     expect(routeFor(PANEL_PATH)).toEqual({ kind: 'panel' })
     expect(routeFor('/sessions')).toEqual({ kind: 'panel' })
@@ -114,6 +122,13 @@ describe('who spells the sharing path', () => {
     // A route nothing links to is a page only a bookmark can reach.
     const linking = sources(SRC).filter((p) => readFileSync(p, 'utf8').includes('href={SHARING_PATH}'))
     expect(linking.length).toBeGreaterThan(0)
+  })
+
+  it('makes Home reachable from both the sidebar and project workspace', () => {
+    for (const file of ['components/Sidebar.tsx', 'components/ProjectWorkspace.tsx']) {
+      expect(readFileSync(join(SRC, file), 'utf8')).toContain('href={HOME_PATH}')
+    }
+    expect(readFileSync(join(SRC, 'main.tsx'), 'utf8')).toContain("route.kind === 'home'")
   })
 
   it('is what the panel is handed a page through', () => {

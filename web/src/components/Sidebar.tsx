@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   Clock,
   GripVertical,
+  House,
   ListOrdered,
   Pause,
   Pin,
@@ -22,6 +23,7 @@ import { InlineName } from './InlineName'
 import { ProjectMark } from './ProjectMark'
 import { EXIT_VANISHED } from '../protocol/wire'
 import { t, useLang } from '../i18n'
+import { HOME_PATH } from '../routes'
 
 export interface SidebarProps {
   projects: Project[]
@@ -198,6 +200,7 @@ export function Sidebar(props: SidebarProps) {
         >
           <ChevronLeft size={15} className="rotate-180" />
         </button>
+        <a href={HOME_PATH} className="vp-control mb-1" title={t('home.title')} data-testid="rail-home"><House size={15} /></a>
         {projects.map((p) => {
           const list = byProject.get(p.id) ?? []
           const state = summarise(list)
@@ -396,6 +399,7 @@ export function Sidebar(props: SidebarProps) {
         </button>
       </header>
 
+      <a href={HOME_PATH} className="vp-control mx-3 mb-2" data-testid="sidebar-home"><House size={15} />{t('home.title')}</a>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         {projects.length === 0 && (
           <p data-testid="sidebar-empty" className="px-2 py-6 text-vp-base leading-relaxed text-ink-2">

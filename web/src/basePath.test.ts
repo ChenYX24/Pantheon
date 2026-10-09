@@ -6,6 +6,18 @@ function mount(value: string) {
   vi.stubGlobal('document', { querySelector: () => ({ getAttribute: () => value }) })
 }
 describe('co-hosted development instance', () => {
+  it('mounts the home route and both kinds of deep link under the same base', async () => {
+    mount('/dev/panel')
+    vi.resetModules()
+    const { HOME_PATH, routeFor } = await import('./routes')
+    const { projectLink, todoLink } = await import('./components/home/helpers')
+    expect(HOME_PATH).toBe('/dev/panel/home')
+    expect(routeFor('/dev/panel/home/')).toEqual({ kind: 'home' })
+    expect(routeFor('/home')).toEqual({ kind: 'panel' })
+    expect(projectLink({ projectId: 'pantheon', taskId: 'A2' })).toBe('/dev/panel/home?project=pantheon&task=A2')
+    expect(todoLink({ id: '1', kind: 'session_waiting', projectId: 'pantheon', title: '', detail: '', at: '', link: { projectId: 'pantheon', taskId: '', reportFile: '', sessionId: 'vp_123' } })).toBe('/dev/panel/?session=vp_123')
+  })
+
   it('keeps the original root behavior and rejects unsafe mount metadata', () => {
     expect(appURL('/api/state')).toBe('/api/state')
     for (const invalid of ['/', '//host', '/dev/', '/..', '/dev?x']) {
