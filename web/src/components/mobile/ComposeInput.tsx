@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
-import { CornerDownLeft, ImagePlus, Send } from 'lucide-react'
+import { CornerDownLeft, Send } from 'lucide-react'
 import { t, useLang } from '../../i18n'
+import { AttachmentPicker } from './AttachmentPicker'
 
 /**
  * Whether this submission is a new one.
@@ -57,7 +58,6 @@ export function ComposeInput({
   onFiles: (files: File[]) => void
 }) {
   useLang()
-  const chooser = useRef<HTMLInputElement | null>(null)
   // The last thing actually sent, so a second commit of it is dropped. Cleared
   // on every change to the box. See isNewSubmission.
   const lastSent = useRef('')
@@ -174,33 +174,11 @@ export function ComposeInput({
         data-testid="compose-input"
         // The terminal is a monospace grid; what you are about to send should
         // look like what will arrive.
-        className="max-h-24 min-h-8 flex-1 resize-none rounded-vp border border-hairline bg-surface px-2 py-1.5 font-mono text-vp-md text-ink outline-none placeholder:font-sans placeholder:text-ink-2 focus:border-accent"
+        className="max-h-24 min-h-8 min-w-0 flex-1 resize-none rounded-vp border border-hairline bg-surface px-2 py-1.5 font-mono text-vp-md text-ink outline-none placeholder:font-sans placeholder:text-ink-2 focus:border-accent"
       />
-      <input
-        ref={chooser}
-        type="file"
-        multiple
-        // Not `capture`: that forces the camera and hides the photo library,
-        // and the thing being attached is almost always a screenshot that
-        // already exists.
-        accept="image/*,application/pdf,text/*"
-        data-testid="compose-file"
-        className="hidden"
-        onChange={(e) => {
-          onFiles([...(e.target.files ?? [])])
-          // Cleared so the same file can be chosen twice running.
-          e.target.value = ''
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => chooser.current?.click()}
-        title={t('compose.attach')}
-        data-testid="compose-attach"
+      <AttachmentPicker prefix="compose" onFiles={onFiles}
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-vp border border-hairline text-ink-2 transition-colors duration-150 ease-vp"
-      >
-        <ImagePlus size={13} />
-      </button>
+      />
       <button
         type="button"
         onClick={() => setNewline((v) => !v)}

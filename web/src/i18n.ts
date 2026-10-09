@@ -540,6 +540,8 @@ const DICT = {
   'key.end': { zh: '行尾', en: 'End' },
   'key.pageUp': { zh: '上一页', en: 'Page up' },
   'key.pageDown': { zh: '下一页', en: 'Page down' },
+  'key.backspace': { zh: '退格：删除光标前的字符', en: 'Backspace: delete before the cursor' },
+  'key.delete': { zh: 'Delete：删除光标后的字符', en: 'Delete after the cursor' },
 
   'session.new': { zh: '新建会话', en: 'New session' },
   'session.kill': { zh: '结束会话', en: 'Kill session' },
@@ -795,6 +797,8 @@ const DICT = {
   'touch.showKeys': { zh: '显示按键', en: 'Show the keys' },
   'touch.hideKeys': { zh: '收起按键', en: 'Hide the keys' },
   'compose.attach': { zh: '选图片或文件', en: 'Pick an image or a file' },
+  'compose.photos': { zh: '上传照片', en: 'Upload photos' },
+  'compose.files': { zh: '上传文件', en: 'Upload files' },
   'compose.send': { zh: '发送', en: 'Send' },
   'settings.title': { zh: '设置', en: 'Settings' },
   'settings.close': { zh: '关闭', en: 'Close' },
@@ -1444,6 +1448,7 @@ const DICT = {
   'set.activity': { zh: '最近活动', en: 'Recent activity' },
 
   'term.takeControl': { zh: '接管', en: 'take control' },
+  'term.fitPhone': { zh: '适应手机宽度', en: 'Fit to phone' },
   'term.takeControlWhy': {
     zh: '另一个观看端拥有这个网格（{cols}×{rows}），你这边能放下 {mine}。接管会让所有人重排。',
     en: 'Another viewer owns this grid ({cols}x{rows}); this window fits {mine}. Taking over reflows it for everyone.',

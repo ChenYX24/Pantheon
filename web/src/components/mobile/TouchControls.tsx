@@ -1,8 +1,8 @@
-import { useRef } from 'react'
-import { ImagePlus, Keyboard } from 'lucide-react'
+import { Keyboard } from 'lucide-react'
 
 import { MobileKeyBar } from './MobileKeyBar'
 import { t, useLang } from '../../i18n'
+import { AttachmentPicker } from './AttachmentPicker'
 
 /**
  * The two controls a tablet needs, in the row that already exists.
@@ -33,7 +33,6 @@ export function TouchControls({
   onFiles: (files: File[]) => void
 }) {
   useLang()
-  const chooser = useRef<HTMLInputElement | null>(null)
 
   return (
     <>
@@ -50,27 +49,7 @@ export function TouchControls({
       {/* Attaching is one press whether the keys are open or not: it is the
           other half of what was missing, and putting it behind the toggle
           would trade one hidden thing for another. */}
-      <input
-        ref={chooser}
-        type="file"
-        multiple
-        accept="image/*,application/pdf,text/*"
-        data-testid="touch-file"
-        className="hidden"
-        onChange={(e) => {
-          onFiles([...(e.target.files ?? [])])
-          e.target.value = ''
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => chooser.current?.click()}
-        data-testid="touch-attach"
-        title={t('compose.attach')}
-        className="vp-control"
-      >
-        <ImagePlus size={15} />
-      </button>
+      <AttachmentPicker prefix="touch" onFiles={onFiles} className="vp-control" />
     </>
   )
 }

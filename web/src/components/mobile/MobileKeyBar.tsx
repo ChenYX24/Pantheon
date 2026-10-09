@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CornerDownLeft, Delete } from 'lucide-react'
 
 import { KEY_SEQUENCES, withAlt, withCtrl } from './keys'
 import type { KeyName } from './keys'
@@ -113,6 +113,13 @@ export function MobileKeyBar({
         className="flex items-center gap-1 overflow-x-auto"
         style={{ touchAction: 'pan-x' }}
       >
+        {/* Editing an existing terminal prompt must not require the phone's
+            keyboard. Keep both directions before the horizontally scrolling
+            extras, so neither disappears on the narrowest supported screen. */}
+        <Key label="backspace" onPress={key('backspace')} wide title={t('key.backspace')}>
+          <Delete size={15} />
+        </Key>
+        <Key label="delete" onPress={key('delete')} wide title={t('key.delete')}>Del</Key>
         {/* alt lives here and ctrl does not, which is a judgement rather than
             a symmetry. Adding ⇧tab above made nine keys, and eight was already
             the number that overflowed a 320px phone -- the row wrapped and put
@@ -170,6 +177,7 @@ function Key({
       data-testid={`key-${label}`}
       data-active={active ? 'true' : 'false'}
       title={title ?? label}
+      aria-label={title ?? label}
       // pointerdown, not click: a thumb that slides a pixel between press and
       // release still counts, and the key fires without the browser first
       // ruling out a double tap.

@@ -74,14 +74,16 @@ describe('a finger on the desktop layout', () => {
 
   it('gives a narrow layout a way to attach a file', () => {
     const compose = read('components/mobile/ComposeInput.tsx')
+    const picker = code('components/mobile/AttachmentPicker.tsx')
     // A real file input. iOS answers one with Photo Library, Take Photo and
     // Files; there is no other road, because a phone cannot drop and iOS does
     // not hand a pasted image to a page that is not an editable field.
-    expect(compose).toMatch(/type="file"/)
-    expect(compose).toMatch(/onFiles\(/)
+    expect(compose).toMatch(/<AttachmentPicker prefix="compose" onFiles=\{onFiles\}/)
+    expect(picker).toMatch(/type="file"/)
+    expect(picker).toMatch(/onFiles\(/)
     // `capture` would force the camera and hide the photo library, and what is
     // being attached is nearly always a screenshot that already exists.
-    expect(code('components/mobile/ComposeInput.tsx')).not.toMatch(/\bcapture\b/)
+    expect(picker).not.toMatch(/\bcapture\b/)
     // Wired to the same upload the desktop paste and drop paths use, so a file
     // lands in the same place however it arrived.
     expect(read('App.tsx')).toMatch(/onFiles=\{\(files\) => void uploadInto\(files\)\}/)
@@ -147,8 +149,10 @@ describe('a touchscreen that is not a phone', () => {
     const bar = code('components/mobile/TouchControls.tsx')
     // Attaching does not go behind the toggle, or one hidden thing has been
     // traded for another.
-    expect(bar).toMatch(/data-testid="touch-attach"/)
-    expect(bar).toMatch(/type="file"/)
+    expect(bar).toMatch(/<AttachmentPicker prefix="touch" onFiles=\{onFiles\}/)
+    const picker = code('components/mobile/AttachmentPicker.tsx')
+    expect(picker).toContain('data-testid={`${prefix}-attach`}')
+    expect(picker).toMatch(/type="file"/)
   })
 
   it('lets a finger scroll the bottom terminal too', () => {

@@ -899,7 +899,7 @@ export function TerminalView({
           <span className="tabular">
             {grid.cols}×{grid.rows}
           </span>{' '}
-          · {t('term.takeControl')}
+          · {t(readOnly ? 'term.fitPhone' : 'term.takeControl')}
         </button>
       )}
     </div>
