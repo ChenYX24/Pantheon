@@ -24585,9 +24585,10 @@ The home notifier starts beside the workflow loop without enabling execution.
 It waits ten seconds, then polls every minute; first-start to-dos establish a
 baseline. Dry-run and missing-recipient receipts never call an adapter. Feishu
 uses plain text and the bridge's existing language setting, with three attempts,
-minute-times-attempt backoff and a 24-hour expiry (reported as failed). A missing
-chat bridge remains a delivery failure; development still does not start the
-existing inbound chat bridge. Changing notification mode does not replay old
+minute-times-attempt backoff and a 24-hour expiry (reported as failed). An explicit
+send in development reuses the enabled Feishu configuration through an outbound
+adapter without starting or exposing the inbound bridge. Missing or disabled
+channel configuration remains a delivery failure. Changing mode does not replay old
 dry-run or baseline receipts.
 
 The home API tests use an in-process mode of `newTestServer` with real routing,
@@ -24597,3 +24598,9 @@ read-only discussion with a fake runner, and notification lifecycle/deduplicatio
 A fake Feishu adapter verifies plain text without buttons. All targeted home,
 HTTP, config, store and chat checks passed. Real tmux launches, live Feishu sends
 and browser integration remain for the Conductor's permitted environment.
+
+A transport-only Feishu test also exercises the real adapter with synthetic
+responses, confirming that an outbound send does not register a webhook and
+that disabling the stored channel prevents further sends. The targeted chat
+language check and command-entrypoint help tests also passed; the latter compile
+the notifier startup wiring without running a server.

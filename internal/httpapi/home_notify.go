@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +16,7 @@ import (
 type homeNotifications struct {
 	mu          sync.Mutex
 	initialized bool
+	outbound    *chat.Bridge
 	// Tests substitute an adapter without starting any channel or network loop.
 	send func(context.Context, store.HomeDelivery) error
 }
@@ -161,7 +161,16 @@ func (s *Server) homeNotificationTick(ctx context.Context, at time.Time) error {
 		case s.Chat != nil:
 			err = s.Chat.SendHomeNotification(sendctx, n.Peer, n.Text)
 		default:
-			err = errors.New("Feishu notification channel is not running")
+			if state.outbound == nil {
+				box, boxErr := s.secretBox()
+				err = boxErr
+				if boxErr == nil {
+					state.outbound = chat.New(chat.Deps{DB: s.DB, Box: box, Log: s.Log, PublicURL: s.Cfg.PublicURL})
+				}
+			}
+			if state.outbound != nil {
+				err = state.outbound.SendHomeNotification(sendctx, n.Peer, n.Text)
+			}
 		}
 		cancel()
 		if err == nil {
