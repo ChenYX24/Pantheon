@@ -25,6 +25,7 @@ import { appURL } from './basePath'
  */
 
 export const PROJECTS_PATH = appURL('/projects')
+export const HOME_PATH = appURL('/home')
 export const PANEL_PATH = appURL('/')
 
 export const SHARING_PATH = appURL('/sharing')
@@ -32,9 +33,10 @@ export const SHARING_PATH = appURL('/sharing')
 /** The page the chat bridge is set up from: routes.ts is the one place that spells it. */
 export const CHAT_PATH = appURL('/chat')
 
-export type Route = { kind: 'projects' } | { kind: 'panel' } | { kind: 'sharing' } | { kind: 'chat' }
+export type Route = { kind: 'home' } | { kind: 'projects' } | { kind: 'panel' } | { kind: 'sharing' } | { kind: 'chat' }
 
 export function routeFor(pathname: string): Route {
+  if (pathname === HOME_PATH || pathname === `${HOME_PATH}/`) return { kind: 'home' }
   if (pathname === PROJECTS_PATH || pathname === `${PROJECTS_PATH}/`) return { kind: 'projects' }
   // With or without a trailing slash, because both arrive: a bookmark keeps
   // whatever was typed, and a proxy may add one.

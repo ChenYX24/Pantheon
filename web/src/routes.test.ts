@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CHAT_PATH,
+  HOME_PATH,
   PANEL_PATH,
   SHARING_PATH,
   pageToOpen,
@@ -24,6 +25,13 @@ import {
  * than a query somebody spells at each end.
  */
 describe('what the address bar decides', () => {
+  it('builds the project home only for its exact path', () => {
+    expect(routeFor(HOME_PATH)).toEqual({ kind: 'home' })
+    expect(routeFor(`${HOME_PATH}/`)).toEqual({ kind: 'home' })
+    expect(routeFor(`${HOME_PATH}x`)).toEqual({ kind: 'panel' })
+    expect(routeFor(`${HOME_PATH}/pantheon`)).toEqual({ kind: 'panel' })
+  })
+
   it('builds the panel for the root and for anything it does not know', () => {
     expect(routeFor(PANEL_PATH)).toEqual({ kind: 'panel' })
     expect(routeFor('/sessions')).toEqual({ kind: 'panel' })
