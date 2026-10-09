@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -61,6 +62,9 @@ func Load(args []string, out io.Writer) (Config, error) {
 	fs.BoolVar(&c.WorkflowExecute, "workflow-execute", false, "execute approved project stages in isolated worktrees (flag only)")
 	fs.BoolVar(&c.PlanningOnly, "planning-only", false, "development board: disable session launches and host configuration writes (flag only)")
 	fs.StringVar(&c.BasePath, "base-path", c.BasePath, "development URL prefix, e.g. /dev; the proxy must preserve this prefix")
+	fs.StringVar(&c.CyxHome, "cyx-home", c.CyxHome, "cyx registry directory (local.json)")
+	fs.StringVar(&c.HomeNotify, "home-notify", c.HomeNotify, "home notifications: off | dry_run | send (default dry_run in development)")
+	fs.StringVar(&c.HomePublicURL, "home-public-url", c.HomePublicURL, "public URL for home notification links; empty uses relative paths")
 	var tlsMode string
 	fs.StringVar(&c.DataDir, "data-dir", c.DataDir, "directory for the database, tmux config and ACME state")
 	fs.StringVar(&c.Addr, "addr", c.Addr, "listen address")
@@ -95,6 +99,9 @@ func Load(args []string, out io.Writer) (Config, error) {
 	// to support. It looked like the flag did nothing, because it did nothing.
 	typed := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { typed[f.Name] = true })
+	if _, fromEnv := os.LookupEnv("VIBEPANEL_HOME_NOTIFY"); !fromEnv && !typed["home-notify"] && (c.Development || c.PlanningOnly) {
+		c.HomeNotify = "dry_run"
+	}
 	if typed["trusted-proxies"] {
 		c.TrustedProxies = splitAndTrim(*proxies)
 	}

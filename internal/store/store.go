@@ -1110,6 +1110,7 @@ var migrations = []func(tx *sql.Tx) error{
 	},
 	migrateProjectBoards,
 	migrateWorkflow,
+	migrateHome,
 }
 
 // scanner is *sql.Row and *sql.Rows both, so one scan function serves a

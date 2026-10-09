@@ -24563,3 +24563,13 @@ The targeted home tests cover parsing, warning recovery, file limits, symlink
 escapes, stable to-do identities and byte-preserving writes. Checks run serially
 at nice 19 with one Go worker on the shared host; deployment and browser checks
 are outside this worker's assignment.
+
+The new `--cyx-home`, `--home-notify` and `--home-public-url` flags follow the
+existing environment/flag precedence. Notifications default to dry-run in
+development and off elsewhere. Two additive runtime tables hold bounded chat
+history reads and notification receipts, without foreign keys into panel
+projects. Delivery receipts suppress replay after restart, including to a
+recipient paired after the original to-do was recorded. Baselines remain in
+the deduplication table but are excluded from the public delivery history.
+
+Targeted configuration, storage and migration-idempotence tests passed.
