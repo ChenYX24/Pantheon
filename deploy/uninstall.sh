@@ -147,8 +147,6 @@ SESSIONS="$(tmux -L "$SOCKET" list-sessions -F '#{session_name}' 2>/dev/null || 
 N=0
 [ -n "$SESSIONS" ] && N="$(printf '%s\n' "$SESSIONS" | wc -l | tr -d ' ')"
 
-RUNNING=no
-if pgrep -f "vibepanel serve" >/dev/null 2>&1; then RUNNING=yes; fi
 
 UNIT="$HOME/.config/systemd/user/vibepanel.service"
 # The same test-only prefix deploy/install.sh and cmd/vibepanel/service.go take.
@@ -186,8 +184,54 @@ if [ -z "$BIN" ]; then
   fi
 fi
 
+# Select an instance by both its data directory and tmux socket. A shared
+# executable name is not an identity: installer checks run beside production.
+matching_panel_pids() {
+  local entry pid arg process_home process_data process_socket index
+  local args
+  if [ ! -d /proc ]; then
+    echo "       cannot verify standalone process ownership here; stop it manually" >&2
+    return 0
+  fi
+  for entry in /proc/[0-9]*/cmdline; do
+    [ -r "$entry" ] || continue
+    args=()
+    while IFS= read -r -d '' arg; do args+=("$arg"); done < "$entry" 2>/dev/null || continue
+    [ "${#args[@]}" -ge 2 ] || continue
+    [ "${args[1]}" = serve ] || continue
+    case "${args[0]}" in "$BIN"|*/vibepanel|vibepanel) ;; *) continue ;; esac
+    pid="${entry%/cmdline}"; pid="${pid##*/}"
+    [ -r "/proc/$pid/environ" ] || continue
+    process_home=; process_data=; process_socket=vibepanel
+    while IFS= read -r -d '' arg; do
+      case "$arg" in
+        HOME=*) process_home="${arg#HOME=}" ;;
+        VIBEPANEL_DATA_DIR=*) process_data="${arg#VIBEPANEL_DATA_DIR=}" ;;
+        VIBEPANEL_TMUX_SOCKET=*) process_socket="${arg#VIBEPANEL_TMUX_SOCKET=}" ;;
+      esac
+    done < "/proc/$pid/environ" 2>/dev/null || continue
+    [ -n "$process_data" ] || process_data="$process_home/.local/share/vibepanel"
+    index=2
+    while [ "$index" -lt "${#args[@]}" ]; do
+      arg="${args[$index]}"
+      case "$arg" in
+        --data-dir|-data-dir) index=$((index + 1)); process_data="${args[$index]:-}" ;;
+        --data-dir=*|-data-dir=*) process_data="${arg#*=}" ;;
+        --tmux-socket|-tmux-socket) index=$((index + 1)); process_socket="${args[$index]:-}" ;;
+        --tmux-socket=*|-tmux-socket=*) process_socket="${arg#*=}" ;;
+      esac
+      index=$((index + 1))
+    done
+    [ "${process_data%/}" = "${DATA%/}" ] && [ "$process_socket" = "$SOCKET" ] && printf '%s\n' "$pid"
+  done
+  return 0
+}
+
+RUNNING=no
+[ -z "$(matching_panel_pids)" ] || RUNNING=yes
+
 echo "what is here:"
-[ "$RUNNING" = yes ] && say "running" "a vibepanel serve process" || say "running" "nothing"
+[ "$RUNNING" = yes ] && say "running" "a vibepanel serve process" || say "running" "no matching instance found"
 say "socket" "$SOCKET  ($N session(s))"
 [ -f "$UNIT" ]    && say "unit" "$UNIT"
 [ -f "$SYSUNIT" ] && say "unit" "$SYSUNIT (needs root to remove)"
@@ -357,17 +401,8 @@ elif [ -f "$UNIT" ] || [ -f "$SYSUNIT" ] || [ -f "$PLIST" ]; then
   UNIT_LEFT=yes
 fi
 
-# Anything still serving, which is the case this whole repository is about: the
-# panel is often run straight out of a working tree rather than as a service.
-#
-# The pids are read and filtered rather than handed to `pkill -f`. A `-f`
-# pattern matches whole command lines, including the command line of whatever
-# invoked this script -- a shell whose `-c` argument happens to mention
-# `vibepanel serve` matches, and pkill kills it. That is not hypothetical: it
-# is how this got written.
-#
-# So: everything from this process up to init is off limits, and so is this
-# process itself.
+# Service uninstall handles its own unit. Any remaining standalone process
+# must still match this exact data/socket pair; ancestors are never candidates.
 mine=" $$ "
 anc=$$
 while [ "$anc" -gt 1 ]; do
@@ -375,13 +410,13 @@ while [ "$anc" -gt 1 ]; do
   [ -n "$anc" ] || break
   mine="$mine$anc "
 done
-if pgrep -f "vibepanel serve" >/dev/null 2>&1; then
-  for p in $(pgrep -f "vibepanel serve"); do
+if [ -n "$(matching_panel_pids)" ]; then
+  for p in $(matching_panel_pids); do
     case "$mine" in *" $p "*) continue ;; esac
     kill "$p" 2>/dev/null || true
   done
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    pgrep -f "vibepanel serve" >/dev/null 2>&1 || break
+    [ -n "$(matching_panel_pids)" ] || break
     sleep 0.5
   done
   did "stopped the running panel"
@@ -499,10 +534,8 @@ if [ "$LEFTOVERS" = yes ]; then
   if [ -n "$orphans" ]; then
     echo "       and these servers, whose socket is in their own temp directory:"
     printf '%s\n' "$orphans" | sed 's/^ */         /' | cut -c1-100
-    printf '%s\n' "$orphans" | awk '{print $1}' | while read -r pid; do
-      kill "$pid" 2>/dev/null || true
-    done
-    did "ended $(printf '%s\n' "$orphans" | wc -l | tr -d ' ') orphaned test server(s)"
+    echo "       inspect these candidates manually; a missing socket does not establish ownership"
+
   fi
 fi
 

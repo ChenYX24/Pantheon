@@ -1,0 +1,673 @@
+{
+  "projectId": "",
+  "goal": "把 Parthenon 建成可持续迭代的项目经理与 Agent 协作平台：以稳定运行版为基线，在独立开发版维护项目计划、阶段模型、共同状态、技能和远程交接。",
+  "stages": [
+    {
+      "id": "P0",
+      "title": "稳定版与开发版隔离",
+      "primary": {
+        "harness": "codex",
+        "model": "gpt-6-astra"
+      },
+      "secondary": {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5"
+      },
+      "reason": "先验证端口、数据、进程与访问边界，辅助复核隔离证据。",
+      "budgetMinutes": 120,
+      "attemptMinutes": 30,
+      "maxAttempts": 3
+    },
+    {
+      "id": "P1",
+      "title": "项目经理与计划看板",
+      "primary": {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5"
+      },
+      "secondary": {
+        "harness": "codex",
+        "model": "gpt-6-astra"
+      },
+      "reason": "主导目标拆解与阶段安排，Codex 检查依赖、实现和验收可行性。",
+      "budgetMinutes": 120,
+      "attemptMinutes": 30,
+      "maxAttempts": 3
+    },
+    {
+      "id": "P2",
+      "title": "多模型执行与共同状态",
+      "primary": {
+        "harness": "codex",
+        "model": "gpt-6-astra"
+      },
+      "secondary": {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5"
+      },
+      "reason": "实现调度和状态不变量，Claude 独立复核并在允许的失败中接替。",
+      "budgetMinutes": 120,
+      "attemptMinutes": 30,
+      "maxAttempts": 3
+    },
+    {
+      "id": "P3",
+      "title": "Session 与上下文交接",
+      "primary": {
+        "harness": "codex",
+        "model": "gpt-6-astra"
+      },
+      "secondary": {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5"
+      },
+      "reason": "实现 tmux 生命周期和恢复机制，Claude 审核上下文完整性。",
+      "budgetMinutes": 120,
+      "attemptMinutes": 30,
+      "maxAttempts": 3
+    },
+    {
+      "id": "P4",
+      "title": "Agent 能力维护",
+      "primary": {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5"
+      },
+      "secondary": {
+        "harness": "codex",
+        "model": "gpt-6-astra"
+      },
+      "reason": "整理 Skill 与协作规范，Codex 验证版本、作用域与执行接口。",
+      "budgetMinutes": 120,
+      "attemptMinutes": 30,
+      "maxAttempts": 3
+    },
+    {
+      "id": "P5",
+      "title": "手机端体验",
+      "primary": {
+        "harness": "codex",
+        "model": "gpt-6-astra"
+      },
+      "secondary": {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5"
+      },
+      "reason": "实现响应式交互，Claude 按用户流程复核。",
+      "budgetMinutes": 120,
+      "attemptMinutes": 30,
+      "maxAttempts": 3
+    },
+    {
+      "id": "P6",
+      "title": "远程项目协作",
+      "primary": {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5"
+      },
+      "secondary": {
+        "harness": "codex",
+        "model": "gpt-6-astra"
+      },
+      "reason": "设计跨设备交接协议，Codex 验证租约与代码同步边界。",
+      "budgetMinutes": 120,
+      "attemptMinutes": 30,
+      "maxAttempts": 3
+    },
+    {
+      "id": "P7",
+      "title": "飞书与微信确认",
+      "primary": {
+        "harness": "codex",
+        "model": "gpt-6-astra"
+      },
+      "secondary": {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5"
+      },
+      "reason": "实现版本绑定和幂等回调，Claude 复核消息与授权含义。",
+      "budgetMinutes": 120,
+      "attemptMinutes": 30,
+      "maxAttempts": 3
+    },
+    {
+      "id": "P8",
+      "title": "持续改进与发布",
+      "primary": {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5"
+      },
+      "secondary": {
+        "harness": "codex",
+        "model": "gpt-6-astra"
+      },
+      "reason": "汇总实际效果并提出策略改进，Codex 执行回归与发布验证。",
+      "budgetMinutes": 120,
+      "attemptMinutes": 30,
+      "maxAttempts": 3
+    }
+  ],
+  "tasks": [
+    {
+      "id": "P0-01",
+      "title": "定位公网访问链路",
+      "status": "done",
+      "phase": "P0",
+      "owner": "codex",
+      "acceptance": "记录域名、Caddy、监听端口、systemd 服务与基线版本；生产保持健康。",
+      "evidence": "Verified Caddy HTTPS/BasicAuth -> loopback 18443 -> vibepanel.service, retaining v1.24.1 / f4dcf68. Production currently healthy with 7 live sessions; the validation report records the installer-test restart incident and its fix.",
+      "sessionId": "",
+      "dependsOn": [],
+      "verify": []
+    },
+    {
+      "id": "P0-02",
+      "title": "隔离开发运行环境",
+      "status": "review",
+      "phase": "P0",
+      "owner": "codex",
+      "acceptance": "独立端口、数据库、认证和 tmux；不改写生产 hooks 或执行器配置。",
+      "evidence": "Development isolation tests passed; permanent preview startup pending.",
+      "sessionId": "",
+      "dependsOn": [
+        "P0-01"
+      ],
+      "verify": [
+        "GOTOOLCHAIN=auto GOSUMDB=sum.golang.org go test ./internal/config ./internal/httpapi -run \"TestDevelopment|TestBoardAuthentication\""
+      ]
+    },
+    {
+      "id": "P0-03",
+      "title": "开发项目清单与启动运维",
+      "status": "review",
+      "phase": "P0",
+      "owner": "codex",
+      "acceptance": "只读导入项目名称和目录，提供安全 start/stop/status，保留原会话。",
+      "evidence": "scripts/panel-dev.py; awaiting live startup verification.",
+      "sessionId": "",
+      "dependsOn": [
+        "P0-02"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P0-04",
+      "title": "独立公网开发入口",
+      "status": "planned",
+      "phase": "P0",
+      "owner": "codex",
+      "acceptance": "发布 https://parthenon.atombit.top/dev，验证 HTTPS 登录、Cookie、路由、PWA、浏览器存储与数据隔离。",
+      "evidence": "Use the native /dev mount and scoped Caddy publication helper. Verify public HTTPS, isolated credentials, unrelated-route preservation and installed-release recovery.",
+      "sessionId": "",
+      "dependsOn": [
+        "P0-03"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P1-01",
+      "title": "项目看板与持久化讨论",
+      "status": "review",
+      "phase": "P1",
+      "owner": "claude",
+      "acceptance": "项目目标、分阶段计划、依赖、验收、证据持久化；项目经理建议需显式应用。",
+      "evidence": "Store/API tests passed; project discussion uses a fake executor in tests.",
+      "sessionId": "",
+      "dependsOn": [
+        "P0-02"
+      ],
+      "verify": [
+        "GOTOOLCHAIN=auto GOSUMDB=sum.golang.org go test ./internal/store ./internal/httpapi -run \"TestWorkflow|TestProjectDiscussion|TestProjectBoard\""
+      ]
+    },
+    {
+      "id": "P1-02",
+      "title": "阶段主辅模型与预算",
+      "status": "review",
+      "phase": "P1",
+      "owner": "claude",
+      "acceptance": "每阶段显示具体模型、选择理由、时长和尝试次数，可编辑；确认前不执行。",
+      "evidence": "Concrete configured model IDs are detected; stage validation and approval tests passed.",
+      "sessionId": "",
+      "dependsOn": [
+        "P1-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P1-03",
+      "title": "活动历史与冲突合并",
+      "status": "review",
+      "phase": "P1",
+      "owner": "claude",
+      "acceptance": "修改携带 rev；冲突保留草稿；能力和计划更新使旧授权失效。",
+      "evidence": "Concurrent claims, stale plans and capability invalidation tests passed.",
+      "sessionId": "",
+      "dependsOn": [
+        "P1-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P1-04",
+      "title": "项目组合、里程碑与截止日",
+      "status": "planned",
+      "phase": "P1",
+      "owner": "claude",
+      "acceptance": "展示所有项目的里程碑、负责人、截止日、阻塞和待我处理；区分任务与里程碑进度。",
+      "evidence": "",
+      "sessionId": "",
+      "dependsOn": [
+        "P1-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P2-01",
+      "title": "原子任务领取与单写入者",
+      "status": "review",
+      "phase": "P2",
+      "owner": "codex",
+      "acceptance": "项目并发 1、全局并发 2；必须有未过期授权且依赖已完成，不重复领取。",
+      "evidence": "SQLite transaction/unique index tests passed.",
+      "sessionId": "",
+      "dependsOn": [
+        "P1-02"
+      ],
+      "verify": [
+        "GOTOOLCHAIN=auto GOSUMDB=sum.golang.org go test ./internal/store -run TestWorkflowClaimsAreAtomicAndRequireApproval"
+      ]
+    },
+    {
+      "id": "P2-02",
+      "title": "主辅接替与独立验收",
+      "status": "review",
+      "phase": "P2",
+      "owner": "codex",
+      "acceptance": "主失败后可切辅一次；三次尝试内，检查和独立审阅通过才完成；需人工输入时停止。",
+      "evidence": "Fake executors verified failover and independent review; real-provider acceptance pending.",
+      "sessionId": "",
+      "dependsOn": [
+        "P2-01"
+      ],
+      "verify": [
+        "GOTOOLCHAIN=auto GOSUMDB=sum.golang.org go test ./internal/parthenon -run TestWorker"
+      ]
+    },
+    {
+      "id": "P2-03",
+      "title": "隔离工作树与持久化执行记录",
+      "status": "review",
+      "phase": "P2",
+      "owner": "codex",
+      "acceptance": "任务在独立 worktree/tmux 运行；记录任务、授权、模型、交接、结果、耗时与已知费用。",
+      "evidence": "Worker receipts and scheduler implemented; real tmux execution recovery still to verify.",
+      "sessionId": "",
+      "dependsOn": [
+        "P2-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P2-04",
+      "title": "真实 Claude/Codex 协作验收",
+      "status": "planned",
+      "phase": "P2",
+      "owner": "codex",
+      "acceptance": "在一个已提交的测试项目完成规划、确认、实现、独立检查和接替，记录 CLI/模型可用性与费用。",
+      "evidence": "No paid model execution has been launched automatically.",
+      "sessionId": "",
+      "dependsOn": [
+        "P2-02",
+        "P2-03"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P2-05",
+      "title": "更多模型执行器适配",
+      "status": "planned",
+      "phase": "P2",
+      "owner": "codex",
+      "acceptance": "通过能力契约新增其他 CLI/API，验证工具权限、用量、取消和上下文继承。",
+      "evidence": "",
+      "sessionId": "",
+      "dependsOn": [
+        "P2-04"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P3-01",
+      "title": "任务与 session 关联",
+      "status": "review",
+      "phase": "P3",
+      "owner": "codex",
+      "acceptance": "看板能定位执行 session；session 的终端状态与任务验收状态分开。",
+      "evidence": "Task/run/session identifiers linked; completion evidence remains separate.",
+      "sessionId": "",
+      "dependsOn": [
+        "P2-03"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P3-02",
+      "title": "重启恢复与检查点",
+      "status": "review",
+      "phase": "P3",
+      "owner": "codex",
+      "acceptance": "后端重启后从 tmux 与原子结果恢复，工作不重复启动，停止保留改动。",
+      "evidence": "Durable job/progress/result receipts implemented; failure injection pending.",
+      "sessionId": "",
+      "dependsOn": [
+        "P3-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P3-03",
+      "title": "任务边界自动接续",
+      "status": "review",
+      "phase": "P3",
+      "owner": "codex",
+      "acceptance": "每次模型调用使用新 session，带上共同计划、能力和最近交接；长对话只附最近窗口。",
+      "evidence": "Bounded manager context and per-attempt handoffs implemented.",
+      "sessionId": "",
+      "dependsOn": [
+        "P3-02"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P3-04",
+      "title": "按上下文用量自动换 session",
+      "status": "planned",
+      "phase": "P3",
+      "owner": "codex",
+      "acceptance": "获取执行器真实上下文用量，阈值触发结构化总结；新 session 验证接续后归档旧 session。",
+      "evidence": "Token usage threshold detection is not implemented; task-boundary rollover is available.",
+      "sessionId": "",
+      "dependsOn": [
+        "P3-03"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P4-01",
+      "title": "Skill/MCP 来源清单",
+      "status": "review",
+      "phase": "P4",
+      "owner": "claude",
+      "acceptance": "展示真实来源、作用域与 Skill 内容指纹，MCP 只展示服务器名称。",
+      "evidence": "Inventory API and project-capability import UI implemented.",
+      "sessionId": "",
+      "dependsOn": [
+        "P1-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P4-02",
+      "title": "能力草稿、版本和应用",
+      "status": "review",
+      "phase": "P4",
+      "owner": "claude",
+      "acceptance": "Skill、规则、MCP 说明、远程规范可迭代成新版本；应用会触发计划重新确认。",
+      "evidence": "Versioned capability drafts and activation tests passed.",
+      "sessionId": "",
+      "dependsOn": [
+        "P4-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P4-03",
+      "title": "项目管理 Skill",
+      "status": "review",
+      "phase": "P4",
+      "owner": "claude",
+      "acceptance": "统一阶段模型规划、共同状态、单写入者、交接和验收规则；可随讨论继续维护。",
+      "evidence": "skills/parthenon-project-manager/SKILL.md passes skill-creator validation.",
+      "sessionId": "",
+      "dependsOn": [
+        "P4-02"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P4-04",
+      "title": "真实 MCP 配置编辑与回滚",
+      "status": "planned",
+      "phase": "P4",
+      "owner": "claude",
+      "acceptance": "分别按 Claude/Codex 契约校验配置，预览差异与影响，凭据引用不入共享状态，支持回滚。",
+      "evidence": "Current MCP management is inventory and project guidance only.",
+      "sessionId": "",
+      "dependsOn": [
+        "P4-02"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P4-05",
+      "title": "能力效果评估与改进建议",
+      "status": "planned",
+      "phase": "P4",
+      "owner": "claude",
+      "acceptance": "固定任务集对比能力版本，报告通过率、人工介入和费用；通过门槛后再应用。",
+      "evidence": "",
+      "sessionId": "",
+      "dependsOn": [
+        "P4-03",
+        "P2-04"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P5-01",
+      "title": "手机项目工作区",
+      "status": "review",
+      "phase": "P5",
+      "owner": "codex",
+      "acceptance": "390px 和桌面可保存任务、查看模型、确认阶段、维护技能，页面无横向溢出。",
+      "evidence": "Initial browser board save/reload/overflow check passed; expanded workflow checks pending.",
+      "sessionId": "",
+      "dependsOn": [
+        "P1-01"
+      ],
+      "verify": [
+        "node web/scripts/board-check.mjs"
+      ]
+    },
+    {
+      "id": "P5-02",
+      "title": "待我处理聚合",
+      "status": "planned",
+      "phase": "P5",
+      "owner": "codex",
+      "acceptance": "统一显示阻塞、计划变更、验收和 session 输入请求，支持项目过滤与深链接。",
+      "evidence": "",
+      "sessionId": "",
+      "dependsOn": [
+        "P5-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P5-03",
+      "title": "移动终端与断线回归",
+      "status": "planned",
+      "phase": "P5",
+      "owner": "codex",
+      "acceptance": "验证中文输入、横竖屏、长输出、复制粘贴与重连；复用现有终端机制。",
+      "evidence": "",
+      "sessionId": "",
+      "dependsOn": [
+        "P5-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P6-01",
+      "title": "可导出的共享交接包",
+      "status": "review",
+      "phase": "P6",
+      "owner": "claude",
+      "acceptance": "输出计划版本、任务状态、能力版本、授权、执行证据和下一步；排除私有聊天历史与凭据。",
+      "evidence": "Authenticated handoff endpoint implemented.",
+      "sessionId": "",
+      "dependsOn": [
+        "P3-03",
+        "P4-02"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P6-02",
+      "title": "已登记远程执行器",
+      "status": "planned",
+      "phase": "P6",
+      "owner": "claude",
+      "acceptance": "只使用 cyx 已登记连接和项目映射，验证远端源码版本和执行器能力。",
+      "evidence": "Remote host/alias configuration will be supplied per project.",
+      "sessionId": "",
+      "dependsOn": [
+        "P6-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P6-03",
+      "title": "跨设备交接与租约",
+      "status": "planned",
+      "phase": "P6",
+      "owner": "claude",
+      "acceptance": "显式移交写入权，接收端确认共同状态版本后启动；网络中断不能产生双写入。",
+      "evidence": "",
+      "sessionId": "",
+      "dependsOn": [
+        "P6-02"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P7-01",
+      "title": "复用飞书与微信桥接",
+      "status": "review",
+      "phase": "P7",
+      "owner": "codex",
+      "acceptance": "通过已配对联系人发出阶段确认，使用现有 adapter 身份和回调校验。",
+      "evidence": "Integration adapter implemented; development delivery remains disabled.",
+      "sessionId": "",
+      "dependsOn": [
+        "P1-02"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P7-02",
+      "title": "确认版本绑定与去重",
+      "status": "review",
+      "phase": "P7",
+      "owner": "codex",
+      "acceptance": "同一授权可由面板或消息确认；身份、有效期、版本和并发拒绝/同意须一致。",
+      "evidence": "Store tests cover peer binding, stale revisions, duplicates and contradictory concurrent decisions.",
+      "sessionId": "",
+      "dependsOn": [
+        "P7-01"
+      ],
+      "verify": [
+        "GOTOOLCHAIN=auto GOSUMDB=sum.golang.org go test ./internal/store -run TestNotification"
+      ]
+    },
+    {
+      "id": "P7-03",
+      "title": "真实机器人接入验收",
+      "status": "planned",
+      "phase": "P7",
+      "owner": "codex",
+      "acceptance": "配置用户选择的渠道和接收人；实测发送、重复回调、过期、拒绝和计划变更。",
+      "evidence": "Awaiting bot configuration and chosen paired recipients; no real message has been sent.",
+      "sessionId": "",
+      "dependsOn": [
+        "P7-02"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P7-04",
+      "title": "自动提醒与安静时段",
+      "status": "planned",
+      "phase": "P7",
+      "owner": "codex",
+      "acceptance": "完成、失败、超时和待确认触发受控提醒；去重、静默时段、重试和深链接可配置。",
+      "evidence": "Current outbox handles explicitly requested stage confirmations.",
+      "sessionId": "",
+      "dependsOn": [
+        "P7-03"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P8-01",
+      "title": "完整回归与运行记录",
+      "status": "review",
+      "phase": "P8",
+      "owner": "claude",
+      "acceptance": "执行 make check、相关浏览器检查和结构验证；记录环境限制和基线失败。",
+      "evidence": "Focused store/API/config/worker checks and frontend build passed; broad checks pending.",
+      "sessionId": "",
+      "dependsOn": [
+        "P2-03",
+        "P4-02",
+        "P5-01",
+        "P7-02"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P8-02",
+      "title": "调度策略度量与改善",
+      "status": "planned",
+      "phase": "P8",
+      "owner": "claude",
+      "acceptance": "记录可用性、成功率、耗时、接替率和费用来源，推荐阶段模型但不自动扩大授权。",
+      "evidence": "",
+      "sessionId": "",
+      "dependsOn": [
+        "P2-04"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P8-03",
+      "title": "数据备份与迁移回退演练",
+      "status": "planned",
+      "phase": "P8",
+      "owner": "claude",
+      "acceptance": "测试迁移副本、数据库恢复和二进制回退；生产升级前验证健康与会话续存。",
+      "evidence": "",
+      "sessionId": "",
+      "dependsOn": [
+        "P8-01"
+      ],
+      "verify": []
+    },
+    {
+      "id": "P8-04",
+      "title": "生产发布",
+      "status": "planned",
+      "phase": "P8",
+      "owner": "claude",
+      "acceptance": "开发版验收、备份与回退演练完成后发布，检查服务与公网访问，保留开发环境。",
+      "evidence": "Production deployment is not part of this preview rollout.",
+      "sessionId": "",
+      "dependsOn": [
+        "P8-03"
+      ],
+      "verify": []
+    }
+  ],
+  "rev": 0
+}

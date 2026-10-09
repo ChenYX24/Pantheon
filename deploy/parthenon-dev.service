@@ -1,0 +1,15 @@
+[Unit]
+Description=Parthenon development workspace
+After=network-online.target
+
+[Service]
+Type=exec
+User=__USER__
+WorkingDirectory=__PROJECT__
+ExecStart=__HOME__/.local/share/panel-dev/bin/parthenon-dev serve --development --base-path /dev --trusted-proxies 127.0.0.1/32 --addr 127.0.0.1:19444 --data-dir __HOME__/.local/share/panel-dev --tmux-socket panel-dev --isolation off
+Restart=on-failure
+RestartSec=3
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

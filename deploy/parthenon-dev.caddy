@@ -1,0 +1,10 @@
+# Inside the existing parthenon.atombit.top site, before its default handler.
+# This is a fragment, not a replacement Caddyfile. The deployed instance uses
+# scripts/panel-dev.py publish to preserve other services' active JSON routes.
+handle /dev {
+    reverse_proxy 127.0.0.1:19444
+}
+handle /dev/* {
+    reverse_proxy 127.0.0.1:19444
+}
+# Do not use handle_path: the development backend requires the /dev prefix.

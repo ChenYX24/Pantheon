@@ -110,6 +110,14 @@ tls-check: build      ## Serve over its own TLS: wss, Secure cookie, cert swap
 #
 # Not merged into `check`, because this takes twenty minutes and a gate people
 # stop running is worse than a slow one they run deliberately.
+.PHONY: board-check
+board-check: build    ## Project planning, approvals and capabilities on desktop and mobile
+	node web/scripts/board-check.mjs
+
+.PHONY: workflow-check
+workflow-check: build ## Real tmux/worktree worker recovery using fixture model executors
+	node web/scripts/workflow-check.mjs
+
 .PHONY: verify
 verify:               ## Every check there is (~20 min)
 	scripts/verify.sh
@@ -126,7 +134,7 @@ release-check:        ## Build the archives and run one from a throwaway HOME
 # runs what it installs. Kept out of `check` only because `check` is the Go and
 # frontend gate; run it whenever deploy/ changes.
 .PHONY: install-check
-install-check:        ## Drive deploy/install.sh down every branch it has
+install-check: uninstall-scope-check ## Drive deploy/install.sh down every branch it has
 	scripts/install-check.sh
 
 # A minute or two, and docker: the elevated upgrade against real sudo and
@@ -158,3 +166,12 @@ clean:
 help:
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | \
 	  awk -F':.*?## ' '{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: uninstall-scope-check
+uninstall-scope-check: ## Ensure uninstall cannot signal a different panel instance
+	python3 -B scripts/uninstall-scope-check.py
+
+.PHONY: basepath-check
+basepath-check: build
+	python3 -B -m unittest discover -s scripts -p test_panel_dev.py -v
+	cd web && CHECK_BASE_PATH=/dev node scripts/board-check.mjs

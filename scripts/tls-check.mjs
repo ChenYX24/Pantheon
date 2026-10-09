@@ -8,7 +8,9 @@
 // own TLS on a public hostname. Three things only happen there: the WebSocket
 // upgrades to wss, the session cookie carries Secure, and a certificate gets
 // replaced under a running server.
-import { chromium } from 'playwright'
+import { createRequire } from 'node:module'
+// Browser dependencies belong to web/package.json; the repository root has none.
+const { chromium } = createRequire(new URL('../web/package.json', import.meta.url))('playwright')
 import { rows as screenRows } from '../web/scripts/lib/screen.mjs'
 import { spawn, execSync } from 'node:child_process'
 import { mkdtempSync, rmSync, mkdirSync, copyFileSync, renameSync } from 'node:fs'
