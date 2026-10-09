@@ -24548,3 +24548,59 @@ verified binary was installed only in the development runtime; projects and
 roadmap revision 5 persisted. Public HTTPS smoke checks passed again, and the
 unrelated live Caddy configuration and production process remained unchanged.
 The default full verify matrix and a committed-release check remain later gates.
+
+## A file-backed home for Pantheon (2026-10-09)
+
+The Stage A home index reads the cyx registry and Harness manifests, active
+context, tasks and reports. It derives review, approval, blocker, question and
+session to-dos without storing project work in SQLite. Reads are capped and
+cached by path, mtime and size; malformed files produce warnings. Filesystem
+operations stay inside an opened Harness root, including symlinks changed during
+a read or write. Task creation reserves its directory, and status patches compare
+the file revision before an atomic rename while preserving unrelated bytes.
+
+The targeted home tests cover parsing, warning recovery, file limits, symlink
+escapes, stable to-do identities and byte-preserving writes. Checks run serially
+at nice 19 with one Go worker on the shared host; deployment and browser checks
+are outside this worker's assignment.
+
+The new `--cyx-home`, `--home-notify` and `--home-public-url` flags follow the
+existing environment/flag precedence. Notifications default to dry-run in
+development and off elsewhere. Two additive runtime tables hold bounded chat
+history reads and notification receipts, without foreign keys into panel
+projects. Delivery receipts suppress replay after restart, including to a
+recipient paired after the original to-do was recorded. Baselines remain in
+the deduplication table but are excluded from the public delivery history.
+
+Targeted configuration, storage and migration-idempotence tests passed.
+
+All Stage A home routes now sit behind the existing authentication middleware.
+The development allow-list admits file/chat operations while keeping manual
+session creation behind the same terminal gate as the panel. Home launches share
+the existing project validation and session/profile creation implementations.
+PM discussion uses the existing runner with write access disabled and a
+three-minute deadline; its suggestions are returned for explicit application.
+
+The home notifier starts beside the workflow loop without enabling execution.
+It waits ten seconds, then polls every minute; first-start to-dos establish a
+baseline. Dry-run and missing-recipient receipts never call an adapter. Feishu
+uses plain text and the bridge's existing language setting, with three attempts,
+minute-times-attempt backoff and a 24-hour expiry (reported as failed). An explicit
+send in development reuses the enabled Feishu configuration through an outbound
+adapter without starting or exposing the inbound bridge. Missing or disabled
+channel configuration remains a delivery failure. Changing mode does not replay old
+dry-run or baseline receipts.
+
+The home API tests use an in-process mode of `newTestServer` with real routing,
+authentication and temporary databases, without an HTTP listener or tmux server.
+They cover database-loss rebuilds, manual-launch gating and shared validation,
+read-only discussion with a fake runner, and notification lifecycle/deduplication.
+A fake Feishu adapter verifies plain text without buttons. All targeted home,
+HTTP, config, store and chat checks passed. Real tmux launches, live Feishu sends
+and browser integration remain for the Conductor's permitted environment.
+
+A transport-only Feishu test also exercises the real adapter with synthetic
+responses, confirming that an outbound send does not register a webhook and
+that disabling the stored channel prevents further sends. The targeted chat
+language check and command-entrypoint help tests also passed; the latter compile
+the notifier startup wiring without running a server.

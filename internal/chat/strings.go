@@ -35,6 +35,12 @@ func msg(lang, key string, args ...any) string {
 }
 
 var strs = map[string][2]string{
+	"home.question":          {"待答复", "Question"},
+	"home.awaiting_approval": {"待批准", "Awaiting approval"},
+	"home.blocked":           {"有阻塞", "Blocked"},
+	"home.awaiting_review":   {"待审核", "Awaiting review"},
+	"home.session_waiting":   {"会话等待中", "Session waiting"},
+	"home.session_rollover":  {"会话需接续", "Session rollover"},
 	"pairing": {
 		"这个面板还不认识你。配对码 %s，在面板的「消息通道」页里输入后就能收到推送和回复。",
 		"This panel does not know you yet. Pairing code %s. Enter it on the panel's Messaging page to be paired.",

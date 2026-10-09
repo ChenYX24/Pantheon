@@ -18,7 +18,7 @@ func (s *Server) planningOnlyGate(next http.Handler) http.Handler {
 			profiles := r.Method == http.MethodGet && path == "/api/launch-profiles"
 			board := strings.HasPrefix(path, "/api/projects/") && strings.HasSuffix(path, "/board") && strings.Count(path, "/") == 4
 			workflow := strings.HasPrefix(path, "/api/projects/") && ((strings.HasSuffix(path, "/workflow") || strings.HasSuffix(path, "/notifications")) || strings.HasSuffix(path, "/discussion") || strings.HasSuffix(path, "/handoff") || strings.Contains(path, "/stages/") || strings.Contains(path, "/capabilities") || strings.HasSuffix(path, "/capability-inventory"))
-			allowed := profiles || workflow || (r.Method == "GET" && ((path == "/api/workflow/executors" || path == "/api/workflow/settings") || path == "/api/workflow/recipients")) || (r.Method == "GET" && (path == "/api/state" || board)) ||
+			allowed := homePlanningRoute(r.Method, path) || profiles || workflow || (r.Method == "GET" && ((path == "/api/workflow/executors" || path == "/api/workflow/settings") || path == "/api/workflow/recipients")) || (r.Method == "GET" && (path == "/api/state" || board)) ||
 				(r.Method == "POST" && path == "/api/projects") || (r.Method == "PUT" && board)
 			if s.Cfg.DevelopmentTerminal && !s.Cfg.PlanningOnly && !s.Cfg.WorkflowExecute {
 				allowed = allowed || developmentTerminalRoute(r.Method, path)
@@ -35,6 +35,9 @@ func (s *Server) planningOnlyGate(next http.Handler) http.Handler {
 // Only the owner's manual workspace is enabled here. Host administration and
 // transcript ingestion remain blocked even when a new API route is added.
 func developmentTerminalRoute(method, path string) bool {
+	if homeSessionRoute(method, path) {
+		return true
+	}
 	if method == http.MethodGet {
 		switch path {
 		case "/api/system", "/api/usage", "/api/resources", "/api/resources/alert", "/api/token-usage", "/api/settings", "/api/browse", "/api/notes":

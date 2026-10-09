@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -45,6 +46,9 @@ type Config struct {
 	DevelopmentTerminal bool
 	WorkflowExecute     bool
 	BasePath            string
+	CyxHome             string
+	HomeNotify          string
+	HomePublicURL       string
 
 	// DataDir holds the database, the generated tmux config and ACME state.
 	DataDir string
@@ -157,7 +161,10 @@ func hookSessionVar(key string) bool {
 }
 
 func Default() Config {
+	home, _ := os.UserHomeDir()
 	return Config{
+		CyxHome:    filepath.Join(home, ".cyx"),
+		HomeNotify: "off",
 		DataDir:    defaultDataDir(),
 		Addr:       fmt.Sprintf(":%d", DefaultPort),
 		TLSMode:    TLSOff,
@@ -206,6 +213,9 @@ func (c *Config) envOverlay() {
 	str(&c.Addr, "VIBEPANEL_ADDR")
 	str(&c.Domain, "VIBEPANEL_DOMAIN")
 	str(&c.BasePath, "VIBEPANEL_BASE_PATH")
+	str(&c.CyxHome, "VIBEPANEL_CYX_HOME")
+	str(&c.HomeNotify, "VIBEPANEL_HOME_NOTIFY")
+	str(&c.HomePublicURL, "VIBEPANEL_HOME_PUBLIC_URL")
 	str(&c.CertFile, "VIBEPANEL_CERT_FILE", "VIBEPANEL_TLS_CERT")
 	str(&c.KeyFile, "VIBEPANEL_KEY_FILE", "VIBEPANEL_TLS_KEY")
 	str(&c.ACMEEmail, "VIBEPANEL_ACME_EMAIL")
@@ -356,6 +366,20 @@ func (c Config) PasskeyBlocker() string {
 // Validate checks for combinations that cannot work, so the process fails at
 // startup with a clear message instead of at first request with a vague one.
 func (c Config) Validate() error {
+	switch c.HomeNotify {
+	case "off", "dry_run", "send":
+	default:
+		return errors.New("config: home-notify must be off, dry_run or send")
+	}
+	if c.CyxHome == "" {
+		return errors.New("config: cyx-home must not be empty")
+	}
+	if c.HomePublicURL != "" {
+		u, err := url.Parse(c.HomePublicURL)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return errors.New("config: home-public-url must be an HTTP(S) URL without credentials, query or fragment")
+		}
+	}
 	if c.BasePath != "" && (!regexp.MustCompile(`^/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*$`).MatchString(c.BasePath) || !(c.Development || c.PlanningOnly)) {
 		return fmt.Errorf("base-path requires development mode and a path such as /dev without a trailing slash")
 	}
