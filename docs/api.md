@@ -1963,6 +1963,63 @@ Callbacks use the existing channel adapter's identity checks and atomically
 bind the decision to that recipient, plan version, digest and expiry. Panel
 approval and remote confirmation resolve the same authorization.
 
+## Pantheon home
+
+The home view is read from files: the cyx registry (`--cyx-home`, default
+`~/.cyx/local.json`) and each Harness project folder (`project.json`,
+`ACTIVE_CONTEXT.md`, `agent-docs/tasks/<id>/task.md`, `agent-docs/reports/*.md`).
+The database keeps only chat history and notification receipts, so a new
+database yields the same projects, tasks and to-dos. The full contract, file
+formats and to-do rules are in `docs/pantheon/stage-a-contract.md`.
+
+### `GET /api/home`
+
+Query `all=1` includes archived and merged projects. Returns `available`,
+`generatedAt`, `projects`, `todos` and `warnings`; without a readable registry it
+returns `200` with `available: false` and a `reason`. Unreadable files become
+warnings and never fail the request.
+
+### `GET /api/home/projects/{id}`
+
+Returns `project`, `tasks` (each with its `rev`), `reports` and `todos` for one
+registered project.
+
+### `POST /api/home/projects/{id}/tasks`
+
+Body: `title` and optional `id`, `stage`, `status`, `primary`, `secondary`,
+`dependsOn`, `body`. Writes `task.md` atomically. `409` when the task exists.
+
+### `PATCH /api/home/projects/{id}/tasks/{taskId}`
+
+Body: `rev` and any of `status`, `blockedReason`, `sessionStatus`, `session`.
+Rewrites only those frontmatter keys plus `updated`. `409` with the current
+`rev` when the file changed since it was read.
+
+### `POST /api/home/projects/{id}/sessions`
+
+Body: optional `profileId`, `name`. Creates a session in the panel project whose
+path is the cyx checkout, adding that project when missing. Available only where
+manual sessions are (in development, with `--development-terminal`).
+
+### `GET /api/home/projects/{id}/discussion`
+
+Returns the last 100 project-manager `messages`, with `suggestions` and
+`suggestedModel` on assistant replies.
+
+### `POST /api/home/projects/{id}/discussion`
+
+Body: `message`, `executor` `{harness, model}`. Runs the chosen Claude or Codex
+model read-only in the checkout for at most three minutes and stores both turns.
+Suggestions (create task, set status, create session) are never applied by the
+server; the page applies one only when the user chooses it.
+
+### `GET /api/home/notifications`
+
+Returns the notification `mode` (`off`, `dry_run`, `send`) and the newest 100
+deliveries. Each new to-do is offered once per Feishu recipient; `dry_run`
+renders without sending, and the first run on an empty database records the
+current to-dos as a baseline without sending them.
+
 ### Development mount
 
 With `--development --base-path /dev`, every route documented above is relative
