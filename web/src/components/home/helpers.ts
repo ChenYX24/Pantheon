@@ -1,6 +1,6 @@
 import type { Key, Lang } from '../../i18n'
 import type { HomeStage, HomeTodo, HomeTodoKind } from '../../protocol/home'
-import { HOME_PATH, panelOpeningSession } from '../../routes'
+import { homeProjectLink, panelOpeningSession, type HomeSelection } from '../../routes'
 import { agoParts } from '../panels/ago'
 
 const TODO_ORDER: HomeTodoKind[] = ['question', 'awaiting_approval', 'blocked', 'awaiting_review', 'session_waiting', 'session_rollover']
@@ -27,14 +27,8 @@ export function relativeTime(at: string, now: number, lang: Lang): string {
   return new Intl.RelativeTimeFormat(lang === 'zh' ? 'zh-CN' : 'en', { numeric: 'auto' }).format(value, unit)
 }
 
-export interface HomeSelection { projectId: string; taskId?: string; reportFile?: string }
-
-export function projectLink({ projectId, taskId, reportFile }: HomeSelection): string {
-  const query = new URLSearchParams({ project: projectId })
-  if (taskId) query.set('task', taskId)
-  if (reportFile) query.set('report', reportFile)
-  return `${HOME_PATH}?${query}`
-}
+export type { HomeSelection } from '../../routes'
+export const projectLink = homeProjectLink
 
 export function selectionFromSearch(search: string): HomeSelection | null {
   const query = new URLSearchParams(search)

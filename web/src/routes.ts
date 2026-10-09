@@ -33,16 +33,56 @@ export const SHARING_PATH = appURL('/sharing')
 /** The page the chat bridge is set up from: routes.ts is the one place that spells it. */
 export const CHAT_PATH = appURL('/chat')
 
-export type Route = { kind: 'home' } | { kind: 'projects' } | { kind: 'panel' } | { kind: 'sharing' } | { kind: 'chat' }
+export type Route = { kind: 'home'; projectId?: string } | { kind: 'projects' } | { kind: 'panel' } | { kind: 'sharing' } | { kind: 'chat' }
 
 export function routeFor(pathname: string): Route {
   if (pathname === HOME_PATH || pathname === `${HOME_PATH}/`) return { kind: 'home' }
+  if (pathname.startsWith(`${HOME_PATH}/p/`)) {
+    const id = pathname.slice(`${HOME_PATH}/p/`.length).replace(/\/$/, '')
+    if (/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) return { kind: 'home', projectId: id }
+  }
   if (pathname === PROJECTS_PATH || pathname === `${PROJECTS_PATH}/`) return { kind: 'projects' }
   // With or without a trailing slash, because both arrive: a bookmark keeps
   // whatever was typed, and a proxy may add one.
   if (pathname === SHARING_PATH || pathname === `${SHARING_PATH}/`) return { kind: 'sharing' }
   if (pathname === CHAT_PATH || pathname === `${CHAT_PATH}/`) return { kind: 'chat' }
   return { kind: 'panel' }
+}
+
+export type HomeTab = 'chat' | 'tasks' | 'reports' | 'sessions' | 'info'
+export interface HomeSelection { projectId: string; taskId?: string; reportFile?: string; thread?: string; tab?: HomeTab }
+
+export function homeProjectLink({ projectId, taskId, reportFile, thread, tab }: HomeSelection): string {
+  const query = new URLSearchParams()
+  if (tab || reportFile || taskId) query.set('tab', tab ?? (reportFile ? 'reports' : 'tasks'))
+  if (thread && thread !== 'main') query.set('thread', thread)
+  if (taskId) query.set('task', taskId)
+  if (reportFile) query.set('report', reportFile)
+  return `${HOME_PATH}/p/${encodeURIComponent(projectId)}${query.size ? `?${query}` : ''}`
+}
+
+export function homeSelection(projectId: string, search: string): HomeSelection {
+  const query = new URLSearchParams(search)
+  const taskId = query.get('task') ?? ''
+  const reportFile = query.get('report') ?? ''
+  const tab = query.get('tab')
+  return {
+    projectId,
+    tab: ['chat', 'tasks', 'reports', 'sessions', 'info'].includes(tab ?? '') ? tab as HomeTab : reportFile ? 'reports' : taskId ? 'tasks' : 'chat',
+    thread: query.get('thread') || 'main',
+    ...(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(taskId) ? { taskId } : {}),
+    ...(reportFile ? { reportFile } : {}),
+  }
+}
+
+export function legacyHomeRedirect(pathname: string, search: string): string | null {
+  if (pathname !== HOME_PATH && pathname !== `${HOME_PATH}/`) return null
+  const query = new URLSearchParams(search)
+  const projectId = query.get('project') ?? ''
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(projectId)) return null
+  query.delete('project')
+  if (!query.has('tab')) query.set('tab', query.has('report') ? 'reports' : query.has('task') ? 'tasks' : 'chat')
+  return `${homeProjectLink({ projectId })}?${query}`
 }
 
 /**
