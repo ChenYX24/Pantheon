@@ -1111,6 +1111,7 @@ var migrations = []func(tx *sql.Tx) error{
 	migrateProjectBoards,
 	migrateWorkflow,
 	migrateHome,
+	migrateHomeThreads,
 }
 
 // scanner is *sql.Row and *sql.Rows both, so one scan function serves a
@@ -1165,6 +1166,10 @@ func Open(ctx context.Context, path string) (*DB, error) {
 
 	db := &DB{sql: sqlDB}
 	if err := db.migrate(ctx); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	if err := db.FailStaleHomeMessages(ctx, time.Now()); err != nil {
 		sqlDB.Close()
 		return nil, err
 	}

@@ -24652,3 +24652,10 @@ unrelated frontmatter and body bytes, including CRLF and comments. Report replie
 append a local timestamped section and clear `needs_user`, then mirror the text
 into the manager history. Tests cover conflicts, fields validation, list round
 trips, the symlink boundary and the disappearing question to-do.
+
+Stage A.2 chat persistence adds project-local threads and pending/done/failed
+assistant rows with an append-only migration. A partial unique index enforces
+one pending turn per project, and inserting both turns in one transaction avoids
+orphan user messages on a conflict. Failed turns retry in place. Opening the
+store marks pending rows older than ten minutes as interrupted. Store tests cover
+thread lifecycle, concurrent conflicts, retry identity and restart recovery.
