@@ -24659,3 +24659,9 @@ one pending turn per project, and inserting both turns in one transaction avoids
 orphan user messages on a conflict. Failed turns retry in place. Opening the
 store marks pending rows older than ten minutes as interrupted. Store tests cover
 thread lifecycle, concurrent conflicts, retry identity and restart recovery.
+
+Feishu group-bot webhooks now have a bounded plain-text sender, separate from
+paired chat adapters. Signing is pinned to a fixed timestamp/secret vector;
+mock-server tests cover the payload, Feishu error codes, malformed responses and
+redirect refusal. Errors never include the credential-bearing URL or remote
+response text. Existing paired-peer and bilingual-label tests remain unchanged.
