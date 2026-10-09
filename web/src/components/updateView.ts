@@ -1,3 +1,4 @@
+import { appStorage } from '../basePath'
 import type { UpdateJob, UpdateStatus } from '../protocol/wire'
 import type { Key } from '../i18n'
 import { formatBytes } from './bytes'
@@ -124,7 +125,7 @@ export const SKIPPED_KEY = 'vp.update.skipped'
 
 export function readSkipped(): string | null {
   try {
-    return localStorage.getItem(SKIPPED_KEY)
+    return appStorage.getItem(SKIPPED_KEY)
   } catch {
     return null
   }
@@ -132,8 +133,8 @@ export function readSkipped(): string | null {
 
 export function writeSkipped(version: string | null): void {
   try {
-    if (version === null) localStorage.removeItem(SKIPPED_KEY)
-    else localStorage.setItem(SKIPPED_KEY, version)
+    if (version === null) appStorage.removeItem(SKIPPED_KEY)
+    else appStorage.setItem(SKIPPED_KEY, version)
   } catch {
     // A browser that refuses storage shows the notice again next time,
     // which is the safe direction.

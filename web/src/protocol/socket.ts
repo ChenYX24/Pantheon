@@ -1,3 +1,4 @@
+import { appURL, appSessionStorage } from '../basePath'
 import { decodeData, encodeData } from './wire'
 import type { ClientMessage, LoadTiming, PanelState, ResourceAction, ResourceAlert, ServerMessage, StateMessage } from './wire'
 
@@ -107,13 +108,13 @@ function clientID(): string {
   const fresh = () =>
     `c${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
   try {
-    const stored = sessionStorage.getItem(CLIENT_KEY)
+    const stored = appSessionStorage.getItem(CLIENT_KEY)
     if (stored) {
       cachedClientID = stored
       return stored
     }
     cachedClientID = fresh()
-    sessionStorage.setItem(CLIENT_KEY, cachedClientID)
+    appSessionStorage.setItem(CLIENT_KEY, cachedClientID)
   } catch {
     cachedClientID = fresh()
   }
@@ -190,7 +191,7 @@ export class PanelSocket {
     this.setStatus('connecting')
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${proto}//${location.host}/ws?client=${encodeURIComponent(clientID())}`)
+    const ws = new WebSocket(`${proto}//${location.host}${appURL('/ws')}?client=${encodeURIComponent(clientID())}`)
     ws.binaryType = 'arraybuffer'
     this.ws = ws
 

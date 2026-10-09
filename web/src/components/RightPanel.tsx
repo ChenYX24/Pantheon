@@ -1,3 +1,4 @@
+import { appStorage } from '../basePath'
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   Activity,
@@ -155,14 +156,14 @@ export function RightPanel(props: Props) {
   // thumbnail capture, and a settings read is not worth a blank panel.
   const [notesGlobal, setNotesGlobal] = useState(() => {
     try {
-      return localStorage.getItem('vp.notes.global') === '1'
+      return appStorage.getItem('vp.notes.global') === '1'
     } catch {
       return false
     }
   })
   useEffect(() => {
     try {
-      localStorage.setItem('vp.notes.global', notesGlobal ? '1' : '0')
+      appStorage.setItem('vp.notes.global', notesGlobal ? '1' : '0')
     } catch {
       /* a browser that will not remember it is not a reason to fail */
     }

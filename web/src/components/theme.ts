@@ -1,3 +1,4 @@
+import { appStorage } from '../basePath'
 import type { ITheme } from '@xterm/xterm'
 
 /**
@@ -53,7 +54,7 @@ export const STORAGE_KEY = 'vibepanel.theme'
 
 export function loadTheme(): ThemeChoice {
   try {
-    const v = localStorage.getItem(STORAGE_KEY)
+    const v = appStorage.getItem(STORAGE_KEY)
     if (v === 'light' || v === 'dark' || v === 'system') return v
   } catch {
     /* private mode */
@@ -90,7 +91,7 @@ export function applyTheme(choice: ThemeChoice) {
   }
   paintChrome()
   try {
-    localStorage.setItem(STORAGE_KEY, choice)
+    appStorage.setItem(STORAGE_KEY, choice)
   } catch {
     /* private mode: the choice simply does not persist */
   }

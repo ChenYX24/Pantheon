@@ -1,3 +1,4 @@
+import { appStorage } from '../basePath'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { resizeStep } from './chrome'
@@ -57,7 +58,7 @@ export function StackedTab({
   const key = stackStorageKey(id)
   const [ratio, setRatioState] = useState(() => {
     try {
-      return readStackRatio(localStorage.getItem(key))
+      return readStackRatio(appStorage.getItem(key))
     } catch {
       // Private mode. The divider still drags; it just does not persist.
       return readStackRatio(null)
@@ -69,7 +70,7 @@ export function StackedTab({
     (next: number) => {
       setRatioState(next)
       try {
-        localStorage.setItem(key, String(next))
+        appStorage.setItem(key, String(next))
       } catch {
         /* private mode: the position simply does not persist */
       }

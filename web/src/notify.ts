@@ -1,3 +1,4 @@
+import { appStorage, appURL } from './basePath'
 import type { ArchivedProject, ResourceAlert, Session } from './protocol/wire'
 import { t } from './i18n'
 import { sessionLabel } from './components/label'
@@ -25,7 +26,7 @@ const KEY = 'vibepanel.notify'
 
 export function notifyEnabled(): boolean {
   try {
-    return localStorage.getItem(KEY) === 'on'
+    return appStorage.getItem(KEY) === 'on'
   } catch {
     return false
   }
@@ -33,7 +34,7 @@ export function notifyEnabled(): boolean {
 
 export function setNotifyEnabled(on: boolean) {
   try {
-    localStorage.setItem(KEY, on ? 'on' : 'off')
+    appStorage.setItem(KEY, on ? 'on' : 'off')
   } catch {
     /* private mode: this tab still honours it for as long as it lives */
   }
@@ -99,8 +100,8 @@ export function notifyOnWaiting(sessions: Session[], focused: boolean) {
       for (const s of newlyWaiting) {
         void reg.showNotification(t('notify.waitingTitle'), {
           body: t('notify.waitingBody', { name: sessionLabel(s) }),
-          icon: '/icon-192.png',
-          badge: '/icon-192.png',
+          icon: appURL('/icon-192.png'),
+          badge: appURL('/icon-192.png'),
           // One notification per session rather than a pile: a second report
           // about the same session replaces the first.
           tag: `vibepanel-waiting-${s.id}`,
@@ -143,8 +144,8 @@ export function notifyOnArchivedWaiting(archived: ArchivedProject[], focused: bo
       for (const p of rising) {
         void reg.showNotification(t('notify.waitingTitle'), {
           body: t('notify.archivedWaitingBody', { name: safeText(p.name) }),
-          icon: '/icon-192.png',
-          badge: '/icon-192.png',
+          icon: appURL('/icon-192.png'),
+          badge: appURL('/icon-192.png'),
           tag: `vibepanel-archived-waiting-${p.id}`,
         })
       }
@@ -199,8 +200,8 @@ export function notifyOnResourceAlert(alert: ResourceAlert | null, sessions: Ses
     .then((reg) =>
       reg.showNotification(t(`res.alert.${alert.reason}`), {
         body: lines.join('\n'),
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
+        icon: appURL('/icon-192.png'),
+        badge: appURL('/icon-192.png'),
         tag: 'vibepanel-memory',
         data: alert.sessionId ? { sessionId: alert.sessionId } : undefined,
       }),

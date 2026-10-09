@@ -570,7 +570,9 @@ try {
 
     let banner = ''
     for (let i = 0; i < 40; i++) {
-      banner = await full.locator('[data-testid="stale-notice"]').innerText().catch(() => '')
+      // A missing banner must cost this poll's budget, not Playwright's 30s
+      // default forty times; otherwise the intended 20s check stalls for 20m.
+      banner = await full.locator('[data-testid="stale-notice"]').innerText({ timeout: 100 }).catch(() => '')
       if (banner) break
       await sleep(500)
     }

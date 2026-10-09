@@ -1,3 +1,4 @@
+import { appStorage } from '../basePath'
 /**
  * Which renderer to use. 'auto' means the GPU one when the browser will give it.
  *
@@ -17,7 +18,7 @@ export const RENDERER_KEY = 'vibepanel.renderer'
 
 export function rendererPreference(): 'auto' | 'dom' {
   try {
-    return localStorage.getItem(RENDERER_KEY) === 'dom' ? 'dom' : 'auto'
+    return appStorage.getItem(RENDERER_KEY) === 'dom' ? 'dom' : 'auto'
   } catch {
     // Private mode. The GPU path is the better default for someone who cannot
     // record a preference either way.

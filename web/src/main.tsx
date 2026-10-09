@@ -1,3 +1,5 @@
+import { appURL } from './basePath'
+import { ProjectWorkspace } from './components/ProjectWorkspace'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
@@ -26,13 +28,13 @@ watchSystemTheme()
 // register has traded the whole product for a nicety.
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('/sw.js').catch(() => {})
+    void navigator.serviceWorker.register(appURL('/sw.js'), { scope: appURL('/') }).catch(() => {})
   })
 }
 
-// Two roots, and only one of them is ever built; routes.ts says which. The
-// panel, or the sharing page — both behind the same AuthGate, on the same
-// cookie. `/share/<token>` never reaches this bundle: the server answers it
+// routes.ts selects the authenticated application page. The terminal, project
+// workspace, chat and sharing pages use the same AuthGate and cookie.
+// `/share/<token>` never reaches this bundle: the server answers it
 // with the page the link draws, or with a page of its own saying the link no
 // longer works, so a stranger holding a share address is never one click from
 // the sign-in screen.
@@ -40,7 +42,9 @@ const route = routeFor(location.pathname)
 
 createRoot(root).render(
   <StrictMode>
-    {route.kind === 'sharing' ? (
+    {route.kind === 'projects' ? (
+      <ErrorBoundary label="Project workspace"><AuthGate>{(_auth, signOut) => <ProjectWorkspace onSignOut={signOut} />}</AuthGate></ErrorBoundary>
+    ) : route.kind === 'sharing' ? (
       <ErrorBoundary label="The sharing page">
         <AuthGate>{(auth, signOut) => <SharingPage auth={auth} onSignOut={signOut} />}</AuthGate>
       </ErrorBoundary>

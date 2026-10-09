@@ -104,7 +104,7 @@ function AskPanel({ request }: { request: AskRequest }) {
             {request.body && (
               <p
                 data-testid="confirm-body"
-                className="mt-1.5 text-vp-base leading-relaxed text-ink-2"
+                className="mt-1.5 max-h-[50dvh] overflow-y-auto whitespace-pre-wrap break-words text-vp-base leading-relaxed text-ink-2"
               >
                 {safeText(request.body)}
               </p>

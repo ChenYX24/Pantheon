@@ -1,3 +1,5 @@
+import { appStorage } from './basePath'
+import { PROJECTS_PATH } from './routes'
 import { Tour } from './components/Tour'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -116,7 +118,7 @@ const RIGHT_DEFAULT_WIDTH = 280
  */
 function readStored(key: string): string | null {
   try {
-    return localStorage.getItem(key)
+    return appStorage.getItem(key)
   } catch {
     return null
   }
@@ -194,8 +196,8 @@ function seedLayout(key: string): PaneLayout {
 
 function writeStored(key: string, value: string | null) {
   try {
-    if (value === null) localStorage.removeItem(key)
-    else localStorage.setItem(key, value)
+    if (value === null) appStorage.removeItem(key)
+    else appStorage.setItem(key, value)
   } catch {
     /* private mode: the choice simply does not persist */
   }
@@ -1210,6 +1212,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
         {/* vp-safe-top repeats h-11; the two have to move together. See the
             class for why it is written that way rather than with box-sizing. */}
         <header className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline px-3 vp-blur vp-safe-top">
+          <a className="vp-control shrink-0" href={PROJECTS_PATH}>{t('pm.boardLink')}</a>
           {narrow && (
             <button
               type="button"

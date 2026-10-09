@@ -1,3 +1,4 @@
+import { appURL } from '../../basePath'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ChevronLeft,
@@ -193,7 +194,7 @@ export function FileTree({
         ...opts,
       })
       .then((made) => {
-        const url = `${window.location.origin}/preview/${made.token}/`
+        const url = `${window.location.origin}${appURL(`/preview/${made.token}/`)}`
         // Through clipboard.ts, which is the only module allowed to touch
         // navigator.clipboard -- there is a test for that, and it caught this
         // line written the other way.

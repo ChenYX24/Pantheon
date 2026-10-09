@@ -1,3 +1,4 @@
+import { appFetch, appURL } from '../basePath'
 import type {
   ApiToken,
   AuditEntry,
@@ -62,7 +63,7 @@ import type {
 } from './wire'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await appFetch(path, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
   })
@@ -634,11 +635,11 @@ export const api = {
 
   /** Where a page's admin page opens: behind the panel login, which mints a
    *  grant and redirects. `draft` serves the draft admin page on draft data. */
-  pageAdminURL: (id: string, draft = false) => `/pages/${encodeURIComponent(id)}/admin/${draft ? '?draft=1' : ''}`,
+  pageAdminURL: (id: string, draft = false) => appURL(`/pages/${encodeURIComponent(id)}/admin/${draft ? '?draft=1' : ''}`),
 
   /** A link to the page as a zip: the published version, or the directory for a
    *  page never published. A plain GET, so an <a download> with the cookie works. */
-  exportPageURL: (id: string): `/${string}` => `/api/settings/pages/${encodeURIComponent(id)}/export`,
+  exportPageURL: (id: string): `/${string}` => appURL(`/api/settings/pages/${encodeURIComponent(id)}/export`),
 
   /** A zip becomes a new, unpublished page under the pages directory. */
   importPage: (file: Blob, name = '') =>
@@ -1014,7 +1015,7 @@ export const api = {
    * beyond the call.
    */
   applyUpdate: async (expected: string, secret?: string): Promise<UpdateStarted> => {
-    const res = await fetch('/api/update', {
+    const res = await appFetch('/api/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(secret ? { password: secret, expected } : { expected }),
@@ -1061,7 +1062,7 @@ export const api = {
    * save dialog, without holding the file in memory.
    */
   downloadURL: (projectId: string, path: string) =>
-    `/api/projects/${projectId}/download?path=${encodeURIComponent(path)}`,
+    appURL(`/api/projects/${projectId}/download?path=${encodeURIComponent(path)}`),
 
   /**
    * Where an <iframe> points to draw a page out of a project.
@@ -1078,8 +1079,8 @@ export const api = {
    * header, so editing the attribute in devtools cannot enable execution.
    */
   renderURL: (projectId: string, path: string, scripts: boolean) =>
-    `/api/projects/${projectId}/preview/render?path=${encodeURIComponent(path)}` +
-    (scripts ? '&scripts=1' : ''),
+    appURL(`/api/projects/${projectId}/preview/render?path=${encodeURIComponent(path)}` +
+    (scripts ? '&scripts=1' : '')),
 
   /** What the working tree says. Reads the disk; never the network. */
   git: (projectId: string) => request<GitInfo>(`/api/projects/${projectId}/git`),
@@ -1117,8 +1118,8 @@ export const api = {
       const xhr = new XMLHttpRequest()
       xhr.open(
         'POST',
-        `/api/projects/${projectId}/upload?path=${encodeURIComponent(path)}` +
-          (dest ? `&dest=${dest}` : ''),
+        appURL(`/api/projects/${projectId}/upload?path=${encodeURIComponent(path)}` +
+          (dest ? `&dest=${dest}` : '')),
       )
       // Capped just short of the end. The last byte leaving the browser is not
       // the upload finishing -- the server still has to write the files, which
@@ -1184,7 +1185,7 @@ export const api = {
    * the panel's own origin.
    */
   preview: async (projectId: string, path: string): Promise<FilePreview> => {
-    const res = await fetch(`/api/projects/${projectId}/preview?path=${encodeURIComponent(path)}`)
+    const res = await appFetch(`/api/projects/${projectId}/preview?path=${encodeURIComponent(path)}`)
     // Drained rather than ignored, for the reason the 204 branch above is:
     // a body nobody reads is reported by Chromium as an aborted request, which
     // turns every honest refusal into a network error in the devtools log.
@@ -1242,7 +1243,7 @@ export const api = {
   // fetch from an unloading document is cancelled by the browser, so the last
   // thing typed before closing the tab never reached the server.
   saveNote: async (projectId: string, content: string, baseRev: number, keepalive = false) => {
-    const res = await fetch(notePath(projectId), {
+    const res = await appFetch(notePath(projectId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content, baseRev }),

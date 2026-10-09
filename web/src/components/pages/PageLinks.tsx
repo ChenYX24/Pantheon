@@ -1,3 +1,4 @@
+import { appURL } from '../../basePath'
 import { useEffect, useRef, useState } from 'react'
 import {
   AlarmClock,
@@ -67,7 +68,7 @@ const MAX_REMARK = 80
 const SOON_S = 86400
 
 function shareURL(token: string): string {
-  return `${location.origin}/share/${token}/`
+  return `${location.origin}${appURL(`/share/${token}/`)}`
 }
 
 function scopeLabel(link: ShareLink): string {

@@ -44,7 +44,7 @@ const note = (ok, what) => {
 // The working tree through vite, not a built bundle. A check that measures
 // `dist` measures whatever was built last, which is the failure lib/fresh.mjs
 // exists for in the harnesses that do need a binary.
-const vite = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], {
+const vite = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], {
   cwd: new URL('..', import.meta.url).pathname,
   stdio: ['ignore', 'pipe', 'pipe'],
 })

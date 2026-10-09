@@ -1,3 +1,4 @@
+import { appFetch } from '../../basePath'
 /**
  * Waiting for the panel to come back after it was told to go.
  *
@@ -60,7 +61,7 @@ export function waitForItToComeBack(opts: Comeback): void {
 
 async function defaultHealth(): Promise<{ version: string; commit: string } | null> {
   try {
-    const r = await fetch('/api/health', { cache: 'no-store' })
+    const r = await appFetch('/api/health', { cache: 'no-store' })
     if (!r.ok) return null
     return (await r.json()) as { version: string; commit: string }
   } catch {

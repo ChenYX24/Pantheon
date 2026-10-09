@@ -1,3 +1,5 @@
+import { appURL } from './basePath'
+
 /**
  * What the address bar decides, and nothing else does.
  *
@@ -22,16 +24,18 @@
  * working the day the route moves, and `routes.test.ts` refuses one.
  */
 
-export const PANEL_PATH = '/'
+export const PROJECTS_PATH = appURL('/projects')
+export const PANEL_PATH = appURL('/')
 
-export const SHARING_PATH = '/sharing'
+export const SHARING_PATH = appURL('/sharing')
 
 /** The page the chat bridge is set up from: routes.ts is the one place that spells it. */
-export const CHAT_PATH = '/chat'
+export const CHAT_PATH = appURL('/chat')
 
-export type Route = { kind: 'panel' } | { kind: 'sharing' } | { kind: 'chat' }
+export type Route = { kind: 'projects' } | { kind: 'panel' } | { kind: 'sharing' } | { kind: 'chat' }
 
 export function routeFor(pathname: string): Route {
+  if (pathname === PROJECTS_PATH || pathname === `${PROJECTS_PATH}/`) return { kind: 'projects' }
   // With or without a trailing slash, because both arrive: a bookmark keeps
   // whatever was typed, and a proxy may add one.
   if (pathname === SHARING_PATH || pathname === `${SHARING_PATH}/`) return { kind: 'sharing' }
