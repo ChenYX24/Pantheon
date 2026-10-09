@@ -24573,3 +24573,27 @@ recipient paired after the original to-do was recorded. Baselines remain in
 the deduplication table but are excluded from the public delivery history.
 
 Targeted configuration, storage and migration-idempotence tests passed.
+
+All Stage A home routes now sit behind the existing authentication middleware.
+The development allow-list admits file/chat operations while keeping manual
+session creation behind the same terminal gate as the panel. Home launches share
+the existing project validation and session/profile creation implementations.
+PM discussion uses the existing runner with write access disabled and a
+three-minute deadline; its suggestions are returned for explicit application.
+
+The home notifier starts beside the workflow loop without enabling execution.
+It waits ten seconds, then polls every minute; first-start to-dos establish a
+baseline. Dry-run and missing-recipient receipts never call an adapter. Feishu
+uses plain text and the bridge's existing language setting, with three attempts,
+minute-times-attempt backoff and a 24-hour expiry (reported as failed). A missing
+chat bridge remains a delivery failure; development still does not start the
+existing inbound chat bridge. Changing notification mode does not replay old
+dry-run or baseline receipts.
+
+The home API tests use an in-process mode of `newTestServer` with real routing,
+authentication and temporary databases, without an HTTP listener or tmux server.
+They cover database-loss rebuilds, manual-launch gating and shared validation,
+read-only discussion with a fake runner, and notification lifecycle/deduplication.
+A fake Feishu adapter verifies plain text without buttons. All targeted home,
+HTTP, config, store and chat checks passed. Real tmux launches, live Feishu sends
+and browser integration remain for the Conductor's permitted environment.

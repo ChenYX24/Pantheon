@@ -31,6 +31,7 @@ import (
 	"github.com/jiangmuran/vibepanel/internal/git"
 	"github.com/jiangmuran/vibepanel/internal/hooks"
 	"github.com/jiangmuran/vibepanel/internal/id"
+	"github.com/jiangmuran/vibepanel/internal/pantheon/home"
 	"github.com/jiangmuran/vibepanel/internal/parthenon"
 	"github.com/jiangmuran/vibepanel/internal/resources"
 	"github.com/jiangmuran/vibepanel/internal/selfupdate"
@@ -46,13 +47,15 @@ import (
 
 // Server holds everything the HTTP layer needs.
 type Server struct {
-	WorkflowRunner parthenon.Runner
-	Cfg            config.Config
-	DB             *store.DB
-	Tmux           *tmux.Client
-	Manager        *session.Manager
-	Hub            *ws.Hub
-	Detector       *session.Detector
+	WorkflowRunner    parthenon.Runner
+	Home              home.Index
+	homeNotifications homeNotifications
+	Cfg               config.Config
+	DB                *store.DB
+	Tmux              *tmux.Client
+	Manager           *session.Manager
+	Hub               *ws.Hub
+	Detector          *session.Detector
 
 	// codexLogs follows the rollout file of each Codex session, for the ones
 	// no hook is reporting. The zero value reads the real /proc.
@@ -484,6 +487,7 @@ func (s *Server) Routes() http.Handler {
 			s.registerClaudeAccountRoutes(r)
 			s.registerProjectBoardRoutes(r)
 			s.registerWorkflowRoutes(r)
+			s.registerHomeRoutes(r)
 			s.registerPanelRoutes(r)
 			s.registerGitRoutes(r)
 			s.registerUpdateRoutes(r)
@@ -1372,6 +1376,10 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	s.createProject(w, r, req, func(p store.Project, status int) { writeJSON(w, status, p) })
+}
+
+func (s *Server) createProject(w http.ResponseWriter, r *http.Request, req createProjectRequest, respond func(store.Project, int)) {
 	if req.Path == "" {
 		writeErr(w, http.StatusBadRequest, "path is required")
 		return
@@ -1412,7 +1420,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	// 200 rather than 201, because nothing was created.
 	if old, err := s.DB.ArchivedProjectAt(r.Context(), abs); err == nil {
 		if p, ok := s.restoreProject(w, r, old.ID); ok {
-			writeJSON(w, http.StatusOK, p)
+			respond(p, http.StatusOK)
 		}
 		return
 	} else if !errors.Is(err, store.ErrNotFound) {
@@ -1425,7 +1433,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.notifyState()
-	writeJSON(w, http.StatusCreated, p)
+	respond(p, http.StatusCreated)
 }
 
 type patchProjectRequest struct {
@@ -1600,6 +1608,10 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	s.createSession(w, r, req, func(rec store.Session) { writeJSON(w, http.StatusCreated, rec) })
+}
+
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request, req createSessionRequest, respond func(store.Session)) {
 	ctx := r.Context()
 	p, err := s.DB.GetProject(ctx, req.ProjectID)
 	if err != nil {
@@ -1764,7 +1776,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		s.Log.Warn("attach new session", "session", sid, "err", aerr)
 	}
 	s.notifyState()
-	writeJSON(w, http.StatusCreated, rec)
+	respond(rec)
 }
 
 type patchSessionRequest struct {

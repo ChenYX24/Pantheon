@@ -211,3 +211,56 @@ func TestHomeListingLimitsAndUnavailable(t *testing.T) {
 		t.Fatal("archived filter")
 	}
 }
+
+func TestHomeCacheTracksMtimeSizeAndResolvedPath(t *testing.T) {
+	dir, project := fixture(t)
+	var index Index
+	context := filepath.Join(project, "ACTIVE_CONTEXT.md")
+	homePut := func(text string) { put(t, context, "- **Goal**: "+text+"\n") }
+	homePut("first")
+	before, err := os.Stat(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index.Snapshot(dir, false, nil).Projects[0].Goal != "first" {
+		t.Fatal("first read")
+	}
+	homePut("other")
+	changed := before.ModTime().Add(time.Second)
+	if err := os.Chtimes(context, changed, changed); err != nil {
+		t.Fatal(err)
+	}
+	if index.Snapshot(dir, false, nil).Projects[0].Goal != "other" {
+		t.Fatal("mtime ignored")
+	}
+	homePut("different size")
+	if err := os.Chtimes(context, changed, changed); err != nil {
+		t.Fatal(err)
+	}
+	if index.Snapshot(dir, false, nil).Projects[0].Goal != "different size" {
+		t.Fatal("size ignored")
+	}
+	if err := os.Remove(context); err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(project, "context-source.md")
+	put(t, inside, "- **Goal**: inside link\n")
+	if err := os.Symlink(inside, context); err != nil {
+		t.Fatal(err)
+	}
+	if index.Snapshot(dir, false, nil).Projects[0].Goal != "inside link" {
+		t.Fatal("absolute link inside Harness refused")
+	}
+	if err := os.Remove(context); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(dir, "outside.md")
+	put(t, outside, "- **Goal**: private\n")
+	if err := os.Symlink(outside, context); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := index.Snapshot(dir, false, nil)
+	if snapshot.Projects[0].Goal != "" || len(snapshot.Warnings) != 1 {
+		t.Fatal("retargeted cached symlink escaped")
+	}
+}

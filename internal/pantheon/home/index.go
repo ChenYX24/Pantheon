@@ -25,6 +25,11 @@ type Index struct {
 	cacheSize int
 }
 
+func (i *Index) evict(path string) {
+	i.cacheSize -= len(i.cache[path].data)
+	delete(i.cache, path)
+}
+
 type registry struct {
 	Version int               `json:"version"`
 	Paths   map[string]string `json:"paths"`
@@ -157,15 +162,18 @@ func (i *Index) Snapshot(cyxHome string, all bool, runtime []RuntimeProject) Sna
 	local, f, err := i.open(cyxHome)
 	if err != nil {
 		out.Reason = err.Error()
+		if !errors.Is(err, os.ErrNotExist) {
+			out.Warnings = append(out.Warnings, Warning{File: "local.json", Message: err.Error()})
+		}
 		return out
 	}
 	defer f.root.Close()
+	out.Available = true
 	entries, err := f.entries("projects")
 	if err != nil {
-		out.Reason = err.Error()
+		out.Warnings = append(out.Warnings, Warning{File: "projects", Message: err.Error()})
 		return out
 	}
-	out.Available = true
 	for _, entry := range entries {
 		id := entry.Name()
 		if !projectID.MatchString(id) {

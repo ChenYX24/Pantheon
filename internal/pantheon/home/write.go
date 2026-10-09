@@ -231,7 +231,7 @@ func (i *Index) Patch(cyxHome, project, task string, req PatchTask) (Task, error
 	}
 	// Patches bypass the read cache: rev is a compare-and-swap on file bytes,
 	// even when an external editor preserved both size and mtime.
-	delete(i.cache, filepath.Join(f.path, rel))
+	i.evict(filepath.Join(f.path, rel))
 	data, at, err := i.file(f, filepath.Join(base, file))
 	if err != nil {
 		return Task{}, err
@@ -257,7 +257,7 @@ func (i *Index) Patch(cyxHome, project, task string, req PatchTask) (Task, error
 	if err = f.atomicWrite(rel, data); err != nil {
 		return Task{}, err
 	}
-	delete(i.cache, filepath.Join(f.path, rel))
+	i.evict(filepath.Join(f.path, rel))
 	updated, _, err := parseTask(data, task, filepath.ToSlash(file), time.Now())
 	updated.Handoffs = original.Handoffs
 	if entries, e := f.entries(filepath.Dir(filepath.Join(base, file))); e == nil {

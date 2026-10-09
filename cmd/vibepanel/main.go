@@ -371,6 +371,7 @@ func cmdServe(args []string) error {
 
 	}
 	go srv.RunWorkflow(ctx)
+	go srv.RunHomeNotifications(ctx)
 	httpServer := &http.Server{
 		Addr:    a.cfg.Addr,
 		Handler: srv.Routes(),

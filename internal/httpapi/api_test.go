@@ -40,8 +40,11 @@ import (
 
 // newTestServer wires a complete panel against a throwaway tmux socket and
 // database, and returns it behind a real HTTP listener.
-func newTestServer(t *testing.T) (*httptest.Server, *Server) {
+func newTestServer(t *testing.T, modes ...testServerMode) (*httptest.Server, *Server) {
 	t.Helper()
+	if len(modes) > 0 && modes[0] == inProcessTestServer {
+		return nil, newInProcessTestServer(t)
+	}
 	ts, srv := newUnconfiguredServer(t)
 
 	// Every endpoint that matters requires a session, so the tests sign in
