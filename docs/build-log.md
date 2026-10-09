@@ -24665,3 +24665,19 @@ paired chat adapters. Signing is pinned to a fixed timestamp/secret vector;
 mock-server tests cover the payload, Feishu error codes, malformed responses and
 redirect refusal. Errors never include the credential-bearing URL or remote
 response text. Existing paired-peer and bilingual-label tests remain unchanged.
+
+The home discussion API now returns a persisted user/pending-assistant pair with
+202 and runs independently of the request lifetime. Prompts include bounded
+ACTIVE_CONTEXT and MEMORY, all task dimensions, recent reports with replies,
+field options, git evidence and sixteen thread messages. Deleting a running
+thread cancels its process before releasing the project's pending slot. JSON
+replies may be bare or fenced, including replies containing markdown fences.
+
+Home notification settings are one runtime DB record; webhook URL and signing
+secret are sealed for separate purposes with the existing box. Omitted inputs
+keep values, explicit empty strings clear them. Runtime mode/public URL override
+flags, with `--home-notify off` still preventing automatic sends. The explicit
+webhook test is interpreted as independent of automatic mode. A webhook joins
+paired Feishu peers as one recipient, preserving baseline and dry-run dedup.
+All new routes have exact development allow-list methods and API documentation.
+The targeted home/API-route suite passes without a panel, tmux or browser check.

@@ -2048,15 +2048,48 @@ manual sessions are (in development, with `--development-terminal`).
 
 ### `GET /api/home/projects/{id}/discussion`
 
-Returns the last 100 project-manager `messages`, with `suggestions` and
-`suggestedModel` on assistant replies.
+Query `thread=<id>` selects a thread (default `main`). Returns the last 200
+project-manager `messages`, each with `threadId`, `status` (`pending`, `done`,
+`failed`) and optional `error`, `suggestions` and `suggestedModel`.
 
 ### `POST /api/home/projects/{id}/discussion`
 
-Body: `message`, `executor` `{harness, model}`. Runs the chosen Claude or Codex
-model read-only in the checkout for at most three minutes and stores both turns.
-Suggestions (create task, set status, create session) are never applied by the
-server; the page applies one only when the user chooses it.
+Body: `message`, `executor` `{harness, model}`, optional `thread` (default `main`).
+Returns `202 {user, assistant}` with a pending assistant immediately. A background
+run uses the chosen model read-only for at most three minutes and saves `done` or
+`failed`; poll the discussion to see completion. At most one pending turn per
+project (`409` otherwise). At startup, pending rows older than ten minutes fail
+with `interrupted by restart`. Context includes bounded ACTIVE_CONTEXT and MEMORY,
+a task table, the newest five reports and their replies, field definitions, git
+log/status and the last sixteen messages of this thread. Suggestions (create task,
+set status/fields, create session, set project metadata, reply to report) are never
+applied by the server; the page applies one only when the user chooses it.
+
+### `POST /api/home/projects/{id}/discussion/{messageId}/retry`
+
+Retries a failed assistant turn using its original message and executor, in place.
+Returns `202 {user, assistant}`; `409` if another turn is pending or this turn has
+not failed, `404` for an unknown message.
+
+### `GET /api/home/projects/{id}/threads`
+
+Returns `{threads:[{id,title,updatedAt,messageCount}]}`, newest first. The implicit
+`main` thread is always present. A new thread’s default title is replaced by the
+first thirty characters of its first user message.
+
+### `POST /api/home/projects/{id}/threads`
+
+Body: `{title?}`. Creates a thread and returns it with `201`. The default title is
+`新对话 HH:MM` in local time.
+
+### `PATCH /api/home/projects/{id}/threads/{threadId}`
+
+Body: `{title}`. Renames the thread and returns its summary.
+
+### `DELETE /api/home/projects/{id}/threads/{threadId}`
+
+Deletes the thread and its messages, cancelling any active run in it. Returns
+`204`; deleting `main` is refused with `400`.
 
 ### `GET /api/home/notifications`
 
@@ -2064,6 +2097,30 @@ Returns the notification `mode` (`off`, `dry_run`, `send`) and the newest 100
 deliveries. Each new to-do is offered once per Feishu recipient; `dry_run`
 renders without sending, and the first run on an empty database records the
 current to-dos as a baseline without sending them.
+
+### `GET /api/home/notify-settings`
+
+Returns `{mode, flagMode, webhookConfigured, signed, publicUrl}`. Credentials
+are encrypted in the runtime database with the panel’s secret box and are never
+returned. Runtime mode/public URL override their startup flags; a flag of `off`
+still prevents automatic sending.
+
+### `PUT /api/home/notify-settings`
+
+Body: optional `mode`, `webhookUrl`, `secret`, `publicUrl`. Omitted properties keep
+their current values; explicit empty strings clear URL/secret values. Webhooks must
+be HTTPS bot URLs on `open.feishu.cn` or `open.larksuite.com`. Mode `send` is refused
+with `403` when `--home-notify off`; invalid values return `400`. Returns the same
+redacted object as GET. Available in development mode.
+
+### `POST /api/home/notify-settings/test`
+
+Sends `[Pantheon] 测试通知` immediately through the configured webhook and returns
+`{ok, error?}`. This explicit test works independently of the automatic notification
+mode, including in development. Signing uses the Feishu timestamp/secret HMAC.
+Webhook errors never expose its URL or secret. A configured webhook is also one
+normal recipient (`feishu_webhook`/`webhook`); adding it or switching to send does
+not replay baseline or dry-run to-dos.
 
 ### Development mount
 
