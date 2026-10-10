@@ -24681,3 +24681,27 @@ webhook test is interpreted as independent of automatic mode. A webhook joins
 paired Feishu peers as one recipient, preserving baseline and dry-run dedup.
 All new routes have exact development allow-list methods and API documentation.
 The targeted home/API-route suite passes without a panel, tmux or browser check.
+
+## 2026-10-10 — Stage B resource catalogue frontend
+
+The resource home and detail routes follow `docs/pantheon/stage-b-contract.md`.
+The catalogue has kind/search filters, API and server cards, snapshot group
+summaries, SSH/profile imports and orphaned-key cleanup. The detail view edits
+metadata, scope and Markdown usage instructions with the displayed revision,
+and shows stored checks and use receipts. Destructive actions use the shared
+confirmation host. Password fields always open empty; blank inputs keep stored
+keys, and a partially successful save clears only the inputs already saved.
+
+Rendering and polling read stored status only. Provider, HTTP and SSH checks
+require a button press. The list's last-check summary does not contain a model
+count, so API cards read it from the existing detail endpoint. Group summaries
+treat fresh/stale hosts as connected and count GPU observations only from fresh
+hosts. Low usage is labelled as observation, never allocation permission.
+
+The first focused pass passed 42 tests in nine files, including bilingual text,
+chrome and dialog rules, request shapes, base paths, filtering, snapshot states,
+scope and password-input rendering. Full TypeScript, then narrower graph checks,
+and ESLint were killed with exit 137. Read-only cgroup inspection found the
+shared session pool near its 1.72 GiB limit with OOM kills recorded; increasing
+the compiler heap would not help. Further compiler retries stopped pending
+headroom. No Go, embedded bundle, live service or deployment is changed here.
