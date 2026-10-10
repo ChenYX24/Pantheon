@@ -16,6 +16,7 @@ import (
 )
 
 type Job struct {
+	AgentScope   string              `json:"agentScope,omitempty"`
 	Run          store.WorkflowRun   `json:"run"`
 	Stage        store.BoardStage    `json:"stage"`
 	Task         store.BoardTask     `json:"task"`
@@ -35,6 +36,7 @@ func Worker(ctx context.Context, spec string, runner Runner) (workerErr error) {
 	if err = json.Unmarshal(raw, &j); err != nil {
 		return err
 	}
+	ctx = WithAgentScope(ctx, j.AgentScope)
 	if runner == nil {
 		runner = RunAgent
 	}

@@ -50,6 +50,7 @@ type Server struct {
 	WorkflowRunner    parthenon.Runner
 	Home              home.Index
 	homeNotifications homeNotifications
+	homeDiscussions   homeDiscussions
 	Cfg               config.Config
 	DB                *store.DB
 	Tmux              *tmux.Client

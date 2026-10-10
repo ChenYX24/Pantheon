@@ -11,14 +11,14 @@ import (
 func TestHomeMessagesSurviveWithoutPanelProjects(t *testing.T) {
 	db := openTest(t)
 	ctx := context.Background()
-	for n := 0; n < 105; n++ {
+	for n := 0; n < 205; n++ {
 		_, err := db.AddHomeMessage(ctx, "harness-only", HomeMessage{Role: "assistant", Text: fmt.Sprint(n), Executor: &ModelAssignment{Harness: "codex", Model: "test"}, Suggestions: json.RawMessage(`[{"type":"create_session","name":"Review"}]`)})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	messages, err := db.HomeMessages(ctx, "harness-only")
-	if err != nil || len(messages) != 100 || messages[0].Text != "5" || messages[99].Text != "104" || messages[0].Executor.Model != "test" || len(messages[0].Suggestions) == 0 {
+	if err != nil || len(messages) != 200 || messages[0].Text != "5" || messages[199].Text != "204" || messages[0].Executor.Model != "test" || len(messages[0].Suggestions) == 0 {
 		t.Fatalf("messages: %d %v", len(messages), err)
 	}
 	if _, err = db.AddHomeMessage(ctx, "harness-only", HomeMessage{Role: "system"}); err == nil {

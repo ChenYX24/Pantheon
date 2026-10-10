@@ -24636,3 +24636,48 @@ killed with exit 137 on the shared host. Every check ran at nice level 19.
 Browser layout checks, backend integration and the embedded bundle build are
 left to integration; this work does not change Go, `internal/webui/dist`,
 deployments or running panels.
+
+## 2026-10-10 — Stage A.2: agent scopes and model choices
+
+Home model choices now include built-in defaults when agent settings omit a
+model, without changing the workflow executor response. Headless agent runs
+use a separate user scope when available, so the panel unit’s memory cap does
+not kill an otherwise valid discussion. `--agent-scope off` keeps direct exec;
+the fallback and argv are tested without contacting systemd.
+
+Stage A.2 field options, task dimensions and project metadata stay in Harness
+files. Optional JSON files use an empty revision until created, then the same
+SHA-256 revision check as tasks; pinned projects sort first. Task patches retain
+unrelated frontmatter and body bytes, including CRLF and comments. Report replies
+append a local timestamped section and clear `needs_user`, then mirror the text
+into the manager history. Tests cover conflicts, fields validation, list round
+trips, the symlink boundary and the disappearing question to-do.
+
+Stage A.2 chat persistence adds project-local threads and pending/done/failed
+assistant rows with an append-only migration. A partial unique index enforces
+one pending turn per project, and inserting both turns in one transaction avoids
+orphan user messages on a conflict. Failed turns retry in place. Opening the
+store marks pending rows older than ten minutes as interrupted. Store tests cover
+thread lifecycle, concurrent conflicts, retry identity and restart recovery.
+
+Feishu group-bot webhooks now have a bounded plain-text sender, separate from
+paired chat adapters. Signing is pinned to a fixed timestamp/secret vector;
+mock-server tests cover the payload, Feishu error codes, malformed responses and
+redirect refusal. Errors never include the credential-bearing URL or remote
+response text. Existing paired-peer and bilingual-label tests remain unchanged.
+
+The home discussion API now returns a persisted user/pending-assistant pair with
+202 and runs independently of the request lifetime. Prompts include bounded
+ACTIVE_CONTEXT and MEMORY, all task dimensions, recent reports with replies,
+field options, git evidence and sixteen thread messages. Deleting a running
+thread cancels its process before releasing the project's pending slot. JSON
+replies may be bare or fenced, including replies containing markdown fences.
+
+Home notification settings are one runtime DB record; webhook URL and signing
+secret are sealed for separate purposes with the existing box. Omitted inputs
+keep values, explicit empty strings clear them. Runtime mode/public URL override
+flags, with `--home-notify off` still preventing automatic sends. The explicit
+webhook test is interpreted as independent of automatic mode. A webhook joins
+paired Feishu peers as one recipient, preserving baseline and dry-run dedup.
+All new routes have exact development allow-list methods and API documentation.
+The targeted home/API-route suite passes without a panel, tmux or browser check.

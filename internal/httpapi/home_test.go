@@ -19,7 +19,6 @@ import (
 	"github.com/jiangmuran/vibepanel/internal/auth"
 	"github.com/jiangmuran/vibepanel/internal/config"
 	"github.com/jiangmuran/vibepanel/internal/pantheon/home"
-	"github.com/jiangmuran/vibepanel/internal/parthenon"
 	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/store"
 )
@@ -205,55 +204,6 @@ func TestHomeAPISessionCreatesValidatedProject(t *testing.T) {
 	}
 }
 
-func TestHomeAPIDiscussionReadOnlySuggestionsAndFallback(t *testing.T) {
-	_, s := newTestServer(t, inProcessTestServer)
-	project := homeFixture(t, s)
-	homePut(t, filepath.Join(project, "agent-docs/tasks/A2/task.md"), "---\nid: A2\ntitle: Backend\nstatus: in_progress\n---\n")
-	homePut(t, filepath.Join(project, "agent-docs/reports/r.md"), "---\ntitle: Report\nsummary: Evidence\nkind: report\n---\nBody\n")
-	s.Cfg.Development = true
-	expectedDir := s.Cfg.DataDir
-	answer := `{"reply":"Ready","suggestions":[{"type":"set_status","taskId":"A2","status":"done"},{"type":"create_session","name":"Review"}],"suggestedModel":{"harness":"claude","model":"review-model","reason":"Independent review"}}`
-	calls := 0
-	s.WorkflowRunner = func(ctx context.Context, m store.ModelAssignment, dir, prompt string, write bool) (parthenon.Answer, error) {
-		calls++
-		deadline, ok := ctx.Deadline()
-		if write || dir != expectedDir || m.Harness != "codex" || !ok || time.Until(deadline) > 3*time.Minute || !strings.Contains(prompt, "Ship home") || !strings.Contains(prompt, "Backend") || !strings.Contains(prompt, "Evidence") {
-			t.Fatal("runner context", dir, prompt)
-		}
-		return parthenon.Answer{Text: answer}, nil
-	}
-	path := "/api/home/projects/demo/discussion"
-	req := `{"message":"Review the plan","executor":{"harness":"codex","model":"test-model"}}`
-	reply := homeDecode[store.HomeMessage](t, homeRequest(t, s, "POST", path, req, true), 200)
-	if reply.Role != "assistant" || reply.Text != "Ready" || !strings.Contains(string(reply.Suggestions), "set_status") {
-		t.Fatalf("%+v", reply)
-	}
-	detail := homeDecode[home.Detail](t, homeRequest(t, s, "GET", "/api/home/projects/demo", "", true), 200)
-	if detail.Tasks[0].Status != "in_progress" || len(detail.Project.Sessions) != 0 {
-		t.Fatal("suggestion was applied")
-	}
-	local, _ := json.Marshal(map[string]any{"version": 1, "paths": map[string]string{"cyx-agent-harness": filepath.Dir(filepath.Dir(project))}})
-	homePut(t, filepath.Join(s.Cfg.CyxHome, "local.json"), string(local))
-	expectedDir = project
-	answer = "not JSON"
-	reply = homeDecode[store.HomeMessage](t, homeRequest(t, s, "POST", path, req, true), 200)
-	if reply.Text != answer || len(reply.Suggestions) != 0 || len(reply.SuggestedModel) != 0 {
-		t.Fatal("invalid JSON fallback")
-	}
-	history := homeDecode[struct {
-		Messages []store.HomeMessage `json:"messages"`
-	}](t, homeRequest(t, s, "GET", path, "", true), 200)
-	if len(history.Messages) != 4 || calls != 2 {
-		t.Fatal("history", len(history.Messages), calls)
-	}
-	s.WorkflowRunner = func(context.Context, store.ModelAssignment, string, string, bool) (parthenon.Answer, error) {
-		return parthenon.Answer{}, errors.New("executor unavailable")
-	}
-	if w := homeRequest(t, s, "POST", path, req, true); w.Code != 502 {
-		t.Fatal("runner failure", w.Code)
-	}
-}
-
 func TestHomeNotificationBaselineDedupAndDryRun(t *testing.T) {
 	_, s := newTestServer(t, inProcessTestServer)
 	project := homeFixture(t, s)
@@ -408,7 +358,7 @@ func TestHomeDiscussionPromptUsesRecentEvidence(t *testing.T) {
 		detail.Reports = append(detail.Reports, home.Report{ReportSummary: home.ReportSummary{Title: fmt.Sprintf("report-%d", n)}})
 	}
 	messages := []store.HomeMessage{}
-	for n := 0; n < 15; n++ {
+	for n := 0; n < 19; n++ {
 		messages = append(messages, store.HomeMessage{Role: "user", Text: fmt.Sprintf("message-%02d", n)})
 	}
 	prompt := homeDiscussionPrompt(detail, messages, "latest")
@@ -417,7 +367,7 @@ func TestHomeDiscussionPromptUsesRecentEvidence(t *testing.T) {
 			t.Fatal("old context", absent)
 		}
 	}
-	for _, present := range []string{"report-4", "message-03", "message-14"} {
+	for _, present := range []string{"report-4", "message-03", "message-18"} {
 		if !strings.Contains(prompt, present) {
 			t.Fatal("missing context", present)
 		}

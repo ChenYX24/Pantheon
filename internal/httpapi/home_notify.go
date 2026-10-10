@@ -15,6 +15,8 @@ import (
 
 type homeNotifications struct {
 	mu          sync.Mutex
+	settingsMu  sync.Mutex
+	webhookHTTP *http.Client
 	initialized bool
 	outbound    *chat.Bridge
 	// Tests substitute an adapter without starting any channel or network loop.
@@ -34,13 +36,15 @@ func (s *Server) handleHomeNotifications(w http.ResponseWriter, r *http.Request)
 		s.writeStoreErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"mode": s.homeNotifyMode(), "items": items})
+	record, err := s.readHomeNotify(r.Context())
+	if err != nil {
+		s.writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mode": s.homeNotifyView(record).Mode, "items": items})
 }
 
 func (s *Server) RunHomeNotifications(ctx context.Context) {
-	if s.homeNotifyMode() == "off" {
-		return
-	}
 	first := time.NewTimer(10 * time.Second)
 	defer first.Stop()
 	select {
@@ -76,7 +80,12 @@ func (s *Server) homeNotificationTick(ctx context.Context, at time.Time) error {
 	state := &s.homeNotifications
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	mode := s.homeNotifyMode()
+	record, err := s.readHomeNotify(ctx)
+	if err != nil {
+		return err
+	}
+	settings := s.homeNotifyView(record)
+	mode := settings.Mode
 	if mode == "off" {
 		return nil
 	}
@@ -98,14 +107,18 @@ func (s *Server) homeNotificationTick(ctx context.Context, at time.Time) error {
 	if err != nil {
 		return err
 	}
-	recipients := []string{}
+	type recipient struct{ channel, peer string }
+	recipients := []recipient{}
 	for _, peer := range peers {
 		if peer.Channel == "feishu" {
-			recipients = append(recipients, peer.PeerID)
+			recipients = append(recipients, recipient{"feishu", peer.PeerID})
 		}
 	}
+	if len(record.Webhook) > 0 {
+		recipients = append(recipients, recipient{"feishu_webhook", "webhook"})
+	}
 	if len(recipients) == 0 {
-		recipients = append(recipients, "")
+		recipients = append(recipients, recipient{"feishu", ""})
 	}
 	lang, err := s.DB.GetSetting(ctx, chat.LangKey, "zh")
 	if err != nil {
@@ -115,13 +128,13 @@ func (s *Server) homeNotificationTick(ctx context.Context, at time.Time) error {
 	for _, todo := range snapshot.Todos {
 		for _, peer := range recipients {
 			status := "dry_run"
-			if mode == "send" && peer != "" {
+			if mode == "send" && peer.peer != "" {
 				status = "pending"
 			}
 			if baseline {
 				status = "baseline"
 			}
-			deliveries = append(deliveries, store.HomeDelivery{TodoID: todo.ID, ProjectID: todo.ProjectID, Channel: "feishu", Peer: peer, Status: status, Text: homeNotificationText(todo, s.Cfg.HomePublicURL, s.Cfg.BasePath, lang), CreatedAt: at.Format(time.RFC3339)})
+			deliveries = append(deliveries, store.HomeDelivery{TodoID: todo.ID, ProjectID: todo.ProjectID, Channel: peer.channel, Peer: peer.peer, Status: status, Text: homeNotificationText(todo, settings.PublicURL, s.Cfg.BasePath, lang), CreatedAt: at.Format(time.RFC3339)})
 		}
 	}
 	if err = s.DB.RecordHomeDeliveries(ctx, deliveries); err != nil {
@@ -158,6 +171,8 @@ func (s *Server) homeNotificationTick(ctx context.Context, at time.Time) error {
 		switch {
 		case state.send != nil:
 			err = state.send(sendctx, n)
+		case n.Channel == "feishu_webhook":
+			err = s.sendHomeWebhook(sendctx, record, n.Text, at)
 		case s.Chat != nil:
 			err = s.Chat.SendHomeNotification(sendctx, n.Peer, n.Text)
 		default:

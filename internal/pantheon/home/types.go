@@ -56,6 +56,10 @@ type Task struct {
 	Title         string   `json:"title"`
 	Status        string   `json:"status"`
 	Stage         string   `json:"stage"`
+	Priority      string   `json:"priority"`
+	Tags          []string `json:"tags"`
+	Owner         string   `json:"owner"`
+	Due           string   `json:"due"`
 	Primary       string   `json:"primary"`
 	Secondary     string   `json:"secondary"`
 	DependsOn     []string `json:"dependsOn"`
@@ -81,10 +85,17 @@ type ReportSummary struct {
 
 type Report struct {
 	ReportSummary
-	Task string `json:"task"`
-	Body string `json:"body"`
-	rev  string
-	at   time.Time
+	Task    string        `json:"task"`
+	Body    string        `json:"body"`
+	Rev     string        `json:"rev"`
+	Replies []ReportReply `json:"replies"`
+
+	at time.Time
+}
+
+type ReportReply struct {
+	At   string `json:"at"`
+	Text string `json:"text"`
 }
 
 type Stage struct {
@@ -133,7 +144,9 @@ type Project struct {
 	Usage          struct {
 		Known bool `json:"known"`
 	} `json:"usage"`
-	UpdatedAt string `json:"updatedAt"`
+	UpdatedAt string      `json:"updatedAt"`
+	Meta      ProjectMeta `json:"meta"`
+	MetaRev   string      `json:"metaRev"`
 }
 
 type TodoLink struct {
@@ -170,6 +183,8 @@ type Detail struct {
 	Todos         []Todo   `json:"todos"`
 	Directory     string   `json:"-"`
 	ActiveContext string   `json:"-"`
+	Memory        string   `json:"-"`
+	Fields        Fields   `json:"-"`
 	activeRev     string
 	activeAt      string
 }

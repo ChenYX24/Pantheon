@@ -214,6 +214,9 @@ func (i *Index) Snapshot(cyxHome string, all bool, runtime []RuntimeProject) Sna
 	SortTodos(out.Todos)
 	sort.Slice(out.Projects, func(a, b int) bool {
 		x, y := out.Projects[a], out.Projects[b]
+		if x.Meta.Pinned != y.Meta.Pinned {
+			return x.Meta.Pinned
+		}
 		xTodo, yTodo := len(out.Details[x.ID].Todos) > 0, len(out.Details[y.ID].Todos) > 0
 		if xTodo != yTodo {
 			return xTodo
@@ -280,9 +283,33 @@ func (i *Index) project(f *harnessFS, id, checkout string) (Detail, []Warning, e
 		touch(at)
 		active := ParseActiveContext(data)
 		p.Goal, p.ActiveDocs, p.LastVerified, p.Blockers = active.Goal, active.ActiveDocs, active.LastVerified, active.Blockers
-		d.ActiveContext, d.activeRev, d.activeAt = string(data), Revision(data), at.Format(time.RFC3339Nano)
+		d.ActiveContext, d.activeRev, d.activeAt = capBytes(string(data), 16<<10), Revision(data), at.Format(time.RFC3339Nano)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		warn("ACTIVE_CONTEXT.md", err)
+	}
+	if data, at, err := i.file(f, filepath.Join(base, "MEMORY.md")); err == nil {
+		d.Memory = capBytes(string(data), 8<<10)
+		touch(at)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		warn("MEMORY.md", err)
+	}
+	p.Meta = ProjectMeta{Labels: []string{}}
+	if data, at, err := i.file(f, filepath.Join(base, "pantheon.json")); err == nil {
+		touch(at)
+		if err = json.Unmarshal(data, &p.Meta); err != nil {
+			warn("pantheon.json", err)
+		}
+		p.MetaRev = Revision(data)
+		if p.Meta.Labels == nil {
+			p.Meta.Labels = []string{}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		warn("pantheon.json", err)
+	}
+	d.Fields, _, err = i.fields(f)
+	if err != nil {
+		warn("pantheon/fields.json", err)
+		d.Fields = DefaultFields()
 	}
 	for _, status := range Statuses {
 		p.TaskCounts[status] = 0
@@ -440,7 +467,7 @@ func deriveTodos(d Detail) []Todo {
 	}
 	for _, report := range d.Reports {
 		if report.NeedsUser {
-			add("question", report.File, report.rev, report.Title, report.Summary, report.At, TodoLink{ReportFile: report.File})
+			add("question", report.File, report.Rev, report.Title, report.Summary, report.At, TodoLink{ReportFile: report.File})
 		}
 	}
 	for _, s := range d.Project.Sessions {

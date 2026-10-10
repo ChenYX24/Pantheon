@@ -1970,7 +1970,8 @@ The home view is read from files: the cyx registry (`--cyx-home`, default
 `ACTIVE_CONTEXT.md`, `agent-docs/tasks/<id>/task.md`, `agent-docs/reports/*.md`).
 The database keeps only chat history and notification receipts, so a new
 database yields the same projects, tasks and to-dos. The full contract, file
-formats and to-do rules are in `docs/pantheon/stage-a-contract.md`.
+formats and to-do rules are in `docs/pantheon/stage-a-contract.md` and
+`docs/pantheon/stage-a2-contract.md`.
 
 ### `GET /api/home`
 
@@ -1978,6 +1979,16 @@ Query `all=1` includes archived and merged projects. Returns `available`,
 `generatedAt`, `projects`, `todos` and `warnings`; without a readable registry it
 returns `200` with `available: false` and a `reason`. Unreadable files become
 warnings and never fail the request.
+
+### `GET /api/home/models`
+
+Returns `harnesses`, each with `harness`, `installed`, `default`, `source` and
+`models`. Configured models precede the built-in defaults and Codex availability
+keys; duplicates are removed. Discussion still accepts a free-text model.
+`/api/workflow/executors` keeps its existing behavior. Agent runs use
+`--agent-scope auto` (`VIBEPANEL_AGENT_SCOPE`): a user systemd scope with
+`MemoryMax=1200M`, `CPUQuota=100%` and nice 10 when a user bus is available;
+otherwise direct execution. `off` forces direct execution.
 
 ### `GET /api/home/projects/{id}`
 
@@ -1991,9 +2002,43 @@ Body: `title` and optional `id`, `stage`, `status`, `primary`, `secondary`,
 
 ### `PATCH /api/home/projects/{id}/tasks/{taskId}`
 
-Body: `rev` and any of `status`, `blockedReason`, `sessionStatus`, `session`.
+Body: `rev` and any of `status`, `blockedReason`, `sessionStatus`, `session`,
+`title`, `stage`, `priority`, `tags` (array), `owner`, `due` (YYYY-MM-DD or empty),
+`primary`, `secondary`, `dependsOn` (array).
 Rewrites only those frontmatter keys plus `updated`. `409` with the current
 `rev` when the file changed since it was read.
+
+### `GET /api/home/fields`
+
+Returns `{fields, rev}` from the optional global `pantheon/fields.json` in the
+Harness. Missing files return the contract defaults with `rev: ""`. Status values
+are fixed; labels and colors may change. Unknown task/project values remain intact.
+
+### `PUT /api/home/fields`
+
+Body: `{rev, fields}`. Validates the task and project option definitions, unique
+values and allowed colors, then atomically writes the file. Returns `{fields, rev}`;
+`409 {error:"stale", rev}` if it changed.
+
+### `PATCH /api/home/projects/{id}/meta`
+
+Body: `rev`, optional `labels` (array), `priority`, `owner`, `phase`, `pinned`.
+Atomically creates or patches the optional project `pantheon.json`; creation uses
+`rev: ""`. Returns `{meta, metaRev}`; `409` on a stale revision. Projects include
+these same keys, and pinned projects sort before all other home projects.
+
+### `GET /api/home/tasks`
+
+Returns `{tasks, fields}` across listed projects, with at most 2000 task rows.
+Each task includes `projectId`, `priority`, `tags`, `owner`, `due` and its `rev`.
+Query `all=1` also includes archived and merged projects.
+
+### `POST /api/home/projects/{id}/reports/{file}/reply`
+
+Body: `{text, rev?}`. Appends a timestamped reply section and changes only
+`needs_user` in the frontmatter, atomically. Returns the report with `rev` and
+`replies` (`at`, `text`); `409` when an optional revision is stale. The question
+leaves the to-do list, and a user message mirrors the reply in the main thread.
 
 ### `POST /api/home/projects/{id}/sessions`
 
@@ -2003,15 +2048,48 @@ manual sessions are (in development, with `--development-terminal`).
 
 ### `GET /api/home/projects/{id}/discussion`
 
-Returns the last 100 project-manager `messages`, with `suggestions` and
-`suggestedModel` on assistant replies.
+Query `thread=<id>` selects a thread (default `main`). Returns the last 200
+project-manager `messages`, each with `threadId`, `status` (`pending`, `done`,
+`failed`) and optional `error`, `suggestions` and `suggestedModel`.
 
 ### `POST /api/home/projects/{id}/discussion`
 
-Body: `message`, `executor` `{harness, model}`. Runs the chosen Claude or Codex
-model read-only in the checkout for at most three minutes and stores both turns.
-Suggestions (create task, set status, create session) are never applied by the
-server; the page applies one only when the user chooses it.
+Body: `message`, `executor` `{harness, model}`, optional `thread` (default `main`).
+Returns `202 {user, assistant}` with a pending assistant immediately. A background
+run uses the chosen model read-only for at most three minutes and saves `done` or
+`failed`; poll the discussion to see completion. At most one pending turn per
+project (`409` otherwise). At startup, pending rows older than ten minutes fail
+with `interrupted by restart`. Context includes bounded ACTIVE_CONTEXT and MEMORY,
+a task table, the newest five reports and their replies, field definitions, git
+log/status and the last sixteen messages of this thread. Suggestions (create task,
+set status/fields, create session, set project metadata, reply to report) are never
+applied by the server; the page applies one only when the user chooses it.
+
+### `POST /api/home/projects/{id}/discussion/{messageId}/retry`
+
+Retries a failed assistant turn using its original message and executor, in place.
+Returns `202 {user, assistant}`; `409` if another turn is pending or this turn has
+not failed, `404` for an unknown message.
+
+### `GET /api/home/projects/{id}/threads`
+
+Returns `{threads:[{id,title,updatedAt,messageCount}]}`, newest first. The implicit
+`main` thread is always present. A new thread’s default title is replaced by the
+first thirty characters of its first user message.
+
+### `POST /api/home/projects/{id}/threads`
+
+Body: `{title?}`. Creates a thread and returns it with `201`. The default title is
+`新对话 HH:MM` in local time.
+
+### `PATCH /api/home/projects/{id}/threads/{threadId}`
+
+Body: `{title}`. Renames the thread and returns its summary.
+
+### `DELETE /api/home/projects/{id}/threads/{threadId}`
+
+Deletes the thread and its messages, cancelling any active run in it. Returns
+`204`; deleting `main` is refused with `400`.
 
 ### `GET /api/home/notifications`
 
@@ -2019,6 +2097,30 @@ Returns the notification `mode` (`off`, `dry_run`, `send`) and the newest 100
 deliveries. Each new to-do is offered once per Feishu recipient; `dry_run`
 renders without sending, and the first run on an empty database records the
 current to-dos as a baseline without sending them.
+
+### `GET /api/home/notify-settings`
+
+Returns `{mode, flagMode, webhookConfigured, signed, publicUrl}`. Credentials
+are encrypted in the runtime database with the panel’s secret box and are never
+returned. Runtime mode/public URL override their startup flags; a flag of `off`
+still prevents automatic sending.
+
+### `PUT /api/home/notify-settings`
+
+Body: optional `mode`, `webhookUrl`, `secret`, `publicUrl`. Omitted properties keep
+their current values; explicit empty strings clear URL/secret values. Webhooks must
+be HTTPS bot URLs on `open.feishu.cn` or `open.larksuite.com`. Mode `send` is refused
+with `403` when `--home-notify off`; invalid values return `400`. Returns the same
+redacted object as GET. Available in development mode.
+
+### `POST /api/home/notify-settings/test`
+
+Sends `[Pantheon] 测试通知` immediately through the configured webhook and returns
+`{ok, error?}`. This explicit test works independently of the automatic notification
+mode, including in development. Signing uses the Feishu timestamp/secret HMAC.
+Webhook errors never expose its URL or secret. A configured webhook is also one
+normal recipient (`feishu_webhook`/`webhook`); adding it or switching to send does
+not replay baseline or dry-run to-dos.
 
 ### Development mount
 

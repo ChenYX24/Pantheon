@@ -123,7 +123,12 @@ func RunAgent(ctx context.Context, m store.ModelAssignment, dir, prompt string, 
 	default:
 		return Answer{}, errors.New("unsupported executor")
 	}
-	cmd := exec.CommandContext(ctx, m.Harness, args...)
+	scope, _ := ctx.Value(agentScopeKey{}).(string)
+	if scope == "" {
+		scope = os.Getenv("VIBEPANEL_AGENT_SCOPE")
+	}
+	program, argv, scopeEnv := agentCommand(scope, m.Harness, args, os.Getenv("XDG_RUNTIME_DIR"), os.Getuid(), exec.LookPath, os.Stat)
+	cmd := exec.CommandContext(ctx, program, argv...)
 	cmd.Dir = dir
 	cmd.Stdin = strings.NewReader(prompt)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -139,6 +144,16 @@ func RunAgent(ctx context.Context, m store.ModelAssignment, dir, prompt string, 
 		if !strings.HasPrefix(e, "VIBEPANEL_") {
 			cmd.Env = append(cmd.Env, e)
 		}
+	}
+	for _, value := range scopeEnv {
+		key, _, _ := strings.Cut(value, "=")
+		filtered := cmd.Env[:0]
+		for _, old := range cmd.Env {
+			if !strings.HasPrefix(old, key+"=") {
+				filtered = append(filtered, old)
+			}
+		}
+		cmd.Env = append(filtered, value)
 	}
 	if m.Harness == "claude" {
 		cmd.Env = claudeProviderEnv(cmd.Env)

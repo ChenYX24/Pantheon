@@ -47,6 +47,7 @@ type Config struct {
 	WorkflowExecute     bool
 	BasePath            string
 	CyxHome             string
+	AgentScope          string
 	HomeNotify          string
 	HomePublicURL       string
 
@@ -165,6 +166,7 @@ func Default() Config {
 	return Config{
 		CyxHome:    filepath.Join(home, ".cyx"),
 		HomeNotify: "off",
+		AgentScope: "auto",
 		DataDir:    defaultDataDir(),
 		Addr:       fmt.Sprintf(":%d", DefaultPort),
 		TLSMode:    TLSOff,
@@ -214,6 +216,7 @@ func (c *Config) envOverlay() {
 	str(&c.Domain, "VIBEPANEL_DOMAIN")
 	str(&c.BasePath, "VIBEPANEL_BASE_PATH")
 	str(&c.CyxHome, "VIBEPANEL_CYX_HOME")
+	str(&c.AgentScope, "VIBEPANEL_AGENT_SCOPE")
 	str(&c.HomeNotify, "VIBEPANEL_HOME_NOTIFY")
 	str(&c.HomePublicURL, "VIBEPANEL_HOME_PUBLIC_URL")
 	str(&c.CertFile, "VIBEPANEL_CERT_FILE", "VIBEPANEL_TLS_CERT")
@@ -366,6 +369,9 @@ func (c Config) PasskeyBlocker() string {
 // Validate checks for combinations that cannot work, so the process fails at
 // startup with a clear message instead of at first request with a vague one.
 func (c Config) Validate() error {
+	if c.AgentScope != "auto" && c.AgentScope != "off" {
+		return errors.New("config: agent-scope must be auto or off")
+	}
 	switch c.HomeNotify {
 	case "off", "dry_run", "send":
 	default:

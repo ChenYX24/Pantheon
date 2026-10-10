@@ -4,11 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
-	"slices"
 	"time"
-
-	"github.com/jiangmuran/vibepanel/internal/id"
 )
 
 func migrateHome(tx *sql.Tx) error {
@@ -35,6 +31,9 @@ func migrateHome(tx *sql.Tx) error {
 
 type HomeMessage struct {
 	ID             string           `json:"id"`
+	ThreadID       string           `json:"threadId"`
+	Status         string           `json:"status"`
+	Error          *string          `json:"error,omitempty"`
 	Role           string           `json:"role"`
 	Text           string           `json:"text"`
 	At             string           `json:"at"`
@@ -46,54 +45,6 @@ type HomeMessage struct {
 type homePayload struct {
 	Suggestions    json.RawMessage `json:"suggestions,omitempty"`
 	SuggestedModel json.RawMessage `json:"suggestedModel,omitempty"`
-}
-
-func (d *DB) AddHomeMessage(ctx context.Context, project string, message HomeMessage) (HomeMessage, error) {
-	if message.Role != "user" && message.Role != "assistant" {
-		return message, errors.New("invalid home message role")
-	}
-	message.ID = id.New()
-	at := time.Now()
-	message.At = at.Format(time.RFC3339Nano)
-	executor, err := json.Marshal(message.Executor)
-	if err != nil {
-		return message, err
-	}
-	payload, err := json.Marshal(homePayload{message.Suggestions, message.SuggestedModel})
-	if err != nil {
-		return message, err
-	}
-	_, err = d.sql.ExecContext(ctx, `INSERT INTO home_messages(id,project_id,role,text,executor_json,payload_json,created_at) VALUES(?,?,?,?,?,?,?)`, message.ID, project, message.Role, message.Text, string(executor), string(payload), at.UnixNano())
-	return message, err
-}
-
-func (d *DB) HomeMessages(ctx context.Context, project string) ([]HomeMessage, error) {
-	rows, err := d.sql.QueryContext(ctx, `SELECT id,role,text,executor_json,payload_json,created_at FROM home_messages WHERE project_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100`, project)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []HomeMessage{}
-	for rows.Next() {
-		var m HomeMessage
-		var executor, payload string
-		var at int64
-		if err = rows.Scan(&m.ID, &m.Role, &m.Text, &executor, &payload, &at); err != nil {
-			return nil, err
-		}
-		if err = json.Unmarshal([]byte(executor), &m.Executor); err != nil {
-			return nil, err
-		}
-		var p homePayload
-		if err = json.Unmarshal([]byte(payload), &p); err != nil {
-			return nil, err
-		}
-		m.At = time.Unix(0, at).Format(time.RFC3339Nano)
-		m.Suggestions, m.SuggestedModel = p.Suggestions, p.SuggestedModel
-		out = append(out, m)
-	}
-	slices.Reverse(out)
-	return out, rows.Err()
 }
 
 type HomeDelivery struct {
