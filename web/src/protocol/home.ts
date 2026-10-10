@@ -65,6 +65,81 @@ export interface HomeTodo {
   link: HomeTodoLink
 }
 export interface HomeWarning { projectId: string; file: string; message: string }
+export const HOME_RESOURCE_KINDS = ['api', 'server', 'dataset', 'account', 'service', 'other'] as const
+export type HomeResourceKind = typeof HOME_RESOURCE_KINDS[number]
+export const HOME_RESOURCE_PROVIDERS = ['anthropic', 'openai', 'openai-compatible', 'feishu', 'other'] as const
+export type HomeResourceProvider = typeof HOME_RESOURCE_PROVIDERS[number] | ''
+export const HOME_RESOURCE_CHECKS = ['none', 'provider', 'http', 'ssh'] as const
+export type HomeResourceCheckKind = typeof HOME_RESOURCE_CHECKS[number]
+export interface HomeResourceSecret { name: string; configured: boolean; updatedAt: string }
+export interface HomeResourceCheck {
+  at: string
+  ok: boolean
+  summary: string
+  detail: { status?: number; models?: string[]; modelCount?: number; ms?: number; exitCode?: number; stderr?: string }
+}
+export interface HomeResourceUse { purpose: 'session' | 'check'; projectId: string; sessionId: string; at: string }
+export type HomeServerState = 'fresh' | 'stale' | 'disconnected' | 'unknown' | 'unsupported'
+export interface HomeGPU {
+  index: number
+  name: string
+  memoryTotalMib: number | null
+  memoryUsedMib: number | null
+  utilizationPct: number | null
+  temperatureC: number | null
+  powerW: number | null
+  migMode: string | null
+  observation: 'low_usage' | 'usage_observed' | 'unknown'
+}
+export interface HomeServerStatus {
+  id: string
+  alias: string
+  group: string
+  label: string
+  state: HomeServerState
+  reachability: string
+  telemetry: string
+  lastSuccessAt: string | null
+  lastMetricsAt: string | null
+  ageSeconds: number | null
+  errorCode: string
+  gpus: HomeGPU[]
+  resourceId: string | null
+}
+export interface HomeServerBoard { available: boolean; collectedAt: string; staleAfterSeconds: number; url: string }
+export interface HomeServers { servers: HomeServerStatus[]; sshAliases: string[]; board: HomeServerBoard }
+export interface HomeResourceFields {
+  kind: HomeResourceKind
+  title: string
+  provider: HomeResourceProvider
+  baseUrl: string
+  env: string[]
+  sshAlias: string
+  gpuBoardId: string
+  url: string
+  projects: string[]
+  tags: string[]
+  check: HomeResourceCheckKind
+  body: string
+}
+export interface HomeResource extends HomeResourceFields {
+  id: string
+  updated: string
+  rev: string
+  file: string
+  secrets: HomeResourceSecret[]
+  lastCheck: Pick<HomeResourceCheck, 'at' | 'ok' | 'summary'> | null
+  server: HomeServerStatus | null
+}
+export interface HomeResourceDetail extends HomeResource { checks: HomeResourceCheck[]; uses: HomeResourceUse[] }
+export interface HomeResources {
+  resources: HomeResource[]
+  orphans: { resourceId: string; names: string[] }[]
+  warnings: HomeWarning[]
+}
+export type HomeCreateResource = Pick<HomeResourceFields, 'kind' | 'title'> & Partial<HomeResourceFields> & { id?: string }
+export type HomePatchResource = Partial<HomeResourceFields> & { rev: string }
+export interface HomeProjectResources { resources: HomeResource[]; defaultResources: string[] }
 export type HomeIndex = { available: false; reason: string } | {
   available: true
   generatedAt: string
@@ -121,8 +196,8 @@ export interface HomePatchTask {
   secondary?: string
   dependsOn?: string[]
 }
-export type HomePatchMeta = Partial<HomeProjectMeta> & { rev: string }
-export interface HomeCreateSession { profileId?: string; name?: string }
+export type HomePatchMeta = Partial<HomeProjectMeta> & { rev: string; resources?: string[] }
+export interface HomeCreateSession { profileId?: string; name?: string; resources?: string[] }
 export interface HomeCreatedSession { sessionId: string; panelProjectId: string }
 export interface HomeExecutor { harness: 'claude' | 'codex'; model: string }
 export interface HomeExecutorOption extends HomeExecutor { installed: boolean; source: string }
@@ -135,6 +210,7 @@ export type HomeSuggestion =
   | { type: 'set_fields'; taskId: string; fields: Omit<HomePatchTask, 'rev'> }
   | { type: 'set_project'; fields: Partial<HomeProjectMeta> }
   | { type: 'reply_report'; file: string; text: string }
+  | { type: 'use_resources'; resources: string[] }
 export interface HomeMessage {
   id: string
   role: 'user' | 'assistant'
@@ -203,8 +279,21 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
 }
 
 const projectPath = (id: string) => `/api/home/projects/${encodeURIComponent(id)}`
+const resourcePath = (id: string) => `/api/home/resources/${encodeURIComponent(id)}`
 
 export const homeApi = {
+  resources: (signal?: AbortSignal) => request<HomeResources>('/api/home/resources', 'GET', undefined, signal),
+  resource: (id: string, signal?: AbortSignal) => request<HomeResourceDetail>(resourcePath(id), 'GET', undefined, signal),
+  createResource: (resource: HomeCreateResource) => request<HomeResource>('/api/home/resources', 'POST', resource),
+  patchResource: (id: string, patch: HomePatchResource) => request<HomeResource>(resourcePath(id), 'PATCH', patch),
+  deleteResource: (id: string, rev: string) => request<void>(`${resourcePath(id)}?${new URLSearchParams({ rev })}`, 'DELETE'),
+  putResourceSecret: (id: string, name: string, value: string) => request<HomeResourceSecret>(`${resourcePath(id)}/secrets/${encodeURIComponent(name)}`, 'PUT', { value }),
+  deleteResourceSecret: (id: string, name: string) => request<void>(`${resourcePath(id)}/secrets/${encodeURIComponent(name)}`, 'DELETE'),
+  checkResource: (id: string) => request<HomeResourceCheck>(`${resourcePath(id)}/check`, 'POST'),
+  importSSHResources: (aliases: string[]) => request<{ created: string[]; skipped: string[] }>('/api/home/resources/import/ssh', 'POST', { aliases }),
+  importProfileResource: (profileId: string, resourceId?: string) => request<unknown>('/api/home/resources/import/profile', 'POST', { profileId, ...(resourceId ? { resourceId } : {}) }),
+  servers: (signal?: AbortSignal) => request<HomeServers>('/api/home/servers', 'GET', undefined, signal),
+  projectResources: (id: string, signal?: AbortSignal) => request<HomeProjectResources>(`${projectPath(id)}/resources`, 'GET', undefined, signal),
   index: (all = false, signal?: AbortSignal) => request<HomeIndex>(`/api/home${all ? '?all=1' : ''}`, 'GET', undefined, signal),
   project: (id: string, signal?: AbortSignal) => request<HomeProjectDetail>(projectPath(id), 'GET', undefined, signal),
   createTask: (id: string, task: HomeCreateTask) => request<HomeTask>(`${projectPath(id)}/tasks`, 'POST', task),

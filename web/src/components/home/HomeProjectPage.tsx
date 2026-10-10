@@ -2,7 +2,7 @@ import { useCallback, useState, type MouseEvent } from 'react'
 import { CheckSquare, FileText, Info, MessageSquare, RefreshCw, Terminal } from 'lucide-react'
 import { t } from '../../i18n'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
-import { homeApi, type HomeFieldSettings, type HomeProject, type HomeSuggestion } from '../../protocol/home'
+import { homeApi, type HomeCreateSession, type HomeFieldSettings, type HomeProject, type HomeSuggestion } from '../../protocol/home'
 import { panelOpeningSession, type HomeSelection, type HomeTab } from '../../routes'
 import { safeText } from '../text'
 import { showToast } from '../toasts'
@@ -13,6 +13,7 @@ import { HomeField } from './HomeField'
 import { HomeTable } from './HomeTable'
 import { HomeReports } from './HomeReports'
 import { HomeSessions } from './HomeSessions'
+import { HomeProjectResourceSettings } from './HomeProjectResources'
 import { useHomeResource } from './useHomeResource'
 import { useHomeMutation } from './useHomeMutation'
 
@@ -33,16 +34,18 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
   const wide = useMediaQuery('(min-width: 768px)')
   const load = useCallback((signal: AbortSignal) => homeApi.project(projectId, signal), [projectId])
   const detail = useHomeResource(load)
+  const loadResources = useCallback((signal: AbortSignal) => homeApi.projectResources(projectId, signal), [projectId])
+  const resources = useHomeResource(loadResources)
   const [createdSession, setCreatedSession] = useState('')
   const [chatRevision, setChatRevision] = useState(0)
-  const changed = async () => { await detail.refresh(); await onChanged(); setChatRevision((old) => old + 1) }
+  const changed = async () => { await detail.refresh(); await resources.refresh(); await onChanged(); setChatRevision((old) => old + 1) }
   const { busy, run } = useHomeMutation(changed)
   const data = detail.data
   const tab = selection.tab ?? 'chat'
   const rightTab = tab === 'chat' ? 'tasks' : tab
   const visibleTabs = wide ? tabs.filter(([id]) => id !== 'chat') : tabs
   const activeTab = wide ? rightTab : tab
-  const createSession = async (session: { name?: string; profileId?: string }) => {
+  const createSession = async (session: HomeCreateSession) => {
     const created = await homeApi.createSession(projectId, session)
     setCreatedSession(created.sessionId)
   }
@@ -54,6 +57,7 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
         await homeApi.createTask(projectId, item.task)
         break
       case 'create_session': await createSession({ name: item.name }); break
+      case 'use_resources': await createSession({ resources: item.resources }); break
       case 'set_project': await homeApi.patchMeta(projectId, { ...item.fields, rev: data.project.metaRev }); break
       case 'reply_report': {
         const report = data.reports.find((report) => report.file === item.file)
@@ -91,8 +95,8 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
             await homeApi.replyReport(projectId, report.file, text, report.rev)
             showToast({ kind: 'success', key: 'home.replySaved' })
           })} /></div>
-          <div id="home-panel-sessions" role="tabpanel" aria-labelledby="home-tab-sessions" hidden={rightTab !== 'sessions'}><HomeSessions project={data.project} busy={busy} onCreate={(session) => run(() => createSession(session))} /></div>
-          <div id="home-panel-info" role="tabpanel" aria-labelledby="home-tab-info" hidden={rightTab !== 'info'}><ProjectInfo project={data.project} settings={settings} busy={busy} onSave={(patch) => run(() => homeApi.patchMeta(projectId, { ...patch, rev: data.project.metaRev }))} /></div>
+          <div id="home-panel-sessions" role="tabpanel" aria-labelledby="home-tab-sessions" hidden={rightTab !== 'sessions'}><HomeSessions project={data.project} resources={resources.data} resourceError={resources.error} busy={busy} onCreate={(session) => run(() => createSession(session))} onRetry={() => void resources.refresh()} /></div>
+          <div id="home-panel-info" role="tabpanel" aria-labelledby="home-tab-info" hidden={rightTab !== 'info'}><ProjectInfo project={data.project} settings={settings} busy={busy} onSave={(patch) => run(() => homeApi.patchMeta(projectId, { ...patch, rev: data.project.metaRev }))} /><div className="mt-4"><HomeProjectResourceSettings data={resources.data} error={resources.error} busy={busy} onNavigate={onNavigate} onRetry={() => void resources.refresh()} onSave={(resources) => run(() => homeApi.patchMeta(projectId, { resources, rev: data.project.metaRev }))} /></div></div>
         </div>
       </div>
     </div>}

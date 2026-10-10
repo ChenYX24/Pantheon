@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "src/components/home/HomeResourcesPage.tsx",
+    "src/components/home/HomeSessions.tsx",
+    "src/components/home/HomeSuggestionAction.tsx",
+    "src/protocol/home.ts",
+    "src/routes.ts"
+  ]
+}

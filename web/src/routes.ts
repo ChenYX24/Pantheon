@@ -26,6 +26,7 @@ import { appURL } from './basePath'
 
 export const PROJECTS_PATH = appURL('/projects')
 export const HOME_PATH = appURL('/home')
+export const HOME_RESOURCES_PATH = appURL('/home/resources')
 export const PANEL_PATH = appURL('/')
 
 export const SHARING_PATH = appURL('/sharing')
@@ -33,10 +34,15 @@ export const SHARING_PATH = appURL('/sharing')
 /** The page the chat bridge is set up from: routes.ts is the one place that spells it. */
 export const CHAT_PATH = appURL('/chat')
 
-export type Route = { kind: 'home'; projectId?: string } | { kind: 'projects' } | { kind: 'panel' } | { kind: 'sharing' } | { kind: 'chat' }
+export type Route = { kind: 'home'; projectId?: string; resources?: true; resourceId?: string } | { kind: 'projects' } | { kind: 'panel' } | { kind: 'sharing' } | { kind: 'chat' }
 
 export function routeFor(pathname: string): Route {
   if (pathname === HOME_PATH || pathname === `${HOME_PATH}/`) return { kind: 'home' }
+  if (pathname === HOME_RESOURCES_PATH || pathname === `${HOME_RESOURCES_PATH}/`) return { kind: 'home', resources: true }
+  if (pathname.startsWith(`${HOME_RESOURCES_PATH}/`)) {
+    const id = pathname.slice(`${HOME_RESOURCES_PATH}/`.length).replace(/\/$/, '')
+    if (/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) return { kind: 'home', resources: true, resourceId: id }
+  }
   if (pathname.startsWith(`${HOME_PATH}/p/`)) {
     const id = pathname.slice(`${HOME_PATH}/p/`.length).replace(/\/$/, '')
     if (/^[a-z0-9][a-z0-9._-]{0,63}$/.test(id)) return { kind: 'home', projectId: id }
@@ -51,6 +57,10 @@ export function routeFor(pathname: string): Route {
 
 export type HomeTab = 'chat' | 'tasks' | 'reports' | 'sessions' | 'info'
 export interface HomeSelection { projectId: string; taskId?: string; reportFile?: string; thread?: string; tab?: HomeTab }
+
+export function homeResourceLink(id: string): string {
+  return `${HOME_RESOURCES_PATH}/${encodeURIComponent(id)}`
+}
 
 export function homeProjectLink({ projectId, taskId, reportFile, thread, tab }: HomeSelection, returnSearch = ''): string {
   const query = new URLSearchParams()
