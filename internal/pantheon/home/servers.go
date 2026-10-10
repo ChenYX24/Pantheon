@@ -238,25 +238,43 @@ func ReadBoardSnapshot(path, boardURL string, now time.Time) ([]ServerStatus, Bo
 		server.Reachability, server.Telemetry = boardString(node, "reachability"), boardString(node, "telemetry")
 		server.LastSuccessAt = boardTimestamp(node, "lastSuccessAt")
 		server.LastMetricsAt = boardTimestamp(node, "lastMetricsAt")
-		server.State = boardString(node, "state")
 		if code := boardString(node, "errorCode"); code != "" {
 			server.ErrorCode = &code
 		}
+		var metricsAge, connectionAge *float64
+		future := false
 		if server.LastMetricsAt != nil {
 			at, _ := time.Parse(time.RFC3339Nano, *server.LastMetricsAt)
 			age := max(0, now.Sub(at).Seconds())
-			server.AgeSeconds = &age
+			metricsAge, server.AgeSeconds = &age, &age
+			future = future || at.After(now.Add(5*time.Second))
 		}
+		if server.LastSuccessAt != nil {
+			at, _ := time.Parse(time.RFC3339Nano, *server.LastSuccessAt)
+			age := max(0, now.Sub(at).Seconds())
+			connectionAge = &age
+			future = future || at.After(now.Add(5*time.Second))
+		}
+		// The board's own public_snapshot rules, in its order. The private
+		// snapshot carries reachability (connected, timeout, auth_failed, …)
+		// and telemetry, not a state; a state field, when present, is ignored
+		// so a stale file cannot claim freshness.
 		switch {
-		case server.Reachability == "disconnected" || server.State == "disconnected":
-			server.State = "disconnected"
-		case server.Telemetry == "unsupported" || server.State == "unsupported":
-			server.State = "unsupported"
-		case server.LastMetricsAt == nil:
+		case server.Reachability != "connected" && (server.Reachability == "" || server.Reachability == "unknown"):
 			server.State = "unknown"
-		case *server.AgeSeconds > BoardStaleAfterSeconds:
+		case server.Reachability != "connected":
+			server.State = "disconnected"
+		case connectionAge == nil:
+			server.State = "unknown"
+		case *connectionAge >= BoardStaleAfterSeconds || future:
 			server.State = "stale"
-		case server.State != "stale" && server.State != "unknown":
+		case server.Telemetry == "unsupported":
+			server.State = "unsupported"
+		case server.Telemetry != "healthy" || metricsAge == nil:
+			server.State = "unknown"
+		case *metricsAge >= BoardStaleAfterSeconds:
+			server.State = "stale"
+		default:
 			server.State = "fresh"
 		}
 		var gpus []map[string]json.RawMessage
@@ -266,10 +284,13 @@ func ReadBoardSnapshot(path, boardURL string, now time.Time) ([]ServerStatus, Bo
 		for _, gpu := range gpus {
 			item := ServerGPU{Name: boardString(gpu, "name"), MemoryTotalMib: boardNumber(gpu, "memoryTotalMib"), MemoryUsedMib: boardNumber(gpu, "memoryUsedMib"), UtilizationPct: boardNumber(gpu, "utilizationPct"), TemperatureC: boardNumber(gpu, "temperatureC"), PowerW: boardNumber(gpu, "powerW"), MIGMode: boardString(gpu, "migMode"), Observation: "unknown"}
 			_ = json.Unmarshal(gpu["index"], &item.Index)
-			// Observations belong to the board's policy; Pantheon only expires
-			// them and never turns a metric threshold into an allocation grant.
-			if observation := boardString(gpu, "observation"); server.State == "fresh" && (observation == "low_usage" || observation == "usage_observed") {
-				item.Observation = observation
+			// Same thresholds as the board: an observation only, never an
+			// allocation grant.
+			if server.State == "fresh" {
+				item.Observation = "usage_observed"
+				if item.MemoryUsedMib != nil && *item.MemoryUsedMib <= 64 && item.UtilizationPct != nil && *item.UtilizationPct == 0 {
+					item.Observation = "low_usage"
+				}
 			}
 			server.GPUs = append(server.GPUs, item)
 		}

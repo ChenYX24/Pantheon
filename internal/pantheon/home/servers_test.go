@@ -26,35 +26,45 @@ func TestHomeSSHAliasesIncludesWildcardsAndNoOtherFields(t *testing.T) {
 }
 
 func TestHomeBoardProjectionPrivacyAndFixedClock(t *testing.T) {
+	// The private snapshot exactly as atombit-gpu-board's collector writes it
+	// (runtime/snapshot.json): reachability and telemetry, never a state, and
+	// fields the public projection must drop.
 	now := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "snapshot.json")
-	put(t, path, `{"version":1,"collected_at":"2026-10-10T10:00:00Z","identity":"private-identity","nodes":[
-{"id":"gpu-a","alias":"alias-a","group":"atombit","label":"GPU A","state":"fresh","reachability":"connected","telemetry":"ok","last_success_at":"2026-10-10T09:59:00Z","last_metrics_at":"2026-10-10T09:57:00Z","identity":"private-identity","address":"private-address","user":"private-user","stderr":"private-stderr","gpus":[{"index":0,"name":"GPU","memory_total_mib":24000,"memory_used_mib":100,"utilization_pct":0,"temperature_c":40,"power_w":30,"mig_mode":"disabled","observation":"low_usage","uuid":"private-uuid"}]},
-{"id":"gpu-old","state":"fresh","reachability":"connected","last_metrics_at":"2026-10-10T09:56:59Z","gpus":[{"index":0,"observation":"low_usage"}]},
-{"id":"off","state":"fresh","reachability":"disconnected","last_metrics_at":"2026-10-10T09:59:00Z","error_code":"ssh_timeout"},
-{"id":"unsupported","telemetry":"unsupported"},
-{"id":"unknown"}]}`)
+	put(t, path, `{"schema_version":1,"collected_at":"2026-10-10T10:00:00Z","origin":"collector","duration_seconds":12,"nodes":[
+{"id":"gpu-a","alias":"alias-a","group":"atombit","label":"GPU A","reachability":"connected","telemetry":"healthy","last_attempt_at":"2026-10-10T09:59:00Z","last_success_at":"2026-10-10T09:59:00Z","last_metrics_at":"2026-10-10T09:57:01Z","identity":{"hostname":"private-host","user":"private-user"},"error_code":null,"gpus":[
+ {"index":0,"name":"A800","memory_total_mib":81920,"memory_used_mib":64,"utilization_pct":0,"temperature_c":40,"power_w":60,"mig_mode":"Disabled","uuid":"private-uuid-0"},
+ {"index":1,"name":"A800","memory_total_mib":81920,"memory_used_mib":40000,"utilization_pct":97,"temperature_c":70,"power_w":300,"mig_mode":"Disabled","uuid":"private-uuid-1"}]},
+{"id":"gpu-old","reachability":"connected","telemetry":"healthy","last_success_at":"2026-10-10T09:59:00Z","last_metrics_at":"2026-10-10T09:56:59Z","gpus":[{"index":0,"memory_used_mib":0,"utilization_pct":0}]},
+{"id":"timeout","state":"fresh","reachability":"timeout","telemetry":"healthy","last_success_at":"2026-10-10T09:59:00Z","last_metrics_at":"2026-10-10T09:59:00Z","error_code":"ssh_timeout"},
+{"id":"auth","reachability":"auth_failed","telemetry":"unknown","error_code":"auth_failed"},
+{"id":"unsupported","reachability":"connected","telemetry":"unsupported","last_success_at":"2026-10-10T09:59:00Z"},
+{"id":"unknown","reachability":"unknown"}]}`)
 	servers, board := ReadBoardSnapshot(path, "https://board.invalid", now)
-	if !board.Available || board.StaleAfterSeconds != 180 || board.CollectedAt == nil || len(servers) != 5 {
+	if !board.Available || board.StaleAfterSeconds != 180 || board.CollectedAt == nil || len(servers) != 6 {
 		t.Fatalf("%+v %+v", servers, board)
 	}
-	for n, want := range []string{"fresh", "stale", "disconnected", "unsupported", "unknown"} {
+	for n, want := range []string{"fresh", "stale", "disconnected", "disconnected", "unsupported", "unknown"} {
 		if servers[n].State != want {
-			t.Errorf("node %d: %s want %s", n, servers[n].State, want)
+			t.Errorf("node %d (%s): %s want %s", n, servers[n].ID, servers[n].State, want)
 		}
 	}
-	if servers[0].GPUs[0].Observation != "low_usage" || servers[1].GPUs[0].Observation != "unknown" || *servers[0].GPUs[0].MemoryTotalMib != 24000 || *servers[0].AgeSeconds != 180 {
+	gpus := servers[0].GPUs
+	if gpus[0].Observation != "low_usage" || gpus[1].Observation != "usage_observed" || servers[1].GPUs[0].Observation != "unknown" || *gpus[0].MemoryTotalMib != 81920 || gpus[0].MIGMode != "Disabled" || *servers[0].AgeSeconds != 179 {
 		t.Fatalf("%+v", servers)
 	}
+	if servers[2].ErrorCode == nil || *servers[2].ErrorCode != "ssh_timeout" {
+		t.Fatal("error code lost")
+	}
 	raw, _ := json.Marshal(servers)
-	for _, private := range []string{"identity", "uuid", "address", "user", "stderr", "private-"} {
+	for _, private := range []string{"uuid", "private-", "hostname"} {
 		if strings.Contains(string(raw), private) {
 			t.Fatal("projection disclosed", private)
 		}
 	}
 	later, _ := ReadBoardSnapshot(path, "", now.Add(time.Second))
 	if later[0].State != "stale" || later[0].GPUs[0].Observation != "unknown" {
-		t.Fatal("old snapshot stayed fresh")
+		t.Fatal("metrics older than 180 s stayed fresh")
 	}
 }
 
