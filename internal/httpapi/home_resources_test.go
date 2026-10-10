@@ -457,7 +457,7 @@ func TestHomeResourceServerSnapshotImportAndPrompt(t *testing.T) {
 	homePut(t, a.s.homeResources.sshConfig, "Host cluster\nHostName private-address\n")
 	writeSnapshot := func(at time.Time) {
 		raw, _ := json.Marshal(map[string]any{"collected_at": at.Format(time.RFC3339Nano), "nodes": []any{
-			map[string]any{"id": "board-node", "alias": "cluster", "group": "atombit", "label": "Board label", "state": "fresh", "reachability": "connected", "telemetry": "ok", "last_metrics_at": at.Format(time.RFC3339Nano), "last_success_at": at.Format(time.RFC3339Nano), "identity": "private-identity", "address": "private-address", "user": "private-user", "stderr": "private-stderr", "gpus": []any{map[string]any{"index": 0, "name": "Test GPU", "memory_total_mib": 24000, "memory_used_mib": 10, "utilization_pct": 0, "mig_mode": "disabled", "observation": "low_usage", "uuid": "private-uuid"}}},
+			map[string]any{"id": "board-node", "alias": "cluster", "group": "atombit", "label": "Board label", "state": "fresh", "reachability": "connected", "telemetry": "healthy", "last_metrics_at": at.Format(time.RFC3339Nano), "last_success_at": at.Format(time.RFC3339Nano), "identity": "private-identity", "address": "private-address", "user": "private-user", "stderr": "private-stderr", "gpus": []any{map[string]any{"index": 0, "name": "Test GPU", "memory_total_mib": 24000, "memory_used_mib": 10, "utilization_pct": 0, "mig_mode": "disabled", "observation": "low_usage", "uuid": "private-uuid"}}},
 		}})
 		homePut(t, a.s.Cfg.GPUBoardSnapshot, string(raw))
 	}
