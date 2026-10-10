@@ -21,7 +21,17 @@ export interface HomeReportSummary {
   kind: 'report' | 'question'
   needsUser: boolean
 }
-export interface HomeReport extends HomeReportSummary { task: string; body: string }
+export interface HomeReport extends HomeReportSummary { task: string; body: string; rev: string; replies: { at: string; text: string }[] }
+export interface HomeProjectMeta { labels: string[]; priority: string; owner: string; phase: string; pinned: boolean }
+export const HOME_FIELD_COLORS = ['gray', 'blue', 'green', 'orange', 'red', 'purple', 'pink', 'teal', 'yellow'] as const
+export type HomeFieldColor = typeof HOME_FIELD_COLORS[number]
+export interface HomeFieldOption { value: string; label?: string; color: HomeFieldColor }
+export interface HomeField { options: HomeFieldOption[] }
+export interface HomeFields {
+  task: Record<'status' | 'priority' | 'tags', HomeField>
+  project: Record<'labels' | 'priority' | 'phase', HomeField>
+}
+export interface HomeFieldSettings { fields: HomeFields; rev: string }
 export interface HomeProject {
   id: string
   aliases: string[]
@@ -41,6 +51,8 @@ export interface HomeProject {
   sessions: HomeSession[]
   usage: { known: false }
   updatedAt: string
+  meta: HomeProjectMeta
+  metaRev: string
 }
 export interface HomeTodoLink { projectId: string; taskId: string; reportFile: string; sessionId: string }
 export interface HomeTodo {
@@ -76,7 +88,12 @@ export interface HomeTask {
   body: string
   rev: string
   file: string
+  priority: string
+  tags: string[]
+  owner: string
+  due: string
 }
+export type HomeTaskRow = HomeTask & { projectId: string }
 export interface HomeProjectDetail { project: HomeProject; tasks: HomeTask[]; reports: HomeReport[]; todos: HomeTodo[] }
 export interface HomeCreateTask {
   title: string
@@ -94,25 +111,52 @@ export interface HomePatchTask {
   blockedReason?: string
   sessionStatus?: HomeSessionStatus
   session?: string
+  title?: string
+  stage?: string
+  priority?: string
+  tags?: string[]
+  owner?: string
+  due?: string
+  primary?: string
+  secondary?: string
+  dependsOn?: string[]
 }
+export type HomePatchMeta = Partial<HomeProjectMeta> & { rev: string }
 export interface HomeCreateSession { profileId?: string; name?: string }
 export interface HomeCreatedSession { sessionId: string; panelProjectId: string }
 export interface HomeExecutor { harness: 'claude' | 'codex'; model: string }
 export interface HomeExecutorOption extends HomeExecutor { installed: boolean; source: string }
+export interface HomeModels { harnesses: { harness: HomeExecutor['harness']; installed: boolean; default: string; source: string; models: string[] }[] }
+export interface HomeThread { id: string; title: string; updatedAt: string; messageCount: number }
 export type HomeSuggestion =
   | { type: 'create_task'; task: HomeCreateTask }
   | { type: 'set_status'; taskId: string; status: HomeTaskStatus }
   | { type: 'create_session'; name: string }
+  | { type: 'set_fields'; taskId: string; fields: Omit<HomePatchTask, 'rev'> }
+  | { type: 'set_project'; fields: Partial<HomeProjectMeta> }
+  | { type: 'reply_report'; file: string; text: string }
 export interface HomeMessage {
   id: string
   role: 'user' | 'assistant'
   text: string
   at: string
+  status: 'pending' | 'done' | 'failed'
+  error?: string
   executor?: HomeExecutor
   suggestions?: HomeSuggestion[]
   suggestedModel?: HomeExecutor & { reason: string }
 }
 export interface HomeDiscussion { messages: HomeMessage[] }
+export interface HomeSendResult { user: HomeMessage; assistant: HomeMessage }
+export type HomeNotifyMode = 'off' | 'dry_run' | 'send'
+export interface HomeNotifySettings {
+  mode: HomeNotifyMode
+  flagMode: HomeNotifyMode
+  webhookConfigured: boolean
+  signed: boolean
+  publicUrl: string
+}
+export interface HomePatchNotify { mode?: HomeNotifyMode; webhookUrl?: string; secret?: string; publicUrl?: string }
 export interface HomeNotifications {
   mode: 'off' | 'dry_run' | 'send'
   items: {
@@ -166,10 +210,22 @@ export const homeApi = {
   createTask: (id: string, task: HomeCreateTask) => request<HomeTask>(`${projectPath(id)}/tasks`, 'POST', task),
   patchTask: (id: string, taskId: string, patch: HomePatchTask) => request<HomeTask>(`${projectPath(id)}/tasks/${encodeURIComponent(taskId)}`, 'PATCH', patch),
   createSession: (id: string, session: HomeCreateSession) => request<HomeCreatedSession>(`${projectPath(id)}/sessions`, 'POST', session),
-  discussion: (id: string, signal?: AbortSignal) => request<HomeDiscussion>(`${projectPath(id)}/discussion`, 'GET', undefined, signal),
-  // The POST response is unspecified. Read the persisted messages through GET
-  // after sending instead of coupling the UI to an invented response shape.
-  sendMessage: (id: string, message: string, executor: HomeExecutor) => request<unknown>(`${projectPath(id)}/discussion`, 'POST', { message, executor }),
+  discussion: (id: string, thread = 'main', signal?: AbortSignal) => request<HomeDiscussion>(`${projectPath(id)}/discussion?${new URLSearchParams({ thread })}`, 'GET', undefined, signal),
+  sendMessage: (id: string, message: string, executor: HomeExecutor, thread = 'main') => request<HomeSendResult>(`${projectPath(id)}/discussion`, 'POST', { message, executor, thread }),
+  retryMessage: (id: string, messageId: string) => request<unknown>(`${projectPath(id)}/discussion/${encodeURIComponent(messageId)}/retry`, 'POST'),
+  models: (signal?: AbortSignal) => request<HomeModels>('/api/home/models', 'GET', undefined, signal),
+  threads: (id: string, signal?: AbortSignal) => request<{ threads: HomeThread[] }>(`${projectPath(id)}/threads`, 'GET', undefined, signal),
+  createThread: (id: string, title?: string) => request<HomeThread>(`${projectPath(id)}/threads`, 'POST', title === undefined ? {} : { title }),
+  renameThread: (id: string, threadId: string, title: string) => request<unknown>(`${projectPath(id)}/threads/${encodeURIComponent(threadId)}`, 'PATCH', { title }),
+  deleteThread: (id: string, threadId: string) => request<unknown>(`${projectPath(id)}/threads/${encodeURIComponent(threadId)}`, 'DELETE'),
+  fields: (signal?: AbortSignal) => request<HomeFieldSettings>('/api/home/fields', 'GET', undefined, signal),
+  putFields: (settings: HomeFieldSettings) => request<unknown>('/api/home/fields', 'PUT', settings),
+  tasks: (all = false, signal?: AbortSignal) => request<{ tasks: HomeTaskRow[]; fields: HomeFields }>(`/api/home/tasks${all ? '?all=1' : ''}`, 'GET', undefined, signal),
+  patchMeta: (id: string, patch: HomePatchMeta) => request<unknown>(`${projectPath(id)}/meta`, 'PATCH', patch),
+  replyReport: (id: string, file: string, text: string, rev?: string) => request<unknown>(`${projectPath(id)}/reports/${encodeURIComponent(file)}/reply`, 'POST', { text, ...(rev === undefined ? {} : { rev }) }),
+  notifySettings: (signal?: AbortSignal) => request<HomeNotifySettings>('/api/home/notify-settings', 'GET', undefined, signal),
+  putNotifySettings: (settings: HomePatchNotify) => request<unknown>('/api/home/notify-settings', 'PUT', settings),
+  testNotification: () => request<{ ok: boolean; error?: string }>('/api/home/notify-settings/test', 'POST'),
   notifications: (signal?: AbortSignal) => request<HomeNotifications>('/api/home/notifications', 'GET', undefined, signal),
   executors: (signal?: AbortSignal) => request<HomeExecutorOption[]>('/api/workflow/executors', 'GET', undefined, signal),
 }

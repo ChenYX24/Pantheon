@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { getLang, setLang, t } from '../../i18n'
 import type { HomeTodo, HomeTodoKind } from '../../protocol/home'
+import { homeSelection, routeFor } from '../../routes'
 import { projectLink, relativeTime, selectionFromSearch, sortTodos, stageProgress, todoLabelKey, todoLink } from './helpers'
 
 const language = getLang()
@@ -58,7 +59,9 @@ describe('report relative times', () => {
 describe('home links', () => {
   it('round-trips project, task and report selection and rejects invalid IDs', () => {
     const selected = { projectId: 'pantheon', taskId: 'A2', reportFile: '汇报 & review.md' }
-    expect(selectionFromSearch(new URL(projectLink(selected), 'http://panel').search)).toEqual(selected)
+    const url = new URL(projectLink(selected), 'http://panel')
+    expect(routeFor(url.pathname)).toEqual({ kind: 'home', projectId: 'pantheon' })
+    expect(homeSelection('pantheon', url.search)).toMatchObject(selected)
     expect(selectionFromSearch('?project=pantheon')).toEqual({ projectId: 'pantheon' })
     expect(selectionFromSearch('?task=A2')).toBeNull()
     expect(selectionFromSearch('?project=../x')).toBeNull()
@@ -66,9 +69,9 @@ describe('home links', () => {
   })
   it('opens waiting sessions in the terminal and rollover tasks in their project', () => {
     expect(todoLink(todo('session_waiting'))).toBe('/?session=vp_123')
-    expect(todoLink(todo('session_rollover'))).toBe('/home?project=pantheon&task=A2')
+    expect(todoLink(todo('session_rollover'))).toBe('/home/p/pantheon?tab=tasks&task=A2')
     const question = todo('question')
     question.link = { projectId: 'pantheon', taskId: '', reportFile: 'question.md', sessionId: '' }
-    expect(todoLink(question)).toBe('/home?project=pantheon&report=question.md')
+    expect(todoLink(question)).toBe('/home/p/pantheon?tab=reports&report=question.md')
   })
 })

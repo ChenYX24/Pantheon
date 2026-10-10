@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { homeApi, type HomeTask } from '../../protocol/home'
 import { answerAsk, currentAsk } from '../ask'
-import { changeHomeTaskStatus } from './actions'
+import { changeHomeTaskFields, changeHomeTaskStatus } from './actions'
 
 const task: HomeTask = {
-  id: 'A2', title: 'Review the backend', status: 'awaiting_review', stage: 'A', primary: '', secondary: '',
+  priority: '', tags: [], owner: '', due: '', id: 'A2', title: 'Review the backend', status: 'awaiting_review', stage: 'A', primary: '', secondary: '',
   dependsOn: [], session: '', blockedReason: '', sessionStatus: 'ok', updated: '', handoffs: 0, body: '', rev: 'visible-revision', file: 'task.md',
 }
 afterEach(() => {
@@ -49,5 +49,26 @@ describe('explicit task status changes', () => {
     expect(patch).not.toHaveBeenCalled()
     await expect(changeHomeTaskStatus('pantheon', task, 'in_progress')).rejects.toThrow('stale')
     expect(patch).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+describe('task field suggestions', () => {
+  it('confirms terminal status even when it is one of several suggested fields', async () => {
+    const patch = vi.spyOn(homeApi, 'patchTask').mockResolvedValue({ ...task, status: 'done' })
+    const cancelled = changeHomeTaskFields('pantheon', task, { status: 'done', priority: 'P0', tags: ['review'] })
+    answerAsk(null)
+    expect(await cancelled).toBe(false)
+    expect(patch).not.toHaveBeenCalled()
+    const accepted = changeHomeTaskFields('pantheon', task, { status: 'done', priority: 'P0', tags: ['review'] })
+    answerAsk('')
+    expect(await accepted).toBe(true)
+    expect(patch).toHaveBeenCalledExactlyOnceWith('pantheon', 'A2', { rev: 'visible-revision', status: 'done', priority: 'P0', tags: ['review'] })
+  })
+  it('does not discard explicit blocker text when applying a multi-field suggestion', async () => {
+    const patch = vi.spyOn(homeApi, 'patchTask').mockResolvedValue({ ...task, status: 'blocked' })
+    expect(await changeHomeTaskFields('pantheon', task, { status: 'blocked', blockedReason: 'Needs review', owner: 'cyx' })).toBe(true)
+    expect(currentAsk()).toBeNull()
+    expect(patch).toHaveBeenCalledWith('pantheon', 'A2', { rev: 'visible-revision', status: 'blocked', blockedReason: 'Needs review', owner: 'cyx' })
   })
 })
