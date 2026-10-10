@@ -59,6 +59,13 @@ project('beta')
 write(join(harness, 'projects', 'beta', 'ACTIVE_CONTEXT.md'), '# beta\n\n- **目标**：Keep beta quiet\n')
 project('gamma', { status: 'archived' })
 write(join(harness, 'projects', 'broken', 'project.json'), '{not json')
+// A GPU board snapshot in the collector's own shape, one node fresh.
+const snapshot = join(root, 'gpu-snapshot.json')
+const stamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z')
+writeFileSync(snapshot, JSON.stringify({ schema_version: 1, collected_at: stamp, origin: 'fixture', nodes: [
+  { id: 'gpu-fixture', alias: 'gpu-fixture', group: 'atombit', label: 'Fixture GPU', reachability: 'connected', telemetry: 'healthy', last_success_at: stamp, last_metrics_at: stamp, identity: { hostname: 'private-host' },
+    gpus: [{ index: 0, name: 'A800', memory_total_mib: 81920, memory_used_mib: 10, utilization_pct: 0, mig_mode: 'Disabled', uuid: 'private-uuid' }] },
+  { id: 'gpu-down', alias: 'gpu-down', group: 'atombit', label: 'Down', reachability: 'timeout', telemetry: 'unknown', error_code: 'ssh_timeout' }] }))
 writeFileSync(join(cyxHome, 'local.json'), JSON.stringify({ version: 1, projects_root: root, paths: { 'cyx-agent-harness': harness, alpha: checkout } }))
 
 async function freePort() {
@@ -78,7 +85,7 @@ async function start(name) {
   const socket = `pantheon-home-check-${name}-${process.pid}`
   const server = spawn(binary, [
     'serve', '--development', '--addr', `127.0.0.1:${port}`, '--data-dir', data,
-    '--tmux-socket', socket, '--isolation', 'off', '--base-path', mount, '--cyx-home', cyxHome, '--agent-scope', 'off',
+    '--tmux-socket', socket, '--isolation', 'off', '--base-path', mount, '--cyx-home', cyxHome, '--agent-scope', 'off', '--gpu-board-snapshot', snapshot,
   ], { env: { ...process.env, PATH: `${fixtures}:${process.env.PATH}`, ANTHROPIC_API_KEY: 'fixture-only' }, stdio: ['ignore', 'pipe', 'pipe'] })
   let log = ''
   server.stdout.on('data', (chunk) => { log += chunk })
@@ -200,6 +207,36 @@ try {
   assert.ok(!settings.includes('fixture-not-real') && !settings.includes('fixture-secret'), 'settings never return the webhook or secret')
   assert.equal(JSON.parse(settings).webhookConfigured, true)
 
+  // B: resources are files, secrets are sealed and never come back.
+  response = await context.request.post(first.base + '/api/home/resources', { data: { id: 'llm-fixture', kind: 'api', title: 'Fixture LLM', provider: 'openai-compatible', baseUrl: 'https://llm.invalid/v1', env: ['FIXTURE_API_KEY'], projects: ['alpha'], check: 'provider', body: '## 使用方法\n\nexport 后直接调用。\n' } })
+  assert.equal(response.status(), 201, await response.text())
+  assert.ok(existsSync(join(harness, 'pantheon', 'resources', 'llm-fixture.md')))
+  assert.match(readFileSync(join(harness, 'pantheon', 'resources', 'README.md'), 'utf8'), /llm-fixture/)
+  const secretValue = 'sk-fixture-' + 'x'.repeat(24)
+  response = await context.request.put(first.base + '/api/home/resources/llm-fixture/secrets/FIXTURE_API_KEY', { data: { value: secretValue } })
+  assert.equal(response.status(), 200)
+  for (const path of ['/api/home/resources', '/api/home/resources/llm-fixture', '/api/home/projects/alpha/resources']) {
+    const text = await (await context.request.get(first.base + path)).text()
+    assert.ok(!text.includes(secretValue) && !text.includes('sk-fixture'), `${path} never returns the secret`)
+  }
+  assert.ok(!readFileSync(join(harness, 'pantheon', 'resources', 'llm-fixture.md'), 'utf8').includes(secretValue), 'secret never written to the Harness')
+  const res = await (await context.request.get(first.base + '/api/home/resources/llm-fixture')).json()
+  assert.ok(res.secrets.some((x) => x.name === 'FIXTURE_API_KEY' && x.configured))
+  const servers = await (await context.request.get(first.base + '/api/home/servers')).json()
+  assert.equal(servers.board.available, true)
+  const fixtureNode = servers.servers.find((x) => x.id === 'gpu-fixture')
+  assert.equal(fixtureNode.state, 'fresh')
+  assert.equal(fixtureNode.gpus[0].observation, 'low_usage')
+  assert.equal(servers.servers.find((x) => x.id === 'gpu-down').state, 'disconnected')
+  assert.ok(!JSON.stringify(servers).includes('private-'), 'server projection drops identity and uuid')
+  response = await context.request.post(first.base + '/api/home/resources', { data: { id: 'gpu-fixture', kind: 'server', title: 'Fixture GPU', gpuBoardId: 'gpu-fixture', check: 'none', body: '## 使用方法\n\nssh gpu-fixture\n' } })
+  assert.equal(response.status(), 201, await response.text())
+  const serverResource = await (await context.request.get(first.base + '/api/home/resources/gpu-fixture')).json()
+  assert.equal(serverResource.server?.state, 'fresh', 'server resource carries live board status')
+  // Import only accepts concrete Host aliases from the SSH config.
+  response = await context.request.post(first.base + '/api/home/resources/import/ssh', { data: { aliases: ['not-in-ssh-config-fixture'] } })
+  assert.equal(response.status(), 400)
+
   // Desktop and phone render the same capabilities.
   const page = await context.newPage()
   const errors = []
@@ -215,6 +252,13 @@ try {
     await page.locator('text=Task A2 >> visible=true').first().waitFor()
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, `table view fits at ${width}`)
     await page.screenshot({ path: join(shots, `pantheon-table-${width}.png`), fullPage: true })
+    await page.goto(first.base + '/home/resources')
+    await page.getByTestId('home-resources-page').waitFor()
+    await page.locator('text=Fixture LLM >> visible=true').first().waitFor()
+    await page.locator('text=Fixture GPU >> visible=true').first().waitFor()
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, `resources page fits at ${width}`)
+    assert.ok(!(await page.content()).includes(secretValue), 'resources page never renders the secret')
+    await page.screenshot({ path: join(shots, `pantheon-resources-${width}.png`), fullPage: true })
     // The legacy side-sheet link becomes the routed project page.
     await page.goto(first.base + '/home?project=alpha')
     await page.waitForURL((url) => url.pathname.endsWith('/home/p/alpha'))
@@ -250,7 +294,7 @@ try {
   assert.equal(shape(again), shape(now), 'empty database rebuilds the identical home view')
 
   assert.deepEqual(errors, [])
-  console.log(`=== ${mount ? 'basepath ' : ''}home check: 0 FAIL, 0 WARN; file index, order, warnings, task write/409, models, async chat, fields, report reply, notify settings, cards/table/project page at desktop/360px, dry_run baseline and DB rebuild checked ===`)
+  console.log(`=== ${mount ? 'basepath ' : ''}home check: 0 FAIL, 0 WARN; file index, order, warnings, task write/409, models, async chat, fields, report reply, notify settings, resources (sealed secrets, GPU projection, ssh import), cards/table/resources/project page at desktop/360px, dry_run baseline and DB rebuild checked ===`)
 } finally {
   await browser?.close()
   for (const { server, socket } of servers) {
