@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { HOME_RESOURCE_KINDS } from '../../protocol/home'
-import { boardStale, emptySecretDraft, filterResources, gpuMemoryPercent, resourceHref, resourceNames, resourceSecrets, secretEdits, secretValueFits, selectedResources, serverChip, serverGroups, toggleResourceScope } from './resources'
+import { boardStale, emptySecretDraft, filterResources, gpuMemoryPercent, resourceChanges, resourceHref, resourceNames, resourceSecrets, secretEdits, secretValueFits, selectedResources, serverChip, serverGroups, toggleResourceScope } from './resources'
+import { safeBody, safeText } from '../text'
 import { gpuFixture, resourceFixture, serverFixture } from './resourceFixtures'
 
 describe('resource filters', () => {
@@ -71,6 +72,13 @@ describe('secret dialog state', () => {
 })
 
 describe('resource scope and selection', () => {
+  it('patches only edited fields, without normalizing an untouched document on metadata saves', () => {
+    const resource = { ...resourceFixture, title: 'Title\u202E', body: '## Usage\r\n\r\nText\u202E\r\n' }
+    const displayed = { kind: resource.kind, title: safeText(resource.title), body: safeBody(resource.body), tags: [...resource.tags], projects: [...resource.projects] }
+    expect(resourceChanges(resource, displayed)).toEqual({})
+    expect(resourceChanges(resource, { ...displayed, title: 'Renamed' })).toEqual({ title: 'Renamed' })
+    expect(resourceChanges(resource, { ...displayed, body: 'New instructions', projects: [] })).toEqual({ body: 'New instructions', projects: [] })
+  })
   it('keeps wildcard scope exclusive and deselection explicit', () => {
     expect(toggleResourceScope(['pantheon', 'lab'], '*')).toEqual(['*'])
     expect(toggleResourceScope(['*'], '*')).toEqual([])

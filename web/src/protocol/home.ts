@@ -196,8 +196,8 @@ export interface HomePatchTask {
   secondary?: string
   dependsOn?: string[]
 }
-export type HomePatchMeta = Partial<HomeProjectMeta> & { rev: string }
-export interface HomeCreateSession { profileId?: string; name?: string }
+export type HomePatchMeta = Partial<HomeProjectMeta> & { rev: string; resources?: string[] }
+export interface HomeCreateSession { profileId?: string; name?: string; resources?: string[] }
 export interface HomeCreatedSession { sessionId: string; panelProjectId: string }
 export interface HomeExecutor { harness: 'claude' | 'codex'; model: string }
 export interface HomeExecutorOption extends HomeExecutor { installed: boolean; source: string }
@@ -210,6 +210,7 @@ export type HomeSuggestion =
   | { type: 'set_fields'; taskId: string; fields: Omit<HomePatchTask, 'rev'> }
   | { type: 'set_project'; fields: Partial<HomeProjectMeta> }
   | { type: 'reply_report'; file: string; text: string }
+  | { type: 'use_resources'; resources: string[] }
 export interface HomeMessage {
   id: string
   role: 'user' | 'assistant'

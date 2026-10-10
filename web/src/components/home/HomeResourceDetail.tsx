@@ -12,7 +12,7 @@ import { HomeResourceCheckResult, HomeResourceURL, HomeSecretStatus } from './Ho
 import { HomeResourceEditor } from './HomeResourceEditor'
 import { HomeResourceSecrets } from './HomeResourceSecrets'
 import { HomeBoardLink, HomeServerMetrics } from './HomeResourceStatus'
-import { resourceSecrets } from './resources'
+import { resourceChanges, resourceSecrets } from './resources'
 import { useHomeMutation } from './useHomeMutation'
 import { useHomeResource } from './useHomeResource'
 
@@ -82,7 +82,10 @@ export function HomeResourceDetail({ id, projects, aliases, boardURL, onChanged,
         })) onGo(HOME_RESOURCES_PATH)
       }}><Trash2 size={14} />{t('home.res.delete')}</button>
     </>}
-    {editing && <HomeResourceEditor resource={editing} projects={projects} aliases={aliases} busy={busy} onClose={() => setEditing(null)} onSave={(fields) => run(() => homeApi.patchResource(editing.id, { ...fields, rev: editing.rev }))} />}
+    {editing && <HomeResourceEditor resource={editing} projects={projects} aliases={aliases} busy={busy} onClose={() => setEditing(null)} onSave={(fields) => {
+      const patch = resourceChanges(editing, fields)
+      return Object.keys(patch).length ? run(() => homeApi.patchResource(editing.id, { ...patch, rev: editing.rev })) : Promise.resolve(true)
+    }} />}
     {secrets && <HomeResourceSecrets resource={secrets} onChanged={changed} onClose={() => setSecrets(null)} />}
   </div>
 }

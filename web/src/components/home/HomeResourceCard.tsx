@@ -26,10 +26,11 @@ export function HomeResourceURL({ url }: { url: string }) {
   return href ? <a className="break-words text-vp-sm text-accent underline" href={href} target="_blank" rel="noopener noreferrer">{safeText(url)}</a> : <span className="break-words text-vp-sm text-ink-2">{safeText(url)}</span>
 }
 
-export function HomeResourceCard({ resource, boardURL, busy, onCheck, onSecrets, onNavigate }: {
+export function HomeResourceCard({ resource, boardURL, busy, checking, onCheck, onSecrets, onNavigate }: {
   resource: HomeResource
   boardURL: string
   busy: boolean
+  checking?: boolean
   onCheck: (resource: HomeResource) => void
   onSecrets: (resource: HomeResource) => void
   onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void
@@ -50,7 +51,7 @@ export function HomeResourceCard({ resource, boardURL, busy, onCheck, onSecrets,
     {kind === 'api' && resource.lastCheck && <p className="text-vp-xs text-ink-2">{typeof count === 'number' ? t('home.res.modelCount', { count }) : t('home.res.modelCountUnknown')}</p>}
     <div className="mt-auto flex flex-wrap gap-2">
       {kind === 'api' && <button type="button" className="vp-control home-wrap-control" onClick={() => onSecrets(resource)}><KeyRound size={14} className="shrink-0" />{t('home.res.setSecrets')}</button>}
-      {resource.check !== 'none' && <button type="button" className="vp-control home-wrap-control" disabled={busy} onClick={() => onCheck(resource)}><Play size={14} className="shrink-0" />{busy ? t('home.res.checking') : t(resource.check === 'ssh' ? 'home.res.checkSSH' : 'home.res.checkNow')}</button>}
+      {resource.check !== 'none' && <button type="button" className="vp-control home-wrap-control" disabled={busy} onClick={() => onCheck(resource)}><Play size={14} className="shrink-0" />{checking ? t('home.res.checking') : t(resource.check === 'ssh' ? 'home.res.checkSSH' : 'home.res.checkNow')}</button>}
       {kind === 'server' && <HomeBoardLink url={boardURL} />}
     </div>
   </article>

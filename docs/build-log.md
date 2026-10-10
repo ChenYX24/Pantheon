@@ -24705,3 +24705,38 @@ and ESLint were killed with exit 137. Read-only cgroup inspection found the
 shared session pool near its 1.72 GiB limit with OOM kills recorded; increasing
 the compiler heap would not help. Further compiler retries stopped pending
 headroom. No Go, embedded bundle, live service or deployment is changed here.
+
+Project info now links available resources and edits session defaults through
+the metadata revision. The new-session dialog starts with allowed defaults and
+sends an explicit empty array when the person deselects all of them. A manager's
+`use_resources` chip displays its ids and creates a plain-shell session only on
+click, matching the existing session suggestion. Metadata edits send only changed
+fields: opening a sanitized Markdown preview cannot normalize an untouched
+document when the person changes a title or scope.
+
+Mutation fields use the API's camelCase spelling, consistently with earlier home
+endpoints. Profile import does not assume an undocumented response object; it
+refreshes the resource list after success. Orphan cleanup uses the existing
+per-name secret DELETE route. These choices do not require a contract change.
+
+Final validation passed 782 tests in 86 files, including all i18n, chrome and
+dialog rules. Focused runs passed 42 and then 52 tests. The resource component
+graph passed strict TypeScript at 192 MiB; a targeted compiler helper checked the
+three modified home entrypoints and all new test files with their real imports
+and the application's strict options, without rechecking every unchanged file.
+The full `tsc -b` could not fit the shared pool. The scoped ESLint pass succeeded
+at 128 MiB with JIT disabled. Vite requires WebAssembly, so the successful bundle
+build keeps JIT enabled and writes only to an ignored cache inside this worktree.
+It reports a large-chunk advisory. No browser check was run on the
+shared host; backend integration and 360px/theme checks remain for the Conductor.
+
+Final validation commands, from `web/`, run sequentially:
+
+```sh
+NODE_OPTIONS=--max-old-space-size=128 nice -n 19 npx vitest run --pool=forks --maxWorkers=1
+NODE_OPTIONS='--max-old-space-size=192 --max-semi-space-size=1 --jitless' nice -n 19 node node_modules/typescript/bin/tsc -p tsconfig.resources.json
+NODE_OPTIONS='--max-old-space-size=192 --max-semi-space-size=1 --jitless' nice -n 19 node scripts/typecheck-files.mjs src/components/HomePage.tsx src/components/home/HomeProjectPage.tsx src/components/home/HomeChat.tsx
+NODE_OPTIONS='--max-old-space-size=192 --max-semi-space-size=1 --jitless' nice -n 19 node scripts/typecheck-files.mjs src/components/home/resources.test.ts src/components/home/resources.render.test.ts src/components/home/resourceFixtures.ts src/protocol/home.resources.test.ts src/routes.resources.test.ts
+NODE_OPTIONS='--max-old-space-size=128 --max-semi-space-size=1 --jitless' nice -n 19 node node_modules/eslint/bin/eslint.js src/components/HomePage.tsx src/components/home/HomeResource*.tsx src/components/home/HomeProjectResources.tsx src/components/home/HomeNewSession.tsx src/components/home/HomeSuggestionAction.tsx src/components/home/HomeChat.tsx src/components/home/HomeSessions.tsx src/components/home/HomeProjectPage.tsx src/components/home/resources*.ts src/components/home/resourceFixtures.ts src/protocol/home*.ts src/routes*.ts src/i18n.ts
+NODE_OPTIONS='--max-old-space-size=128 --max-semi-space-size=1' RAYON_NUM_THREADS=1 nice -n 19 node node_modules/vite/bin/vite.js build --outDir node_modules/.cache/stage-b-build
+```

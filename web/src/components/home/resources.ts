@@ -1,5 +1,6 @@
-import type { HomeGPU, HomeResource, HomeResourceKind, HomeResourceSecret, HomeServerBoard, HomeServerState, HomeServerStatus } from '../../protocol/home'
+import type { HomeGPU, HomeResource, HomeResourceFields, HomeResourceKind, HomeResourceSecret, HomeServerBoard, HomeServerState, HomeServerStatus } from '../../protocol/home'
 import type { HomeFieldColor } from '../../protocol/home'
+import { safeBody, safeText } from '../text'
 
 export type ResourceFilter = HomeResourceKind | 'all'
 
@@ -45,6 +46,15 @@ export function gpuMemoryPercent(gpu: HomeGPU): number | null {
 
 export function resourceNames(value: string): string[] {
   return [...new Set(value.split(/[,\n，]/).map((item) => item.trim()).filter(Boolean))]
+}
+
+export function resourceChanges(resource: HomeResource, fields: Partial<HomeResourceFields>): Partial<HomeResourceFields> {
+  return Object.fromEntries(Object.entries(fields).filter(([key, value]) => {
+    // Sanitization is for display. Saving a title must not rewrite an
+    // untouched document's line endings or invisible characters.
+    const before = key === 'body' ? safeBody(resource.body) : key === 'title' ? safeText(resource.title) : resource[key as keyof HomeResourceFields]
+    return JSON.stringify(before) !== JSON.stringify(value)
+  }))
 }
 
 export function resourceSecrets(resource: Pick<HomeResource, 'env' | 'secrets'>): HomeResourceSecret[] {

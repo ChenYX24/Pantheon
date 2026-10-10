@@ -7,6 +7,10 @@ import { HomeCheckHistory } from './HomeResourceDetail'
 import { HomeResourceScope } from './HomeResourceEditor'
 import { HomeSecretFields } from './HomeResourceSecrets'
 import { HomeServerChip, HomeServerMetrics, HomeServerOverview } from './HomeResourceStatus'
+import { HomeProjectResourceSettings, HomeResourceChoices } from './HomeProjectResources'
+import { HomeSessions } from './HomeSessions'
+import { HomeSuggestionAction } from './HomeSuggestionAction'
+import { projectFixture } from './fixtures'
 import { resourceDetailFixture, resourceFixture, serverFixture } from './resourceFixtures'
 import { emptySecretDraft } from './resources'
 
@@ -75,5 +79,49 @@ describe('resource content', () => {
     expect(html).toContain('unlisted')
     expect(html).toContain('pantheon')
     expect(html).toContain(t('home.res.allProjects'))
+  })
+
+  it('links project resource chips to details and exposes default editing', () => {
+    const onSave = vi.fn()
+    const html = renderToStaticMarkup(createElement(HomeProjectResourceSettings, {
+      data: { resources: [resourceFixture], defaultResources: ['api-main'] }, error: '', busy: false,
+      onSave, onRetry: vi.fn(), onNavigate: vi.fn(),
+    }))
+    expect(html).toContain('/home/resources/api-main')
+    expect(html).toContain('href="/home/resources"')
+    expect(html).toContain(t('home.res.defaults'))
+    expect(html).toContain(resourceFixture.title)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('renders session resource checkboxes from allowed defaults and retains explicit deselection', () => {
+    const props = { resources: [resourceFixture, { ...resourceFixture, id: 'other', title: 'Other' }], disabled: false, onChange: vi.fn() }
+    const html = renderToStaticMarkup(createElement(HomeResourceChoices, { ...props, value: ['api-main'] }))
+    expect(html.match(/type="checkbox"/g)).toHaveLength(2)
+    expect(html.match(/checked=""/g)).toHaveLength(1)
+    expect(renderToStaticMarkup(createElement(HomeResourceChoices, { ...props, value: [] }))).not.toContain('checked=""')
+  })
+
+  it('waits for the allowed-resource list before offering to create a session', () => {
+    const onCreate = vi.fn()
+    const html = renderToStaticMarkup(createElement(HomeSessions, { project: projectFixture, resources: null, resourceError: 'Unavailable', busy: false, onCreate, onRetry: vi.fn() }))
+    expect(html).toContain('disabled=""')
+    expect(html).toContain('role="alert"')
+    expect(html).toContain(t('home.retry'))
+    expect(onCreate).not.toHaveBeenCalled()
+  })
+
+  it.each(['zh', 'en'] as const)('renders resource suggestions as explicit action chips in %s', (lang) => {
+    setLang(lang)
+    const onApply = vi.fn()
+    const suggestion = { type: 'use_resources' as const, resources: ['api-main', 'gpu\u202E'] }
+    const html = renderToStaticMarkup(createElement(HomeSuggestionAction, { suggestion, applied: false, disabled: false, onApply }))
+    expect(html).toContain(t('home.res.useSuggestion'))
+    expect(html).toContain('api-main')
+    expect(html).toContain('gpu�')
+    expect(onApply).not.toHaveBeenCalled()
+    const applied = renderToStaticMarkup(createElement(HomeSuggestionAction, { suggestion, applied: true, disabled: false, onApply }))
+    expect(applied).toContain('disabled=""')
+    expect(applied).toContain(t('home.applied'))
   })
 })

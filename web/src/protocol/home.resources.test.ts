@@ -67,4 +67,17 @@ describe('Stage B resource API', () => {
     await expect(pending).rejects.toMatchObject({ status: 409, rev: 'current' })
     expect(fetch).toHaveBeenCalledTimes(1)
   })
+  it('sends project defaults and preserves omitted versus explicitly empty session selections', async () => {
+    const fetch = mockAPI({})
+    await homeApi.patchMeta('pantheon', { rev: 'seen-meta', resources: ['api-main', 'gpu-1'] })
+    await homeApi.createSession('pantheon', {})
+    await homeApi.createSession('pantheon', { resources: [] })
+    await homeApi.createSession('pantheon', { profileId: 'builtin:codex', name: 'Work', resources: ['api-main', 'gpu-1'] })
+    expect(fetch.mock.calls.map(([url, init]) => [url, init.method, JSON.parse(init.body)])).toEqual([
+      ['/dev/api/home/projects/pantheon/meta', 'PATCH', { rev: 'seen-meta', resources: ['api-main', 'gpu-1'] }],
+      ['/dev/api/home/projects/pantheon/sessions', 'POST', {}],
+      ['/dev/api/home/projects/pantheon/sessions', 'POST', { resources: [] }],
+      ['/dev/api/home/projects/pantheon/sessions', 'POST', { profileId: 'builtin:codex', name: 'Work', resources: ['api-main', 'gpu-1'] }],
+    ])
+  })
 })

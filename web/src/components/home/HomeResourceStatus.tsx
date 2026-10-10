@@ -11,7 +11,7 @@ export function HomeServerChip({ state }: { state: HomeServerState }) {
   const chip = serverChip(state)
   const color = optionColor(chip.color)
   const Icon = { check: CheckCircle2, clock: Clock, disconnected: Unplug, unknown: CircleHelp }[chip.icon]
-  return <span className="inline-flex max-w-full items-center gap-1 rounded-vp border px-2 py-0.5 text-vp-xs" style={{ borderColor: color, color }}><Icon size={13} className="shrink-0" />{t(`home.res.state.${state}`)}</span>
+  return <span className="inline-flex max-w-full items-center gap-1 rounded-vp border px-2 py-0.5 text-vp-xs" style={{ borderColor: color, background: `color-mix(in srgb, ${color} 10%, transparent)` }}><Icon size={13} className="shrink-0" style={{ color }} />{t(`home.res.state.${state}`)}</span>
 }
 
 export function HomeBoardLink({ url }: { url: string }) {
