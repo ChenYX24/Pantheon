@@ -119,7 +119,7 @@ func RunAgent(ctx context.Context, m store.ModelAssignment, dir, prompt string, 
 			mode = "acceptEdits"
 			tools = "Read,Write,Edit,Glob,Grep"
 		}
-		args = []string{"-p", "--output-format", "json", "--model", m.Model, "--permission-mode", mode, "--permission-prompts", "none", "--restricted", "--strict-mcp-config", "--tools", tools, "--settings", `{"hooks":{}}`}
+		args = []string{"-p", "--output-format", "json", "--model", m.Model, "--permission-mode", mode, "--permission-prompts", "none", "--restricted", "--strict-mcp-config", "--tools", tools, "--settings", claudeRunSettings()}
 	default:
 		return Answer{}, errors.New("unsupported executor")
 	}
@@ -321,6 +321,25 @@ func claudeProviderEnv(environment []string) []string {
 		}
 	}
 	return environment
+}
+
+// --restricted ignores the user's settings file, which is where a machine that
+// authenticates through apiKeyHelper keeps it; only --settings still applies.
+// Carry that one key across so restricted runs can sign in, and nothing else:
+// hooks stay empty and no other user setting is imported.
+func claudeRunSettings() string {
+	settings := map[string]any{"hooks": map[string]any{}}
+	home, _ := os.UserHomeDir()
+	if raw, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json")); err == nil {
+		var user struct {
+			APIKeyHelper string `json:"apiKeyHelper"`
+		}
+		if json.Unmarshal(raw, &user) == nil && user.APIKeyHelper != "" {
+			settings["apiKeyHelper"] = user.APIKeyHelper
+		}
+	}
+	out, _ := json.Marshal(settings)
+	return string(out)
 }
 
 // Match the server key, not a nested env/headers table. Quoted keys may

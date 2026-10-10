@@ -113,6 +113,23 @@ func TestRestrictedClaudeKeepsProviderConnectionWithoutHooks(t *testing.T) {
 	}
 }
 
+func TestRestrictedClaudeCarriesOnlyTheKeyHelper(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got := claudeRunSettings(); got != `{"hooks":{}}` {
+		t.Fatalf("without user settings: %s", got)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(`{"apiKeyHelper":"/fixture/key-helper","hooks":{"PreToolUse":["do-not-run"]},"permissions":{"allow":["Bash"]}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := claudeRunSettings(); got != `{"apiKeyHelper":"/fixture/key-helper","hooks":{}}` {
+		t.Fatalf("restricted settings must carry the key helper and nothing else: %s", got)
+	}
+}
+
 func TestMCPNamesDoNotTurnNestedCredentialsIntoServers(t *testing.T) {
 	names := configuredMCPNames([]byte("[mcp_servers.first]\n[mcp_servers.first.env]\nTOKEN='private'\n[mcp_servers.\"name.with.dots\"]\n[mcp_servers.\"name.with.dots\".headers]\n"))
 	if !reflect.DeepEqual(names, []string{"first", "name.with.dots"}) {
