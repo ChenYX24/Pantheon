@@ -24681,3 +24681,66 @@ webhook test is interpreted as independent of automatic mode. A webhook joins
 paired Feishu peers as one recipient, preserving baseline and dry-run dedup.
 All new routes have exact development allow-list methods and API documentation.
 The targeted home/API-route suite passes without a panel, tmux or browser check.
+
+## 2026-10-10 — Stage B: resource files and sealed runtime records
+
+Resource metadata and usage documentation now use the home index's existing
+frontmatter parser, revision comparison and atomic writes. Patches retain
+unrelated bytes, and create/update/delete regenerate the resource README index.
+Project metadata can keep default resource ids without losing them on other
+metadata edits. Non-Latin titles use a stable hash-based filename when no ASCII
+slug remains.
+
+An appended store migration adds sealed resource secrets, usage receipts and
+the latest twenty checks per resource. Listing secret metadata never selects
+ciphertext. Reading secrets for use records the receipt in the same transaction,
+before decryption or execution; failed attempts therefore remain auditable.
+Deleting resource runtime data keeps these historical receipts. Focused home
+and resource-store tests cover revisions, byte preservation, path boundaries,
+README regeneration, sealing context, retention and reopening the database.
+
+Stage B server discovery reads concrete SSH Host names, including bounded Include
+expansion, without invoking SSH or evaluating Match exec. The GPU snapshot reader
+copies only the contract's public fields, expires metrics after 180 seconds and
+drops low-usage observations when a server is no longer fresh. Fixed-clock tests
+cover freshness boundaries and the removal of identity, UUID, address, user and
+stderr fields. Snapshot path and optional board URL have flags and environment
+overrides; missing snapshots remain unavailable and SSH aliases remain visible.
+
+The board's own `public_snapshot` implementation is not present in this worktree,
+and the worker is prohibited from reading the separate board repository. The
+current input assumption is a `nodes` array with a collection timestamp, optional
+version 1, and snake-case or camel-case public fields. It preserves the board's
+reported GPU observations rather than inventing utilization thresholds. Exact
+schema and state-policy parity still require a board-owned fixture at integration.
+
+The authenticated home API now exposes resource CRUD, metadata-only secret
+views, orphan cleanup, checks, SSH/profile imports and project-scoped resources.
+Checks run only on request. HTTP redirects are never followed; provider error
+excerpts redact raw, JSON-quoted and URL-escaped keys before clipping, including
+overlapping keys. Check I/O releases the write lock and revalidates the resource
+before saving, so a slow provider does not hold editing hostage or resurrect a
+deleted resource's history. Tests use local HTTP servers and fake SSH/tmux binaries.
+
+Home sessions resolve their explicit selection or project defaults before
+creation, refuse forbidden resources before reading any secrets, and inject
+configured values with tmux's existing environment mechanism. Later selected
+resources win duplicate variable names; account and panel variables stay last.
+Receipts name the allocated session id, including a failed launch. Resource
+launch errors are deliberately generic because the tmux wrapper includes `-e`
+arguments in its errors. Prompts receive only allowed resource metadata, bounded
+usage docs and fresh GPU summaries; `use_resources` remains a suggestion for the
+user to accept.
+
+Profile import exposed a pre-existing lookup bug: saved edits of built-ins lost
+to the built-in catalogue before the stored row was read. The row now wins, with
+the catalogue as fallback, and focused store tests pin both cases. The API route
+documentation test now uses the existing in-process helper because it only walks
+the router and never needed a real tmux server.
+
+The focused home, config, resource/profile store and required home/API-documentation
+suites pass. The first HTTP-package compile was killed under the shared machine's
+memory pressure; adding `GOGC=20` to the prescribed single-worker, nice-19 command
+completed it. An initial fake-tmux argument offset was corrected after the session
+test caught it. No browser checks, frontend builds, deployment or live service
+operations were performed.

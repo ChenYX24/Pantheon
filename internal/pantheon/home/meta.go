@@ -8,26 +8,28 @@ import (
 )
 
 type ProjectMeta struct {
-	Labels   []string `json:"labels"`
-	Priority string   `json:"priority"`
-	Owner    string   `json:"owner"`
-	Phase    string   `json:"phase"`
-	Pinned   bool     `json:"pinned"`
+	Resources []string `json:"resources"`
+	Labels    []string `json:"labels"`
+	Priority  string   `json:"priority"`
+	Owner     string   `json:"owner"`
+	Phase     string   `json:"phase"`
+	Pinned    bool     `json:"pinned"`
 }
 
 type PatchMeta struct {
-	Rev      string    `json:"rev"`
-	Labels   *[]string `json:"labels"`
-	Priority *string   `json:"priority"`
-	Owner    *string   `json:"owner"`
-	Phase    *string   `json:"phase"`
-	Pinned   *bool     `json:"pinned"`
+	Resources *[]string `json:"resources"`
+	Rev       string    `json:"rev"`
+	Labels    *[]string `json:"labels"`
+	Priority  *string   `json:"priority"`
+	Owner     *string   `json:"owner"`
+	Phase     *string   `json:"phase"`
+	Pinned    *bool     `json:"pinned"`
 }
 
 func (i *Index) PatchMeta(cyxHome, project string, req PatchMeta) (ProjectMeta, string, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	meta := ProjectMeta{Labels: []string{}}
+	meta := ProjectMeta{Labels: []string{}, Resources: []string{}}
 	f, base, err := i.writableProject(cyxHome, project)
 	if err != nil {
 		return meta, "", err
@@ -53,6 +55,20 @@ func (i *Index) PatchMeta(cyxHome, project string, req PatchMeta) (ProjectMeta, 
 			return meta, "", err
 		}
 		meta.Labels = *req.Labels
+	}
+	if req.Resources != nil {
+		if len(*req.Resources) > 200 {
+			return meta, "", errors.New("too many resources")
+		}
+		for _, id := range *req.Resources {
+			if !ValidResourceID(id) {
+				return meta, "", errors.New("invalid resource id")
+			}
+		}
+		meta.Resources = *req.Resources
+	}
+	if meta.Resources == nil {
+		meta.Resources = []string{}
 	}
 	if meta.Labels == nil {
 		meta.Labels = []string{}

@@ -50,6 +50,8 @@ type Config struct {
 	AgentScope          string
 	HomeNotify          string
 	HomePublicURL       string
+	GPUBoardSnapshot    string
+	GPUBoardURL         string
 
 	// DataDir holds the database, the generated tmux config and ACME state.
 	DataDir string
@@ -164,14 +166,15 @@ func hookSessionVar(key string) bool {
 func Default() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
-		CyxHome:    filepath.Join(home, ".cyx"),
-		HomeNotify: "off",
-		AgentScope: "auto",
-		DataDir:    defaultDataDir(),
-		Addr:       fmt.Sprintf(":%d", DefaultPort),
-		TLSMode:    TLSOff,
-		TmuxSocket: "vibepanel",
-		Isolation:  "auto",
+		CyxHome:          filepath.Join(home, ".cyx"),
+		GPUBoardSnapshot: filepath.Join(home, "projects/atombit-gpu-board/runtime/snapshot.json"),
+		HomeNotify:       "off",
+		AgentScope:       "auto",
+		DataDir:          defaultDataDir(),
+		Addr:             fmt.Sprintf(":%d", DefaultPort),
+		TLSMode:          TLSOff,
+		TmuxSocket:       "vibepanel",
+		Isolation:        "auto",
 	}
 }
 
@@ -219,6 +222,8 @@ func (c *Config) envOverlay() {
 	str(&c.AgentScope, "VIBEPANEL_AGENT_SCOPE")
 	str(&c.HomeNotify, "VIBEPANEL_HOME_NOTIFY")
 	str(&c.HomePublicURL, "VIBEPANEL_HOME_PUBLIC_URL")
+	str(&c.GPUBoardSnapshot, "VIBEPANEL_GPU_BOARD_SNAPSHOT")
+	str(&c.GPUBoardURL, "VIBEPANEL_GPU_BOARD_URL")
 	str(&c.CertFile, "VIBEPANEL_CERT_FILE", "VIBEPANEL_TLS_CERT")
 	str(&c.KeyFile, "VIBEPANEL_KEY_FILE", "VIBEPANEL_TLS_KEY")
 	str(&c.ACMEEmail, "VIBEPANEL_ACME_EMAIL")

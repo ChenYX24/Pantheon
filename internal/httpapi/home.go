@@ -18,6 +18,7 @@ import (
 )
 
 func (s *Server) registerHomeRoutes(r chi.Router) {
+	s.registerHomeResourceRoutes(r)
 	r.Get("/home", s.handleHome)
 	r.Get("/home/models", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"harnesses": parthenon.Models()})
@@ -53,6 +54,9 @@ func homePlanningRoute(method, path string) bool {
 	if !strings.HasPrefix(path, "/api/") {
 		return false
 	}
+	if homeResourceRoute(method, path) {
+		return true
+	}
 	if method == http.MethodGet && (path == "/api/home" || path == "/api/home/notifications" || path == "/api/home/models" || path == "/api/home/fields" || path == "/api/home/tasks" || path == "/api/home/notify-settings") {
 		return true
 	}
@@ -70,6 +74,9 @@ func homePlanningRoute(method, path string) bool {
 		return method == http.MethodGet
 	}
 	if len(parts) == 4 {
+		if parts[3] == "resources" {
+			return method == http.MethodGet
+		}
 		if parts[3] == "meta" {
 			return method == http.MethodPatch
 		}
@@ -195,8 +202,9 @@ func (s *Server) handleHomePatchTask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHomeSession(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ProfileID string `json:"profileId"`
-		Name      string `json:"name"`
+		ProfileID string    `json:"profileId"`
+		Name      string    `json:"name"`
+		Resources *[]string `json:"resources"`
 	}
 	if !decode(w, r, &req) {
 		return
@@ -209,8 +217,25 @@ func (s *Server) handleHomeSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "the project checkout directory is missing")
 		return
 	}
+	s.homeResources.mu.Lock()
+	defer s.homeResources.mu.Unlock()
+	ids := detail.Project.Meta.Resources
+	if req.Resources != nil {
+		ids = *req.Resources
+	}
+	resources, err := s.homeSessionResources(detail.Project.ID, ids)
+	if errors.Is(err, errHomeResourceForbidden) {
+		writeErr(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if err != nil {
+		homeError(w, err)
+		return
+	}
 	create := func(p store.Project, _ int) {
-		s.createSession(w, r, createSessionRequest{ProjectID: p.ID, LaunchProfileID: req.ProfileID, Title: req.Name}, func(row store.Session) {
+		s.createSession(w, r, createSessionRequest{ProjectID: p.ID, LaunchProfileID: req.ProfileID, Title: req.Name, resourceEnv: func(ctx context.Context, sid string) ([]string, error) {
+			return s.homeSessionEnv(ctx, resources, detail.Project.ID, sid)
+		}}, func(row store.Session) {
 			writeJSON(w, http.StatusCreated, map[string]string{"sessionId": row.ID, "panelProjectId": p.ID})
 		})
 	}
@@ -227,14 +252,15 @@ func (s *Server) handleHomeSession(w http.ResponseWriter, r *http.Request) {
 }
 
 type homeSuggestion struct {
-	Type   string                     `json:"type"`
-	Task   *home.CreateTask           `json:"task,omitempty"`
-	TaskID string                     `json:"taskId,omitempty"`
-	Status string                     `json:"status,omitempty"`
-	Name   string                     `json:"name,omitempty"`
-	Fields map[string]json.RawMessage `json:"fields,omitempty"`
-	File   string                     `json:"file,omitempty"`
-	Text   string                     `json:"text,omitempty"`
+	Resources []string                   `json:"resources,omitempty"`
+	Type      string                     `json:"type"`
+	Task      *home.CreateTask           `json:"task,omitempty"`
+	TaskID    string                     `json:"taskId,omitempty"`
+	Status    string                     `json:"status,omitempty"`
+	Name      string                     `json:"name,omitempty"`
+	Fields    map[string]json.RawMessage `json:"fields,omitempty"`
+	File      string                     `json:"file,omitempty"`
+	Text      string                     `json:"text,omitempty"`
 }
 
 type homeSuggestedModel struct {
@@ -284,6 +310,14 @@ func parseHomeReply(text string) homeReply {
 			}
 		case "create_session":
 			valid = append(valid, suggestion)
+		case "use_resources":
+			ok := len(suggestion.Resources) > 0 && len(suggestion.Resources) <= 200
+			for _, id := range suggestion.Resources {
+				ok = ok && home.ValidResourceID(id)
+			}
+			if ok {
+				valid = append(valid, suggestion)
+			}
 		case "set_fields", "set_project":
 			if (suggestion.Type == "set_project" || suggestion.TaskID != "") && validHomeSuggestionFields(suggestion) {
 				valid = append(valid, suggestion)

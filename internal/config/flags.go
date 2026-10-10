@@ -66,6 +66,8 @@ func Load(args []string, out io.Writer) (Config, error) {
 	fs.StringVar(&c.AgentScope, "agent-scope", c.AgentScope, "agent resource scope: auto | off")
 	fs.StringVar(&c.HomeNotify, "home-notify", c.HomeNotify, "home notifications: off | dry_run | send (default dry_run in development)")
 	fs.StringVar(&c.HomePublicURL, "home-public-url", c.HomePublicURL, "public URL for home notification links; empty uses relative paths")
+	fs.StringVar(&c.GPUBoardSnapshot, "gpu-board-snapshot", c.GPUBoardSnapshot, "GPU board snapshot JSON path")
+	fs.StringVar(&c.GPUBoardURL, "gpu-board-url", c.GPUBoardURL, "GPU scheduling board URL; empty hides the link")
 	var tlsMode string
 	fs.StringVar(&c.DataDir, "data-dir", c.DataDir, "directory for the database, tmux config and ACME state")
 	fs.StringVar(&c.Addr, "addr", c.Addr, "listen address")
