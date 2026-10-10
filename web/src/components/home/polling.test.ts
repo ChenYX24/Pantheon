@@ -4,6 +4,29 @@ import { watchHomeVisibility } from './polling'
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('visible home polling', () => {
+  it('polls execution tails every three seconds only while visible, and cleans up', () => {
+    vi.useFakeTimers()
+    const document = Object.assign(new EventTarget(), { hidden: false })
+    vi.stubGlobal('document', document)
+    vi.stubGlobal('window', globalThis)
+    const refresh = vi.fn()
+    const stop = watchHomeVisibility(refresh, 3000)
+    vi.advanceTimersByTime(2999)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(1)
+    expect(refresh).toHaveBeenCalledTimes(2)
+    document.hidden = true
+    vi.advanceTimersByTime(9000)
+    expect(refresh).toHaveBeenCalledTimes(2)
+    document.hidden = false
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(refresh).toHaveBeenCalledTimes(3)
+    stop()
+    vi.advanceTimersByTime(9000)
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(refresh).toHaveBeenCalledTimes(3)
+  })
+
   it('reads immediately and every ten seconds, pauses when hidden, and resumes on return', () => {
     vi.useFakeTimers()
     const document = Object.assign(new EventTarget(), { hidden: false })

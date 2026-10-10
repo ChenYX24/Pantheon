@@ -12,7 +12,7 @@ export const projectFixture: HomeProject = {
   taskCounts: { planned: 1, in_progress: 0, awaiting_review: 1, awaiting_approval: 0, blocked: 0, done: 1, cancelled: 0, total: 3 },
   stages: [{ name: 'A', done: 1, total: 3 }], latestReport: { file: 'review.md', title: '<script>not markup</script>', summary: 'Review ready', at: '', kind: 'report', needsUser: false },
   sessions: [{ id: 'vp_1', name: 'Terminal', state: 'waiting', agent: 'codex', stateChangedAt: '' }], usage: { known: false }, updatedAt: '2026-10-09T12:00:00Z',
-  meta: { labels: ['product'], priority: 'P0', phase: 'development', owner: 'cyx', pinned: false }, metaRev: 'meta-rev',
+  meta: { labels: ['product'], priority: 'P0', phase: 'development', owner: 'cyx', pinned: false, autonomy: 'off', approvedStages: [], autoMerge: false, maxAttempts: 2, attemptMinutes: 30, verifyScope: 'auto' }, metaRev: 'meta-rev', activeRun: null,
 }
 export const fieldsFixture: HomeFieldSettings = {
   rev: 'fields-rev',

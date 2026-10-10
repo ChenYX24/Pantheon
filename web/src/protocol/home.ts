@@ -22,7 +22,42 @@ export interface HomeReportSummary {
   needsUser: boolean
 }
 export interface HomeReport extends HomeReportSummary { task: string; body: string; rev: string; replies: { at: string; text: string }[] }
-export interface HomeProjectMeta { labels: string[]; priority: string; owner: string; phase: string; pinned: boolean }
+export type HomeAutonomy = 'off' | 'stage' | 'full'
+export interface HomeExecutionMeta {
+  autonomy: HomeAutonomy
+  approvedStages: string[]
+  autoMerge: boolean
+  maxAttempts: number
+  attemptMinutes: number
+  verifyScope: string
+}
+export interface HomeProjectMeta extends HomeExecutionMeta { labels: string[]; priority: string; owner: string; phase: string; pinned: boolean }
+export const HOME_RUN_STATES = ['running', 'reviewing', 'accepted', 'rejected', 'blocked', 'failed', 'stopped', 'merged'] as const
+export type HomeRunState = typeof HOME_RUN_STATES[number]
+// Home files use RFC3339; database receipts elsewhere use Unix seconds. E1
+// leaves the timestamp encoding open, so the display accepts either.
+export type HomeRunTime = string | number
+export interface HomeRun {
+  id: string
+  projectId: string
+  taskId: string
+  attempt: number
+  state: HomeRunState
+  harness: string
+  model: string
+  reviewer: string
+  branch: string
+  worktree: string
+  sessionId: string
+  baseCommit: string
+  headCommit: string
+  startedAt: HomeRunTime
+  finishedAt: HomeRunTime
+  summary: string
+  checks: unknown[]
+}
+export interface HomeRunDetail extends HomeRun { log: string; handoff: string }
+export interface HomeExecution { flag: 'off' | 'allow'; enabled: boolean; maxRuns: number; active: HomeRun[] }
 export const HOME_FIELD_COLORS = ['gray', 'blue', 'green', 'orange', 'red', 'purple', 'pink', 'teal', 'yellow'] as const
 export type HomeFieldColor = typeof HOME_FIELD_COLORS[number]
 export interface HomeFieldOption { value: string; label?: string; color: HomeFieldColor }
@@ -53,6 +88,7 @@ export interface HomeProject {
   updatedAt: string
   meta: HomeProjectMeta
   metaRev: string
+  activeRun: Pick<HomeRun, 'id' | 'taskId' | 'state' | 'startedAt'> | null
 }
 export interface HomeTodoLink { projectId: string; taskId: string; reportFile: string; sessionId: string }
 export interface HomeTodo {
@@ -251,12 +287,14 @@ export interface HomeNotifications {
 export class HomeAPIError extends Error {
   readonly status: number
   readonly rev?: string
+  readonly stale: boolean
 
-  constructor(status: number, message: string, rev?: string) {
+  constructor(status: number, message: string, rev?: string, stale = false) {
     super(message)
     this.name = 'HomeAPIError'
     this.status = status
     this.rev = rev
+    this.stale = stale
   }
 }
 
@@ -273,15 +311,23 @@ async function request<T>(path: string, method = 'GET', body?: unknown, signal?:
   })
   if (!response.ok) {
     const reason = typeof data?.error === 'string' ? data.error : `HTTP ${response.status}`
-    throw new HomeAPIError(response.status, reason === 'stale' ? t('home.conflict') : reason, data?.rev)
+    throw new HomeAPIError(response.status, reason === 'stale' ? t('home.conflict') : reason, data?.rev, reason === 'stale')
   }
   return data as T
 }
 
 const projectPath = (id: string) => `/api/home/projects/${encodeURIComponent(id)}`
 const resourcePath = (id: string) => `/api/home/resources/${encodeURIComponent(id)}`
+const runPath = (id: string, runId: string) => `${projectPath(id)}/runs/${encodeURIComponent(runId)}`
 
 export const homeApi = {
+  execution: (signal?: AbortSignal) => request<HomeExecution>('/api/home/execution', 'GET', undefined, signal),
+  putExecution: (enabled: boolean) => request<unknown>('/api/home/execution', 'PUT', { enabled }),
+  runs: (id: string, signal?: AbortSignal) => request<HomeRun[]>(`${projectPath(id)}/runs`, 'GET', undefined, signal),
+  run: (id: string, runId: string, signal?: AbortSignal) => request<HomeRunDetail>(runPath(id, runId), 'GET', undefined, signal),
+  runTask: (id: string, taskId: string) => request<unknown>(`${projectPath(id)}/tasks/${encodeURIComponent(taskId)}/run`, 'POST'),
+  stopRun: (id: string, runId: string) => request<unknown>(`${runPath(id, runId)}/stop`, 'POST'),
+  mergeRun: (id: string, runId: string) => request<unknown>(`${runPath(id, runId)}/merge`, 'POST'),
   resources: (signal?: AbortSignal) => request<HomeResources>('/api/home/resources', 'GET', undefined, signal),
   resource: (id: string, signal?: AbortSignal) => request<HomeResourceDetail>(resourcePath(id), 'GET', undefined, signal),
   createResource: (resource: HomeCreateResource) => request<HomeResource>('/api/home/resources', 'POST', resource),

@@ -55,19 +55,20 @@ export function routeFor(pathname: string): Route {
   return { kind: 'panel' }
 }
 
-export type HomeTab = 'chat' | 'tasks' | 'reports' | 'sessions' | 'info'
-export interface HomeSelection { projectId: string; taskId?: string; reportFile?: string; thread?: string; tab?: HomeTab }
+export type HomeTab = 'chat' | 'tasks' | 'reports' | 'sessions' | 'info' | 'execution'
+export interface HomeSelection { projectId: string; taskId?: string; reportFile?: string; thread?: string; tab?: HomeTab; runId?: string }
 
 export function homeResourceLink(id: string): string {
   return `${HOME_RESOURCES_PATH}/${encodeURIComponent(id)}`
 }
 
-export function homeProjectLink({ projectId, taskId, reportFile, thread, tab }: HomeSelection, returnSearch = ''): string {
+export function homeProjectLink({ projectId, taskId, reportFile, thread, tab, runId }: HomeSelection, returnSearch = ''): string {
   const query = new URLSearchParams()
   if (tab || reportFile || taskId) query.set('tab', tab ?? (reportFile ? 'reports' : 'tasks'))
   if (thread && thread !== 'main') query.set('thread', thread)
   if (taskId) query.set('task', taskId)
   if (reportFile) query.set('report', reportFile)
+  if (runId) query.set('run', runId)
   if (returnSearch) query.set('from', returnSearch.replace(/^\?/, ''))
   return `${HOME_PATH}/p/${encodeURIComponent(projectId)}${query.size ? `?${query}` : ''}`
 }
@@ -83,12 +84,14 @@ export function homeSelection(projectId: string, search: string): HomeSelection 
   const taskId = query.get('task') ?? ''
   const reportFile = query.get('report') ?? ''
   const tab = query.get('tab')
+  const runId = query.get('run') ?? ''
   return {
     projectId,
-    tab: ['chat', 'tasks', 'reports', 'sessions', 'info'].includes(tab ?? '') ? tab as HomeTab : reportFile ? 'reports' : taskId ? 'tasks' : 'chat',
+    tab: ['chat', 'tasks', 'reports', 'sessions', 'info', 'execution'].includes(tab ?? '') ? tab as HomeTab : reportFile ? 'reports' : taskId ? 'tasks' : 'chat',
     thread: query.get('thread') || 'main',
     ...(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(taskId) ? { taskId } : {}),
     ...(reportFile ? { reportFile } : {}),
+    ...(/^[A-Za-z0-9_-]+$/.test(runId) ? { runId } : {}),
   }
 }
 
@@ -99,7 +102,7 @@ export function legacyHomeRedirect(pathname: string, search: string): string | n
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(projectId)) return null
   query.delete('project')
   const overview = new URLSearchParams(query)
-  for (const key of ['tab', 'thread', 'task', 'report', 'from']) overview.delete(key)
+  for (const key of ['tab', 'thread', 'task', 'report', 'run', 'from']) overview.delete(key)
   if (overview.size && !query.has('from')) query.set('from', overview.toString())
   if (!query.has('tab')) query.set('tab', query.has('report') ? 'reports' : query.has('task') ? 'tasks' : 'chat')
   return `${homeProjectLink({ projectId })}?${query}`

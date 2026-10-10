@@ -24803,3 +24803,18 @@ NODE_OPTIONS='--max-old-space-size=192 --max-semi-space-size=1 --jitless' nice -
 NODE_OPTIONS='--max-old-space-size=128 --max-semi-space-size=1 --jitless' nice -n 19 node node_modules/eslint/bin/eslint.js src/components/HomePage.tsx src/components/home/HomeResource*.tsx src/components/home/HomeProjectResources.tsx src/components/home/HomeNewSession.tsx src/components/home/HomeSuggestionAction.tsx src/components/home/HomeChat.tsx src/components/home/HomeSessions.tsx src/components/home/HomeProjectPage.tsx src/components/home/resources*.ts src/components/home/resourceFixtures.ts src/protocol/home*.ts src/routes*.ts src/i18n.ts
 NODE_OPTIONS='--max-old-space-size=128 --max-semi-space-size=1' RAYON_NUM_THREADS=1 nice -n 19 node node_modules/vite/bin/vite.js build --outDir node_modules/.cache/stage-b-build
 ```
+
+## 2026-10-10 — Stage E1 execution frontend
+
+The execution API adapter follows the frozen E1 contract: a direct run array,
+flat run details with log and handoff filename, an enabled-only switch PUT, and
+bodyless run/stop/merge actions. Mutation refusals now retain their server reason;
+only a stale file revision gets the stale-edit toast. Manual-run eligibility
+ignores autonomy and checks the exposed status, checkout, dependencies and
+concurrency facts. Git validity remains a server check because the snapshot has
+no Git-validity field. Run timestamps accept RFC3339 or Unix seconds, the two
+existing home/runtime conventions; E1 does not specify their encoding.
+
+The first low-priority, single-worker pass passed 35 tests for API shapes,
+eligibility explanations, state glyphs, durations, autonomy defaults and bounds,
+full-auto consent, handoff route selection, and visible three-second polling.
