@@ -219,7 +219,7 @@ func (s *Server) startHomeDiscussion(detail home.Detail, user, assistant store.H
 				dir = detail.Project.Path
 			}
 			executor, _ := json.Marshal(assistant.Executor)
-			prompt := homeDiscussionPrompt(detail, history, user.Text) + "\n" + s.homeResourcePrompt(pid) + "\nGIT:\n" + homeGitContext(ctx, detail.Project) + "\nEXECUTOR: " + string(executor)
+			prompt := homeDiscussionPrompt(detail, history, user.Text) + "\n" + s.homeResourcePrompt(pid) + "\n" + s.homeExecutionPrompt(ctx, pid) + "\nGIT:\n" + homeGitContext(ctx, detail.Project) + "\nEXECUTOR: " + string(executor)
 			answer, err = runner(ctx, *assistant.Executor, dir, prompt, false)
 			if err == nil {
 				err = ctx.Err()

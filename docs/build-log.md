@@ -24834,3 +24834,58 @@ Fake Claude/Codex executable tests pass for success, fallback, rejection, failed
 checks, permission blocking, cancellation within ten seconds, and reviewer-only
 acceptance. Existing workflow worker tests also pass; its implementation is
 unchanged. No real model or tmux server was invoked by these tests.
+
+## 2026-10-11 — Stage E1 execution service and reconciliation
+
+The home execution ticker claims eligible file tasks in priority/age order and
+launches a dedicated `home-worker` tmux session in a fresh worktree. The runtime
+switch is subordinate to `--home-execute allow`. Development routes have exact
+method allow-lists; `/api/home` projects expose the active run. Immediate execution
+bypasses autonomy, but still checks dependency completion, checkout validity and
+both concurrency limits. A checkout must be its Git root: Git's upward discovery
+must never select an unrelated parent repository when a directory lacks `.git`.
+
+Reconciliation applies worker receipts to tasks, numbered handoffs and reports,
+including review reasons and unapproved follow-up suggestions for the project
+manager. Receipt markers make replay after an interrupted reconciliation
+idempotent. Missing workers fail only after thirty seconds of observed absence.
+A stop retains the writer slot until acknowledged. Stage completion reports use
+a stable stage key so later ticks do not repeat them.
+
+Accepted runs may merge into a clean, attached checkout with `--no-ff`; changed
+run branches are refused and conflicts are aborted before returning 409. Successful
+merges mark tasks done, retain branches and remove worktrees. Automatic merging
+requires executable checks; reviewer-only acceptance leaves a manual decision.
+Merge receipts accompany the original worker result. The old workflow worker and
+all frontend sources are unchanged.
+
+Contract interpretations: `verifyScope` accepts `auto|off`, like agent scopes;
+reviewer identifiers are `harness/model` strings; run times are Unix seconds,
+matching existing runtime tables. The default executor pair comes from the home
+model catalogue. Missing executable checks permit manual merging after acceptance,
+but never automatic merging. A stop restores `planned`, so still-enabled autonomy
+may claim the task on a later scheduling pass. Receipts contain the data needed to
+rebuild runtime history; there is no automatic database import command in E1.
+
+Validation: focused configuration, store, home-file and worker tests passed, plus
+`go test ./internal/httpapi -run '^TestHome|^TestTheAPIDocCoversEveryRoute$'`.
+These include temporary Git repositories, fake Claude/Codex executables, a fake
+tmux launch function, claims, stop/vanish handling, reconciliation replay, merge
+success/refusals/conflict abort and stage-summary deduplication. No real model,
+tmux server, browser, service or deployment was started. The first HTTP API compile
+was killed by the host; retrying with `GOGC=20` passed, as did the final rerun.
+An optional CLI-dispatch test was cancelled at the work budget while compiling;
+it has no completed result. A prematurely queued CLI attempt briefly overlapped a
+pending home check and was immediately cancelled, then retried serially.
+
+All successful commands ran from the worktree with these environment settings:
+`TMPDIR="$PWD/data/e1-tmp" GOCACHE="$PWD/data/e1-go-cache" GOTOOLCHAIN=auto
+GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB`, followed by
+`nice -n 19`. Final home, worker and HTTP API commands also set `GOGC=20`.
+
+- `go test ./internal/config -run '^TestHome'` — passed.
+- `go test ./internal/store -run '^TestHome'` — passed after cancelling the cold compile and copying an existing cache locally.
+- `go test ./internal/pantheon/home -run '^TestHome'` — passed, including the final rerun.
+- `go test ./internal/parthenon -run '^TestHome|^TestWorker'` — passed, including the final rerun.
+- `go test ./internal/httpapi -run '^TestHome|^TestTheAPIDocCoversEveryRoute$'` — passed, including the final rerun.
+- `go test ./cmd/vibepanel -run '^TestEveryDocumentedCommandExists$|^TestTheHelpTextDescribesEachCommand$'` — cancelled during compilation; pending reviewer validation.

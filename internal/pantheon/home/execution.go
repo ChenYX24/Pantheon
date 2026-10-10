@@ -41,16 +41,19 @@ func EligibleTasks(d Detail, manual bool) []Task {
 		}
 	}
 	sort.Slice(out, func(a, b int) bool {
-		x, y := out[a], out[b]
-		if priority(x.Priority) != priority(y.Priority) {
-			return priority(x.Priority) < priority(y.Priority)
-		}
-		if !timestamp(x.Updated).Equal(timestamp(y.Updated)) {
-			return timestamp(x.Updated).Before(timestamp(y.Updated))
-		}
-		return x.ID < y.ID
+		return TaskBefore(out[a], out[b])
 	})
 	return out
+}
+
+func TaskBefore(x, y Task) bool {
+	if priority(x.Priority) != priority(y.Priority) {
+		return priority(x.Priority) < priority(y.Priority)
+	}
+	if !timestamp(x.Updated).Equal(timestamp(y.Updated)) {
+		return timestamp(x.Updated).Before(timestamp(y.Updated))
+	}
+	return x.ID < y.ID
 }
 
 func priority(value string) int {
