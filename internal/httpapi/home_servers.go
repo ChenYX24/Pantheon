@@ -31,19 +31,10 @@ func (s *Server) homeServers(resources []home.Resource) home.Servers {
 		}
 	}
 	servers, board := home.ReadBoardSnapshot(path, s.Cfg.GPUBoardURL, time.Now())
+	// SSH aliases are offered for import, not listed as servers: one host has
+	// several aliases (hospital-017, lc_2217, gpu-a800-017, …), and an alias
+	// nobody registered is not a server anyone asked to watch.
 	aliases := s.homeSSHAliases()
-	for _, alias := range aliases {
-		found := false
-		for _, server := range servers {
-			if server.Alias == alias || server.ID == alias {
-				found = true
-				break
-			}
-		}
-		if !found {
-			servers = append(servers, home.UnknownServer(alias, alias))
-		}
-	}
 	for _, resource := range resources {
 		if resource.Kind != "server" {
 			continue
