@@ -201,7 +201,14 @@ func resourceValues(fields map[string]json.RawMessage) (map[string]string, *stri
 		if _, ok := values[key]; ok {
 			return nil, nil, errors.New("duplicate frontmatter field")
 		}
-		if key == "env" || key == "projects" || key == "tags" {
+		knownList := key == "env" || key == "projects" || key == "tags"
+		if knownList || strings.HasPrefix(strings.TrimSpace(string(raw)), "[") {
+			if !knownList {
+				switch key {
+				case "id", "kind", "title", "provider", "base_url", "ssh_alias", "gpu_board_id", "url", "check", "updated", "body":
+					return nil, nil, errors.New("expected a frontmatter string")
+				}
+			}
 			var list []string
 			if err := json.Unmarshal(raw, &list); err != nil || list == nil || validateStrings(list) != nil {
 				return nil, nil, errors.New("expected a list of strings")

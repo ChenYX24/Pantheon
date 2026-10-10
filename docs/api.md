@@ -1968,10 +1968,11 @@ approval and remote confirmation resolve the same authorization.
 The home view is read from files: the cyx registry (`--cyx-home`, default
 `~/.cyx/local.json`) and each Harness project folder (`project.json`,
 `ACTIVE_CONTEXT.md`, `agent-docs/tasks/<id>/task.md`, `agent-docs/reports/*.md`).
-The database keeps only chat history and notification receipts, so a new
-database yields the same projects, tasks and to-dos. The full contract, file
+The database keeps chat history, notification receipts, sealed resource secrets,
+resource checks and usage receipts. A new database yields the same projects,
+tasks, to-dos and resource metadata, without their runtime history or secrets. The full contract, file
 formats and to-do rules are in `docs/pantheon/stage-a-contract.md` and
-`docs/pantheon/stage-a2-contract.md`.
+`docs/pantheon/stage-a2-contract.md` and `docs/pantheon/stage-b-contract.md`.
 
 ### `GET /api/home`
 
@@ -2022,7 +2023,8 @@ values and allowed colors, then atomically writes the file. Returns `{fields, re
 
 ### `PATCH /api/home/projects/{id}/meta`
 
-Body: `rev`, optional `labels` (array), `priority`, `owner`, `phase`, `pinned`.
+Body: `rev`, optional `labels` (array), `priority`, `owner`, `phase`, `pinned`,
+`resources` (array of resource ids used by default for new sessions).
 Atomically creates or patches the optional project `pantheon.json`; creation uses
 `rev: ""`. Returns `{meta, metaRev}`; `409` on a stale revision. Projects include
 these same keys, and pinned projects sort before all other home projects.
@@ -2042,9 +2044,17 @@ leaves the to-do list, and a user message mirrors the reply in the main thread.
 
 ### `POST /api/home/projects/{id}/sessions`
 
-Body: optional `profileId`, `name`. Creates a session in the panel project whose
+Body: optional `profileId`, `name`, `resources` (array of ids; omitted uses the
+project's defaults, `[]` explicitly selects none). Creates a session in the panel project whose
 path is the cyx checkout, adding that project when missing. Available only where
 manual sessions are (in development, with `--development-terminal`).
+Every selected resource must allow the project (`403` otherwise). Configured
+secrets, including stored names outside the declared `env`, become tmux `-e`
+variables with `PANTHEON_RESOURCES=<comma-separated ids>`. Selected resources
+override profile variables, later selected resources win duplicate names, and
+the account/panel environment remains last. One receipt per distinct resource
+names the allocated session id; a failed launch retains its attempted-use receipt.
+No resource values are saved in the session row or returned in launch errors.
 
 ### `GET /api/home/projects/{id}/discussion`
 
@@ -2061,8 +2071,12 @@ run uses the chosen model read-only for at most three minutes and saves `done` o
 project (`409` otherwise). At startup, pending rows older than ten minutes fail
 with `interrupted by restart`. Context includes bounded ACTIVE_CONTEXT and MEMORY,
 a task table, the newest five reports and their replies, field definitions, git
-log/status and the last sixteen messages of this thread. Suggestions (create task,
-set status/fields, create session, set project metadata, reply to report) are never
+log/status, the last sixteen messages of this thread and a `可用资源` section:
+allowed resource ids, kinds, titles, env names, SSH aliases, server state, fresh
+GPU summaries and the first 1 KiB of usage documentation. Secret values are never
+read for prompts. Suggestions (create task,
+set status/fields, create session, set project metadata, reply to report,
+`{"type":"use_resources","resources":["id"]}`) are never
 applied by the server; the page applies one only when the user chooses it.
 
 ### `POST /api/home/projects/{id}/discussion/{messageId}/retry`
@@ -2131,3 +2145,112 @@ prefix; unprefixed backend paths return 404. `/dev` redirects to the workspace.
 Session/challenge cookie names and paths, browser storage keys, static assets
 and PWA scope belong to this instance. Only the trusted local proxy may assert
 HTTPS through forwarded headers. The root deployment behavior is unchanged.
+
+### `GET /api/home/resources`
+
+Returns `{resources, orphans, warnings}`. Resource metadata comes from
+`<harness>/pantheon/resources/<id>.md`; each resource has `id`, `kind`, `title`,
+`provider`, `baseUrl`, `env`, `sshAlias`, `gpuBoardId`, `url`, `projects`, `tags`,
+`check`, `updated`, `body`, `rev`, `file`, `secrets`, `lastCheck` and `server`.
+`secrets` contains only `{name, configured, updatedAt}` for every declared env
+name and every stored extra name. `lastCheck` is `{at, ok, summary}` or null;
+`server` is the server projection or null. Orphans are `{resourceId, names}`
+for stored secrets whose resource file disappeared. Invalid files become warnings.
+
+### `GET /api/home/resources/{id}`
+
+Returns the same Resource plus `checks` (latest twenty `{at, ok, summary, detail}`)
+and `uses` (latest fifty `{id, resourceId, purpose, projectId, sessionId, at}`).
+Returns `404` for a missing resource. No read endpoint unseals secrets.
+
+### `POST /api/home/resources`
+
+Body: `kind`, `title`, optional `id`, `provider`, `baseUrl`, `env`, `sshAlias`,
+`gpuBoardId`, `url`, `projects`, `tags`, `check`, `body` and additional string or list
+frontmatter fields. Frontmatter spellings `base_url`, `ssh_alias`, `gpu_board_id`
+are accepted too. Defaults: id is a title slug (stable hash fallback for titles
+without ASCII), projects is `["*"]`, check is `none`. Returns `201 Resource`,
+`409` if its file exists. Writes also regenerate the README resource index.
+
+### `PATCH /api/home/resources/{id}`
+
+Body: `rev` and any frontmatter fields or `body`. Returns Resource; `409
+{error:"stale", rev}` for stale bytes. The id cannot change. Only selected keys,
+`updated` and an explicitly supplied body change; unknown keys, comments and
+unrelated body bytes are preserved. Regenerates the README index.
+
+### `DELETE /api/home/resources/{id}`
+
+Requires query `rev=<revision>`. Returns `204` after removing the file, sealed
+secrets and checks and regenerating the README; `409` for stale bytes. Usage
+receipts remain as history.
+
+### `PUT /api/home/resources/{id}/secrets/{name}`
+
+Body: `{value}`. Requires an existing resource and a name matching
+`^[A-Z_][A-Z0-9_]{0,63}$`. Values contain 1–8192 bytes and no NUL (tmux environments
+cannot carry NUL). Seals the value with context `resource:<id>:<name>` in the panel
+database. Returns only `{name, configured:true, updatedAt}`. Nothing is written
+to the resource file, and no secret value, prefix or suffix is returned.
+
+### `DELETE /api/home/resources/{id}/secrets/{name}`
+
+Returns `204`. Works even when the resource file is gone, so orphaned secrets can
+be removed. Repeated deletion is harmless.
+
+### `POST /api/home/resources/{id}/check`
+
+Runs the configured check only on explicit request, with a twenty-second timeout,
+stores the result and returns `{at, ok, summary, detail}`. `none` returns `400`.
+Provider checks support Anthropic (`/v1/models`, API key or auth token) and
+OpenAI-compatible endpoints (`/models`, first configured env secret); details
+include status, at most fifty model ids, modelCount and `balance:"unknown"`.
+Success means HTTP 200. Error excerpts are capped at 200 characters after key
+redaction. HTTP checks GET `url` without credentials; 2xx/3xx succeeds and detail
+is `{status, ms}`. Neither check follows redirects. SSH checks accept only a
+concrete configured alias, execute `ssh -o BatchMode=yes -o ConnectTimeout=8 -o
+ConnectionAttempts=1 <alias> true`, and return `{exitCode, ms, stderr}` (stderr
+at most 200 characters). Checks never write remotely and have no timer.
+
+### `POST /api/home/resources/import/ssh`
+
+Body: `{aliases:[...]}` from the SSH alias list. Creates server resource files
+with `check:ssh`, a GPU board label when available and a usage-document template.
+Returns `{created:[ids], skipped:[aliases]}`; aliases already represented are
+skipped. Unknown aliases return `400` before creating any file.
+
+### `POST /api/home/resources/import/profile`
+
+Body: `{profileId, resourceId?}`. Imports non-empty `*_KEY`, `*_TOKEN`, `*_SECRET`
+variables into sealed resource secrets and env names; a non-secret `*_BASE_URL`
+becomes `base_url`. Creates an API resource (`201`) or updates it (`200`), returning
+only Resource. Existing usage docs and project scope survive an update. Defaults
+the resource id to a slug of the profile name. The source profile is unchanged.
+
+### `GET /api/home/servers`
+
+Returns `{servers, sshAliases, board}`. Concrete SSH `Host` names are read from
+`~/.ssh/config` and its Includes, excluding wildcard and negated names; no SSH
+command runs while listing. The board is read from `--gpu-board-snapshot` (default
+`~/projects/atombit-gpu-board/runtime/snapshot.json`). `--gpu-board-url` supplies
+an optional scheduling-board link. Both have `VIBEPANEL_GPU_BOARD_*` environment
+equivalents. Missing/unrecognized snapshots return `board.available:false`.
+
+Server fields: `id`, `alias`, `group`, `label`, `state`, `reachability`, `telemetry`,
+`lastSuccessAt`, `lastMetricsAt`, `ageSeconds`, `errorCode`, `gpus`, `resourceId`.
+GPU fields: `index`, `name`, `memoryTotalMib`, `memoryUsedMib`, `utilizationPct`,
+`temperatureC`, `powerW`, `migMode`, `observation`. Only these fields leave the
+server; identities, UUIDs, addresses, users and stderr do not. Samples older than
+180 seconds are stale; low-usage observations never authorize allocation.
+Aliases without a board entry still appear with unknown state.
+The snapshot reader currently accepts a `nodes` array and `collectedAt` (or
+`collected_at`), optional version 1, with snake-case or camel-case public fields.
+GPU observations come from the snapshot; the reader does not invent low-usage
+thresholds. Parity with the separate board's `public_snapshot` implementation
+still needs a board-owned integration fixture.
+
+### `GET /api/home/projects/{id}/resources`
+
+Returns `{resources, defaultResources, warnings}`. Lists only resources allowing
+`*` or that project id; `defaultResources` comes from `resources` in the project's
+`pantheon.json`, editable through the existing metadata PATCH.

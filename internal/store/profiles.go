@@ -581,18 +581,23 @@ func (d *DB) listLaunchRows(ctx context.Context) ([]LaunchProfile, error) {
 // The values are here because this is what the launch path needs; every path
 // that answers a request goes through RedactLaunchProfile first.
 func (d *DB) GetLaunchProfile(ctx context.Context, id string) (LaunchProfile, error) {
-	for _, p := range BuiltinLaunchProfiles() {
-		if p.ID == id {
-			return p, nil
-		}
-	}
 	row := d.sql.QueryRowContext(ctx, `
 		SELECT id, name, command, env, claude_account_id, created_at, updated_at
 		FROM launch_profiles WHERE id = ?`, id)
 	p, err := scanLaunch(row)
+	// Saved edits of built-ins have the same id as the catalogue entry. Reading
+	// the catalogue first loses their keys on launch and on resource import.
+	if err == ErrNotFound {
+		for _, builtin := range BuiltinLaunchProfiles() {
+			if builtin.ID == id {
+				return builtin, nil
+			}
+		}
+	}
 	if err != nil {
 		return LaunchProfile{}, err
 	}
+	p.Overridden = IsBuiltinLaunchProfile(id)
 	return p, nil
 }
 

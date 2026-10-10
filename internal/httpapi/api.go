@@ -51,6 +51,7 @@ type Server struct {
 	Home              home.Index
 	homeNotifications homeNotifications
 	homeDiscussions   homeDiscussions
+	homeResources     homeResources
 	Cfg               config.Config
 	DB                *store.DB
 	Tmux              *tmux.Client
@@ -1572,11 +1573,14 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 }
 
 type createSessionRequest struct {
-	ProjectID string   `json:"projectId"`
-	Title     string   `json:"title"`
-	Command   []string `json:"command"`
-	Cols      int      `json:"cols"`
-	Rows      int      `json:"rows"`
+	// Resource secrets are resolved only after validation and session id
+	// allocation, so receipts name the attempted session. Never JSON input.
+	resourceEnv func(context.Context, string) ([]string, error)
+	ProjectID   string   `json:"projectId"`
+	Title       string   `json:"title"`
+	Command     []string `json:"command"`
+	Cols        int      `json:"cols"`
+	Rows        int      `json:"rows"`
 
 	// Scratch puts this in the project's terminal strip instead of the
 	// sidebar. Scoped to the project: the strip does not change when the
@@ -1711,6 +1715,14 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request, req creat
 
 	sid := id.New()
 	tmuxName := id.TmuxName(sid)
+	var resourceEnv []string
+	if req.resourceEnv != nil {
+		resourceEnv, err = req.resourceEnv(ctx, sid)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "resource secrets could not be prepared")
+			return
+		}
+	}
 
 	err = s.Tmux.Create(ctx, tmux.CreateOptions{
 		Name:    tmuxName,
@@ -1727,11 +1739,16 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request, req creat
 		// hook token attached. store.LaunchEnv is the one place that knows it.
 		// The account between the two: after the profile, so it cannot be
 		// overridden by a variable validation missed; before the panel's own.
-		Env:    store.LaunchEnv(profile, append(accountEnv, s.hookEnv(ctx, sid, p.ID)...)),
+		Env:    store.LaunchEnv(profile, append(resourceEnv, append(accountEnv, s.hookEnv(ctx, sid, p.ID)...)...)),
 		Width:  req.Cols,
 		Height: req.Rows,
 	})
 	if err != nil {
+		if req.resourceEnv != nil {
+			// tmux errors include argv, which contains every -e secret value.
+			writeErr(w, http.StatusInternalServerError, "could not create the resource session")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

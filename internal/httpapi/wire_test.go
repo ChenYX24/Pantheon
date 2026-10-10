@@ -536,8 +536,7 @@ func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 // The same shape as the runbook and doctor, the state enum and its three
 // mirrors, and wire.ts: a definition with a copy somewhere no compiler looks.
 func TestTheAPIDocCoversEveryRoute(t *testing.T) {
-	ts, srv := newTestServer(t)
-	_ = ts
+	_, srv := newTestServer(t, inProcessTestServer)
 
 	doc, err := os.ReadFile("../../docs/api.md")
 	if err != nil {

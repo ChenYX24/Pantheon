@@ -93,3 +93,23 @@ func TestHomeResourceMigrationReopens(t *testing.T) {
 		t.Fatalf("%+v %v", secrets, err)
 	}
 }
+
+func TestHomeResourceProfileReadsStoredBuiltinOverride(t *testing.T) {
+	db, ctx := openTest(t), context.Background()
+	p := BuiltinLaunchProfiles()[0]
+	p.Env = []LaunchEnvVar{{Name: "API_KEY", Value: "private-test-value", Secret: true}}
+	if err := db.UpsertLaunchProfile(ctx, p.ID, p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetLaunchProfile(ctx, p.ID)
+	if err != nil || !got.Overridden || len(got.Env) != 1 || got.Env[0].Value != "private-test-value" {
+		t.Fatal("import/launch read the catalogue instead of the saved profile", err)
+	}
+	if err := db.DeleteLaunchProfile(ctx, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = db.GetLaunchProfile(ctx, p.ID)
+	if err != nil || !got.Builtin || got.Overridden {
+		t.Fatal("catalogue fallback failed", err)
+	}
+}

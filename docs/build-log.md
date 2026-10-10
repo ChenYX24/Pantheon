@@ -24713,3 +24713,34 @@ current input assumption is a `nodes` array with a collection timestamp, optiona
 version 1, and snake-case or camel-case public fields. It preserves the board's
 reported GPU observations rather than inventing utilization thresholds. Exact
 schema and state-policy parity still require a board-owned fixture at integration.
+
+The authenticated home API now exposes resource CRUD, metadata-only secret
+views, orphan cleanup, checks, SSH/profile imports and project-scoped resources.
+Checks run only on request. HTTP redirects are never followed; provider error
+excerpts redact raw, JSON-quoted and URL-escaped keys before clipping, including
+overlapping keys. Check I/O releases the write lock and revalidates the resource
+before saving, so a slow provider does not hold editing hostage or resurrect a
+deleted resource's history. Tests use local HTTP servers and fake SSH/tmux binaries.
+
+Home sessions resolve their explicit selection or project defaults before
+creation, refuse forbidden resources before reading any secrets, and inject
+configured values with tmux's existing environment mechanism. Later selected
+resources win duplicate variable names; account and panel variables stay last.
+Receipts name the allocated session id, including a failed launch. Resource
+launch errors are deliberately generic because the tmux wrapper includes `-e`
+arguments in its errors. Prompts receive only allowed resource metadata, bounded
+usage docs and fresh GPU summaries; `use_resources` remains a suggestion for the
+user to accept.
+
+Profile import exposed a pre-existing lookup bug: saved edits of built-ins lost
+to the built-in catalogue before the stored row was read. The row now wins, with
+the catalogue as fallback, and focused store tests pin both cases. The API route
+documentation test now uses the existing in-process helper because it only walks
+the router and never needed a real tmux server.
+
+The focused home, config, resource/profile store and required home/API-documentation
+suites pass. The first HTTP-package compile was killed under the shared machine's
+memory pressure; adding `GOGC=20` to the prescribed single-worker, nice-19 command
+completed it. An initial fake-tmux argument offset was corrected after the session
+test caught it. No browser checks, frontend builds, deployment or live service
+operations were performed.

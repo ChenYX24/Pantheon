@@ -131,9 +131,13 @@ func TestHomeResourcePatchFreshBytesAndBody(t *testing.T) {
 	if _, err := index.PatchResource(dir, r.ID, r.Rev, resourceFields(t, `{"body":"New body"}`)); !errors.As(err, &stale) {
 		t.Fatalf("mtime-preserving edit missed: %v", err)
 	}
-	r, err = index.PatchResource(dir, r.ID, stale.Rev, resourceFields(t, `{"body":"New body","custom":"New custom field"}`))
+	r, err = index.PatchResource(dir, r.ID, stale.Rev, resourceFields(t, `{"body":"New body","custom":"New custom field","custom_list":["one","with, comma"]}`))
 	if err != nil || r.Body != "New body" || r.Title != "Bravo" {
 		t.Fatalf("%+v %v", r, err)
+	}
+	data, _ = os.ReadFile(file)
+	if !strings.Contains(string(data), `custom_list: ["one","with, comma"]`) {
+		t.Fatal("unknown list was not preserved")
 	}
 	if _, err := index.PatchResource(dir, r.ID, r.Rev, resourceFields(t, `{"id":"renamed"}`)); err == nil {
 		t.Fatal("renamed without changing filename")
