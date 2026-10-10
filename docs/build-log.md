@@ -24819,3 +24819,18 @@ unique index. Checks run serially at nice 19 with one Go worker and a 600 MiB Go
 memory limit. Build cache and temporary test data stay in the worktree's ignored
 `data/` directory. A cold store compile was cancelled and the existing compiled
 cache copied locally before retrying successfully; no live service was touched.
+
+## 2026-10-10 — Stage E1 file-task worker
+
+`home-worker` uses the existing bounded CLI runner and resource-scope detection,
+with an immutable job outside the worktree. It supports primary/secondary failover,
+permission blocking, stop-file cancellation, declared verification, worker-authored
+commits and independent read-only review by the other harness/model. Verification
+uses nice 19 in the optional user scope and retains exit codes plus output tails.
+Review-only acceptance never triggers automatic merging. File tasks are only
+updated by the server, not by the worker.
+
+Fake Claude/Codex executable tests pass for success, fallback, rejection, failed
+checks, permission blocking, cancellation within ten seconds, and reviewer-only
+acceptance. Existing workflow worker tests also pass; its implementation is
+unchanged. No real model or tmux server was invoked by these tests.
