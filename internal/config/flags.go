@@ -30,7 +30,8 @@ import (
 //
 // Here rather than in main because this is the only place that prints usage,
 // and a second copy of the list is how the two stop agreeing.
-const Commands = `  workflow-worker execute one approved task (internal tmux worker)
+const Commands = `  home-worker execute one file task (internal tmux worker)
+  workflow-worker execute one approved task (internal tmux worker)
   serve      run the panel (the default with no command)
   project    add, list and remove projects
   session    create, list and kill sessions
@@ -64,6 +65,8 @@ func Load(args []string, out io.Writer) (Config, error) {
 	fs.StringVar(&c.BasePath, "base-path", c.BasePath, "development URL prefix, e.g. /dev; the proxy must preserve this prefix")
 	fs.StringVar(&c.CyxHome, "cyx-home", c.CyxHome, "cyx registry directory (local.json)")
 	fs.StringVar(&c.AgentScope, "agent-scope", c.AgentScope, "agent resource scope: auto | off")
+	fs.StringVar(&c.HomeExecute, "home-execute", c.HomeExecute, "home task execution: off | allow")
+	fs.IntVar(&c.HomeMaxRuns, "home-max-runs", c.HomeMaxRuns, "maximum concurrent home task runs")
 	fs.StringVar(&c.HomeNotify, "home-notify", c.HomeNotify, "home notifications: off | dry_run | send (default dry_run in development)")
 	fs.StringVar(&c.HomePublicURL, "home-public-url", c.HomePublicURL, "public URL for home notification links; empty uses relative paths")
 	fs.StringVar(&c.GPUBoardSnapshot, "gpu-board-snapshot", c.GPUBoardSnapshot, "GPU board snapshot JSON path")

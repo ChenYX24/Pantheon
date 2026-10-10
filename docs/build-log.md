@@ -24803,3 +24803,19 @@ NODE_OPTIONS='--max-old-space-size=192 --max-semi-space-size=1 --jitless' nice -
 NODE_OPTIONS='--max-old-space-size=128 --max-semi-space-size=1 --jitless' nice -n 19 node node_modules/eslint/bin/eslint.js src/components/HomePage.tsx src/components/home/HomeResource*.tsx src/components/home/HomeProjectResources.tsx src/components/home/HomeNewSession.tsx src/components/home/HomeSuggestionAction.tsx src/components/home/HomeChat.tsx src/components/home/HomeSessions.tsx src/components/home/HomeProjectPage.tsx src/components/home/resources*.ts src/components/home/resourceFixtures.ts src/protocol/home*.ts src/routes*.ts src/i18n.ts
 NODE_OPTIONS='--max-old-space-size=128 --max-semi-space-size=1' RAYON_NUM_THREADS=1 nice -n 19 node node_modules/vite/bin/vite.js build --outDir node_modules/.cache/stage-b-build
 ```
+
+## 2026-10-10 — Stage E1 execution foundations
+
+Home project metadata now carries bounded execution settings, defaulting to off.
+Eligibility is derived from file tasks, approved stages and completed dependencies,
+ordered by priority and age. SQLite reserves one running/reviewing writer per
+Harness project and checks the instance cap in the same insert. Home handoffs and
+reports retain a run marker so reconciliation can be retried after a restart without
+appending duplicate receipts; same-minute reports preserve both runs.
+
+Focused home, configuration and store tests pass, including revision validation,
+symlink containment, stage/dependency eligibility, receipt numbering and the partial
+unique index. Checks run serially at nice 19 with one Go worker and a 600 MiB Go
+memory limit. Build cache and temporary test data stay in the worktree's ignored
+`data/` directory. A cold store compile was cancelled and the existing compiled
+cache copied locally before retrying successfully; no live service was touched.

@@ -48,6 +48,8 @@ type Config struct {
 	BasePath            string
 	CyxHome             string
 	AgentScope          string
+	HomeExecute         string
+	HomeMaxRuns         int
 	HomeNotify          string
 	HomePublicURL       string
 	GPUBoardSnapshot    string
@@ -168,6 +170,8 @@ func Default() Config {
 	return Config{
 		CyxHome:          filepath.Join(home, ".cyx"),
 		GPUBoardSnapshot: filepath.Join(home, "projects/atombit-gpu-board/runtime/snapshot.json"),
+		HomeExecute:      "off",
+		HomeMaxRuns:      2,
 		HomeNotify:       "off",
 		AgentScope:       "auto",
 		DataDir:          defaultDataDir(),
@@ -220,6 +224,11 @@ func (c *Config) envOverlay() {
 	str(&c.BasePath, "VIBEPANEL_BASE_PATH")
 	str(&c.CyxHome, "VIBEPANEL_CYX_HOME")
 	str(&c.AgentScope, "VIBEPANEL_AGENT_SCOPE")
+	str(&c.HomeExecute, "VIBEPANEL_HOME_EXECUTE")
+	seen["VIBEPANEL_HOME_MAX_RUNS"] = true
+	if value, ok := os.LookupEnv("VIBEPANEL_HOME_MAX_RUNS"); ok {
+		c.HomeMaxRuns, _ = strconv.Atoi(value)
+	}
 	str(&c.HomeNotify, "VIBEPANEL_HOME_NOTIFY")
 	str(&c.HomePublicURL, "VIBEPANEL_HOME_PUBLIC_URL")
 	str(&c.GPUBoardSnapshot, "VIBEPANEL_GPU_BOARD_SNAPSHOT")
@@ -374,6 +383,12 @@ func (c Config) PasskeyBlocker() string {
 // Validate checks for combinations that cannot work, so the process fails at
 // startup with a clear message instead of at first request with a vague one.
 func (c Config) Validate() error {
+	if c.HomeExecute != "off" && c.HomeExecute != "allow" {
+		return errors.New("config: home-execute must be off or allow")
+	}
+	if c.HomeMaxRuns < 1 {
+		return errors.New("config: home-max-runs must be positive")
+	}
 	if c.AgentScope != "auto" && c.AgentScope != "off" {
 		return errors.New("config: agent-scope must be auto or off")
 	}
