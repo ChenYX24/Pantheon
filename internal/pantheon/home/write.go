@@ -188,13 +188,21 @@ func encodeScalar(value string) string {
 }
 
 func rewrite(f frontmatter, values map[string]string) []byte {
+	encoded := make(map[string]string, len(values))
+	for key, value := range values {
+		encoded[key] = encodeField(key, value)
+	}
+	return rewriteEncoded(f, encoded)
+}
+
+func rewriteEncoded(f frontmatter, values map[string]string) []byte {
 	var out bytes.Buffer
 	out.Write(f.lines[0])
 	for _, line := range f.lines[1:f.end] {
 		key, _, _ := strings.Cut(string(line), ":")
 		key = strings.TrimSpace(key)
 		if value, ok := values[key]; ok {
-			out.WriteString(key + ": " + encodeField(key, value) + f.newline)
+			out.WriteString(key + ": " + value + f.newline)
 			delete(values, key)
 		} else {
 			out.Write(line)
@@ -206,7 +214,7 @@ func rewrite(f frontmatter, values map[string]string) []byte {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		out.WriteString(key + ": " + encodeField(key, values[key]) + f.newline)
+		out.WriteString(key + ": " + values[key] + f.newline)
 	}
 	out.Write(f.lines[f.end])
 	out.Write(f.body)

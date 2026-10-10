@@ -24681,3 +24681,20 @@ webhook test is interpreted as independent of automatic mode. A webhook joins
 paired Feishu peers as one recipient, preserving baseline and dry-run dedup.
 All new routes have exact development allow-list methods and API documentation.
 The targeted home/API-route suite passes without a panel, tmux or browser check.
+
+## 2026-10-10 — Stage B: resource files and sealed runtime records
+
+Resource metadata and usage documentation now use the home index's existing
+frontmatter parser, revision comparison and atomic writes. Patches retain
+unrelated bytes, and create/update/delete regenerate the resource README index.
+Project metadata can keep default resource ids without losing them on other
+metadata edits. Non-Latin titles use a stable hash-based filename when no ASCII
+slug remains.
+
+An appended store migration adds sealed resource secrets, usage receipts and
+the latest twenty checks per resource. Listing secret metadata never selects
+ciphertext. Reading secrets for use records the receipt in the same transaction,
+before decryption or execution; failed attempts therefore remain auditable.
+Deleting resource runtime data keeps these historical receipts. Focused home
+and resource-store tests cover revisions, byte preservation, path boundaries,
+README regeneration, sealing context, retention and reopening the database.

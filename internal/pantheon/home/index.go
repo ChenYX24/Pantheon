@@ -293,7 +293,7 @@ func (i *Index) project(f *harnessFS, id, checkout string) (Detail, []Warning, e
 	} else if !errors.Is(err, os.ErrNotExist) {
 		warn("MEMORY.md", err)
 	}
-	p.Meta = ProjectMeta{Labels: []string{}}
+	p.Meta = ProjectMeta{Labels: []string{}, Resources: []string{}}
 	if data, at, err := i.file(f, filepath.Join(base, "pantheon.json")); err == nil {
 		touch(at)
 		if err = json.Unmarshal(data, &p.Meta); err != nil {
@@ -302,6 +302,9 @@ func (i *Index) project(f *harnessFS, id, checkout string) (Detail, []Warning, e
 		p.MetaRev = Revision(data)
 		if p.Meta.Labels == nil {
 			p.Meta.Labels = []string{}
+		}
+		if p.Meta.Resources == nil {
+			p.Meta.Resources = []string{}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		warn("pantheon.json", err)
