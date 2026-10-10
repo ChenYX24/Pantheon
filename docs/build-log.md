@@ -24698,3 +24698,18 @@ before decryption or execution; failed attempts therefore remain auditable.
 Deleting resource runtime data keeps these historical receipts. Focused home
 and resource-store tests cover revisions, byte preservation, path boundaries,
 README regeneration, sealing context, retention and reopening the database.
+
+Stage B server discovery reads concrete SSH Host names, including bounded Include
+expansion, without invoking SSH or evaluating Match exec. The GPU snapshot reader
+copies only the contract's public fields, expires metrics after 180 seconds and
+drops low-usage observations when a server is no longer fresh. Fixed-clock tests
+cover freshness boundaries and the removal of identity, UUID, address, user and
+stderr fields. Snapshot path and optional board URL have flags and environment
+overrides; missing snapshots remain unavailable and SSH aliases remain visible.
+
+The board's own `public_snapshot` implementation is not present in this worktree,
+and the worker is prohibited from reading the separate board repository. The
+current input assumption is a `nodes` array with a collection timestamp, optional
+version 1, and snake-case or camel-case public fields. It preserves the board's
+reported GPU observations rather than inventing utilization thresholds. Exact
+schema and state-policy parity still require a board-owned fixture at integration.

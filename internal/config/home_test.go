@@ -63,3 +63,20 @@ func TestHomeAgentScopeConfig(t *testing.T) {
 		t.Fatal("invalid scope")
 	}
 }
+
+func TestHomeGPUBoardConfig(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	if Default().GPUBoardSnapshot != filepath.Join(home, "projects/atombit-gpu-board/runtime/snapshot.json") || Default().GPUBoardURL != "" {
+		t.Fatal("GPU board defaults")
+	}
+	t.Setenv("VIBEPANEL_GPU_BOARD_SNAPSHOT", "/test/snapshot.json")
+	t.Setenv("VIBEPANEL_GPU_BOARD_URL", "https://board.invalid")
+	c, err := Load(nil, io.Discard)
+	if err != nil || c.GPUBoardSnapshot != "/test/snapshot.json" || c.GPUBoardURL != "https://board.invalid" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	c, err = Load([]string{"--gpu-board-snapshot", "/override/snapshot.json", "--gpu-board-url", ""}, io.Discard)
+	if err != nil || c.GPUBoardSnapshot != "/override/snapshot.json" || c.GPUBoardURL != "" {
+		t.Fatalf("%+v %v", c, err)
+	}
+}
