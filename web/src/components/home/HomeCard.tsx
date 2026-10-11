@@ -7,6 +7,7 @@ import { StateDot } from '../StateDot'
 import { safeText } from '../text'
 import { projectLink, relativeTime, stageProgress } from './helpers'
 import { HomeChip } from './HomeField'
+import { HomeRunChip } from './HomeRun'
 import { useHomeClock } from './clock'
 
 export function HomeTime({ at }: { at: string }) {
@@ -30,6 +31,7 @@ export function HomeCard({ project, onNavigate, fields, onPin, busy, returnSearc
       </div>
       <p className="mt-3 line-clamp-3 text-vp-base text-ink-2">{safeText(project.goal) || t('home.noGoal')}</p>
       <div className="mt-2 flex flex-wrap gap-1">{project.meta.labels.map((value) => <HomeChip key={value} value={value} options={fields?.project.labels.options} />)}{project.meta.priority && <HomeChip value={project.meta.priority} options={fields?.project.priority.options} />}{project.meta.phase && <HomeChip value={project.meta.phase} options={fields?.project.phase.options} />}</div>
+      {project.activeRun && <a className="relative z-10 mt-3 flex flex-wrap items-center gap-2 text-vp-sm hover:text-accent" href={projectLink({ projectId: project.id, tab: 'execution' }, returnSearch)} onClick={onNavigate} title={t('home.exec.taskRunning', { task: safeText(project.activeRun.taskId) })}><HomeRunChip state={project.activeRun.state} /><span>{safeText(project.activeRun.taskId)}</span></a>}
       {project.stages.length > 0 && <div className="mt-4 space-y-2">
         {project.stages.map((stage) => {
           const progress = stageProgress(stage)

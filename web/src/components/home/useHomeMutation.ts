@@ -15,7 +15,7 @@ export function useHomeMutation(refresh: () => Promise<unknown> | void) {
       return true
     } catch (error) {
       if (error instanceof HomeAPIError && error.status === 409) {
-        showToast({ kind: 'error', key: 'home.conflict' })
+        showToast(error.stale ? { kind: 'error', key: 'home.conflict' } : { kind: 'error', key: 'home.actionFailed', detail: error.message })
         await refresh()
       } else showToast({ kind: 'error', key: 'home.actionFailed', detail: error instanceof Error ? error.message : String(error) })
       return false

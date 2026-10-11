@@ -4,6 +4,15 @@ import { HOME_PATH, homeOverviewLink, homeProjectLink, homeSelection, legacyHome
 afterEach(() => { vi.unstubAllGlobals(); vi.resetModules() })
 
 describe('Stage A.2 project routes', () => {
+  it('links to execution and carries a handoff run into its task view', () => {
+    const execution = new URL(homeProjectLink({ projectId: 'pantheon', tab: 'execution' }), 'https://panel.test')
+    expect(homeSelection('pantheon', execution.search).tab).toBe('execution')
+    const handoff = new URL(homeProjectLink({ projectId: 'pantheon', taskId: 'E1', runId: 'run_1' }, '?view=table'), 'https://panel.test')
+    expect(homeSelection('pantheon', handoff.search)).toMatchObject({ tab: 'tasks', taskId: 'E1', runId: 'run_1' })
+    expect(homeOverviewLink(handoff.search)).toBe(`${HOME_PATH}?view=table`)
+    expect(homeSelection('pantheon', '?task=E1&run=../bad').runId).toBeUndefined()
+  })
+
   it('recognizes exactly one valid project segment, including trailing slash', () => {
     expect(routeFor(`${HOME_PATH}/p/pantheon`)).toEqual({ kind: 'home', projectId: 'pantheon' })
     expect(routeFor(`${HOME_PATH}/p/pantheon/`)).toEqual({ kind: 'home', projectId: 'pantheon' })

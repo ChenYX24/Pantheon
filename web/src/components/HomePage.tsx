@@ -11,6 +11,7 @@ import { applyTheme, loadTheme, type ThemeChoice } from './theme'
 import { safeText } from './text'
 import { HomeCard, HomeTime } from './home/HomeCard'
 import { HomeNotifications } from './home/HomeNotifications'
+import { HomeExecutionStatus } from './home/HomeExecutionStatus'
 import { HomeProjectPage } from './home/HomeProjectPage'
 import { HomeResourcesPage } from './home/HomeResourcesPage'
 import { HomeTable } from './home/HomeTable'
@@ -45,8 +46,10 @@ export function HomePage({ onSignOut }: { onSignOut: () => void }) {
   const index = useHomeResource(load)
   const tasks = useHomeResource(loadTasks)
   const settings = useHomeResource(homeApi.fields)
+  const execution = useHomeResource(homeApi.execution)
+  const executionStatus = execution.error ? null : execution.data
   const data = index.data?.available ? index.data : null
-  const changed = async () => { await index.refresh(); await tasks.refresh(); await settings.refresh() }
+  const changed = async () => { await index.refresh(); await tasks.refresh(); await settings.refresh(); await execution.refresh() }
   const mutation = useHomeMutation(changed)
 
   useEffect(() => { document.title = `${projectId || t(resourcesRoute ? 'home.res.title' : 'home.title')} · Pantheon` }, [lang, projectId, resourcesRoute])
@@ -99,6 +102,7 @@ export function HomePage({ onSignOut }: { onSignOut: () => void }) {
         {selection || resourcesRoute ? <a href={back} onClick={navigate} className="vp-control" title={t('home.back')}><ArrowLeft size={17} /><span className="text-vp-sm">{t('home.back')}</span></a> : <span className="text-vp-md font-semibold">{t('home.brand')}</span>}
         {!selection && !resourcesRoute && <div className="vp-segmented" role="tablist" aria-label={t('home.views')}>{HOME_VIEWS.map((value) => <button type="button" key={value} className="vp-tab px-3 text-vp-sm" role="tab" aria-selected={view.view === value} onClick={() => setView({ ...view, view: value })}>{t(`home.view.${value}`)}</button>)}</div>}
         <a href={HOME_RESOURCES_PATH} onClick={navigate} className="vp-control" aria-current={resourcesRoute ? 'page' : undefined}><Boxes size={16} />{t('home.res.title')}</a>
+        <HomeExecutionStatus execution={executionStatus} />
         <div className="ml-auto flex flex-wrap items-center gap-1">
           <button type="button" className="vp-control" onClick={() => setNotifications(true)} title={t('home.notifications')}><Bell size={16} /></button>
           <button type="button" className="vp-control" onClick={() => void changed()} disabled={index.loading} title={t('home.refresh')}><RefreshCw size={16} className={index.loading ? 'animate-spin' : ''} /></button>
@@ -110,7 +114,7 @@ export function HomePage({ onSignOut }: { onSignOut: () => void }) {
         {!selection && !resourcesRoute && <label className="flex w-full min-w-0 items-center gap-2"><Search size={16} className="shrink-0 text-ink-2" /><input className="home-input" type="search" value={view.q} onChange={(event) => setView({ ...view, q: event.target.value })} placeholder={t('home.search')} aria-label={t('home.search')} /></label>}
       </div>
     </header>
-    {resourcesRoute ? <HomeResourcesPage resourceId={route.kind === 'home' ? route.resourceId : undefined} projects={data?.projects ?? []} projectError={index.error} onNavigate={navigate} onGo={go} /> : selection ? <HomeProjectPage key={selection.projectId} selection={selection} settings={settings.data} state={view} onState={setView} onChanged={changed} onNavigate={navigate} onTab={(tab) => setProjectQuery({ tab })} onThread={(thread) => setProjectQuery({ thread })} returnSearch={previous ?? ''} /> : <main className="vp-safe-bottom min-h-0 min-w-0 flex-1 overflow-y-auto p-3 [--vp-safe-pad:2rem]">
+    {resourcesRoute ? <HomeResourcesPage resourceId={route.kind === 'home' ? route.resourceId : undefined} projects={data?.projects ?? []} projectError={index.error} onNavigate={navigate} onGo={go} /> : selection ? <HomeProjectPage key={selection.projectId} selection={selection} settings={settings.data} state={view} onState={setView} onChanged={changed} onNavigate={navigate} onTab={(tab) => setProjectQuery({ tab })} onThread={(thread) => setProjectQuery({ thread })} returnSearch={previous ?? ''} execution={executionStatus} executionError={execution.error} /> : <main className="vp-safe-bottom min-h-0 min-w-0 flex-1 overflow-y-auto p-3 [--vp-safe-pad:2rem]">
       <div className="mx-auto max-w-[1500px] space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 text-vp-xs text-ink-2">{data && <span>{t('home.generated', { time: '' })}<HomeTime at={data.generatedAt} /></span>}<label className="flex items-center gap-2"><input type="checkbox" checked={view.all} onChange={(event) => setView({ ...view, all: event.target.checked })} />{t('home.allProjects')}</label></div>
         {error && <p role="alert" className="rounded-vp border border-hairline bg-surface p-3">{safeText(error)}</p>}
@@ -124,7 +128,7 @@ export function HomePage({ onSignOut }: { onSignOut: () => void }) {
               <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">{projects.map((project) => <HomeCard key={project.id} project={project} fields={settings.data?.fields} returnSearch={address.search} onNavigate={navigate} busy={mutation.busy} onPin={() => void mutation.run(() => homeApi.patchMeta(project.id, { rev: project.metaRev, pinned: !project.meta.pinned }))} />)}</div>
             </section>
           </div>}
-          {view.view === 'table' && <HomeTable projects={data.projects} tasks={tasks.data ?? []} todos={data.todos} settings={settings.data} state={view} onState={setView} onChanged={changed} onNavigate={navigate} returnSearch={address.search} />}
+          {view.view === 'table' && <HomeTable projects={data.projects} tasks={tasks.data ?? []} todos={data.todos} settings={settings.data} state={view} onState={setView} onChanged={changed} onNavigate={navigate} returnSearch={address.search} execution={executionStatus} />}
           {view.view === 'todo' && <section className="rounded-vp-lg border border-hairline bg-surface p-4"><h1 className="mb-4 flex items-center gap-2 text-vp-md font-semibold"><ClipboardList size={18} />{t('home.todos', { count: todos.length })}</h1><HomeTodos todos={todos} onNavigate={navigate} returnSearch={address.search} /></section>}
           {data.warnings.length > 0 && <details className="rounded-vp border border-hairline bg-surface p-3 text-vp-sm"><summary className="cursor-pointer">{t('home.warnings', { count: data.warnings.length })}</summary><ul className="mt-2 space-y-2 text-ink-2">{data.warnings.map((warning, i) => <li key={i}>{safeText(warning.projectId)} · {safeText(warning.file)}<p>{safeText(warning.message)}</p></li>)}</ul></details>}
         </>}

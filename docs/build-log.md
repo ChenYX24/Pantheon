@@ -24889,3 +24889,18 @@ GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB`, followed by
 - `go test ./internal/parthenon -run '^TestHome|^TestWorker'` — passed, including the final rerun.
 - `go test ./internal/httpapi -run '^TestHome|^TestTheAPIDocCoversEveryRoute$'` — passed, including the final rerun.
 - `go test ./cmd/vibepanel -run '^TestEveryDocumentedCommandExists$|^TestTheHelpTextDescribesEachCommand$'` — cancelled during compilation; pending reviewer validation.
+
+## 2026-10-10 — Stage E1 execution frontend
+
+The execution API adapter follows the frozen E1 contract: a direct run array,
+flat run details with log and handoff filename, an enabled-only switch PUT, and
+bodyless run/stop/merge actions. Mutation refusals now retain their server reason;
+only a stale file revision gets the stale-edit toast. Manual-run eligibility
+ignores autonomy and checks the exposed status, checkout, dependencies and
+concurrency facts. Git validity remains a server check because the snapshot has
+no Git-validity field. Run timestamps accept RFC3339 or Unix seconds, the two
+existing home/runtime conventions; E1 does not specify their encoding.
+
+The first low-priority, single-worker pass passed 35 tests for API shapes,
+eligibility explanations, state glyphs, durations, autonomy defaults and bounds,
+full-auto consent, handoff route selection, and visible three-second polling.

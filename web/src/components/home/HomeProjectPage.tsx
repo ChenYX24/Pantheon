@@ -1,14 +1,15 @@
 import { useCallback, useState, type MouseEvent } from 'react'
-import { CheckSquare, FileText, Info, MessageSquare, RefreshCw, Terminal } from 'lucide-react'
+import { CheckSquare, FileText, Info, MessageSquare, Play, RefreshCw, Terminal } from 'lucide-react'
 import { t } from '../../i18n'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
-import { homeApi, type HomeCreateSession, type HomeFieldSettings, type HomeProject, type HomeSuggestion } from '../../protocol/home'
+import { homeApi, type HomeCreateSession, type HomeExecution as Execution, type HomeFieldSettings, type HomeProject, type HomeSuggestion } from '../../protocol/home'
 import { panelOpeningSession, type HomeSelection, type HomeTab } from '../../routes'
 import { safeText } from '../text'
 import { showToast } from '../toasts'
-import { changeHomeTaskFields, confirmHomeStatus } from './actions'
+import { changeHomeTaskFields, confirmHomeAutonomy, confirmHomeStatus } from './actions'
 import type { HomeViewState } from './board'
 import { HomeChat } from './HomeChat'
+import { HomeExecution } from './HomeExecution'
 import { HomeField } from './HomeField'
 import { HomeTable } from './HomeTable'
 import { HomeReports } from './HomeReports'
@@ -17,9 +18,9 @@ import { HomeProjectResourceSettings } from './HomeProjectResources'
 import { useHomeResource } from './useHomeResource'
 import { useHomeMutation } from './useHomeMutation'
 
-const tabs = [['chat', MessageSquare], ['tasks', CheckSquare], ['reports', FileText], ['sessions', Terminal], ['info', Info]] as const
+const tabs = [['chat', MessageSquare], ['tasks', CheckSquare], ['execution', Play], ['reports', FileText], ['sessions', Terminal], ['info', Info]] as const
 
-export function HomeProjectPage({ selection, settings, state, onState, onTab, onThread, onChanged, onNavigate, returnSearch }: {
+export function HomeProjectPage({ selection, settings, state, onState, onTab, onThread, onChanged, onNavigate, returnSearch, execution = null, executionError = '' }: {
   selection: HomeSelection
   settings: HomeFieldSettings | null
   state: HomeViewState
@@ -29,6 +30,8 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
   onChanged: () => Promise<unknown> | void
   onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void
   returnSearch?: string
+  execution?: Execution | null
+  executionError?: string
 }) {
   const { projectId, taskId, reportFile } = selection
   const wide = useMediaQuery('(min-width: 768px)')
@@ -58,7 +61,10 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
         break
       case 'create_session': await createSession({ name: item.name }); break
       case 'use_resources': await createSession({ resources: item.resources }); break
-      case 'set_project': await homeApi.patchMeta(projectId, { ...item.fields, rev: data.project.metaRev }); break
+      case 'set_project':
+        if (!await confirmHomeAutonomy(item.fields.autonomy, data.project.meta.autonomy)) return false
+        await homeApi.patchMeta(projectId, { ...item.fields, rev: data.project.metaRev })
+        break
       case 'reply_report': {
         const report = data.reports.find((report) => report.file === item.file)
         if (!report) throw new Error(t('home.reportMissing'))
@@ -77,7 +83,7 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
     <div className="vp-segmented" role="tablist">{visibleTabs.map(([id, Icon], index) => <button key={id} id={`home-tab-${id}`} type="button" role="tab" aria-selected={activeTab === id} aria-controls={`home-panel-${id}`} tabIndex={activeTab === id ? 0 : -1} className="vp-tab h-auto flex-col gap-1 px-1 py-2 text-vp-xs" onClick={() => onTab(id)} onKeyDown={(event) => {
       const next = event.key === 'ArrowRight' ? (index + 1) % visibleTabs.length : event.key === 'ArrowLeft' ? (index + visibleTabs.length - 1) % visibleTabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? visibleTabs.length - 1 : null
       if (next !== null) { event.preventDefault(); onTab(visibleTabs[next][0]); document.getElementById(`home-tab-${visibleTabs[next][0]}`)?.focus() }
-    }}><Icon size={16} /><span>{t(`home.tab.${id}`)}</span></button>)}</div>
+    }}><Icon size={16} className="shrink-0" /><span className="min-w-0 max-w-full [overflow-wrap:anywhere]">{t(id === 'execution' ? 'home.exec.title' : `home.tab.${id}`)}</span></button>)}</div>
   </nav>
 
   return <main className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="home-project-page">
@@ -90,7 +96,8 @@ export function HomeProjectPage({ selection, settings, state, onState, onTab, on
       <div className={`${wide || tab !== 'chat' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-[2] flex-col border-hairline md:border-l`}>
         {wide && nav}
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3">
-          <div id="home-panel-tasks" role="tabpanel" aria-labelledby="home-tab-tasks" hidden={rightTab !== 'tasks'}>{rightTab === 'tasks' && <HomeTable projects={[data.project]} tasks={data.tasks.map((task) => ({ ...task, projectId }))} todos={data.todos} settings={settings} state={state} onState={onState} onChanged={changed} onNavigate={onNavigate} projectId={projectId} target={taskId} returnSearch={returnSearch} />}</div>
+          <div id="home-panel-tasks" role="tabpanel" aria-labelledby="home-tab-tasks" hidden={rightTab !== 'tasks'}>{rightTab === 'tasks' && <HomeTable projects={[data.project]} tasks={data.tasks.map((task) => ({ ...task, projectId }))} todos={data.todos} settings={settings} state={state} onState={onState} onChanged={changed} onNavigate={onNavigate} projectId={projectId} target={taskId} returnSearch={returnSearch} execution={execution} runId={selection.runId} />}</div>
+          <div id="home-panel-execution" role="tabpanel" aria-labelledby="home-tab-execution" hidden={rightTab !== 'execution'}>{rightTab === 'execution' && <HomeExecution project={data.project} tasks={data.tasks} execution={execution} executionError={executionError} onChanged={changed} onNavigate={onNavigate} returnSearch={returnSearch} />}</div>
           <div id="home-panel-reports" role="tabpanel" aria-labelledby="home-tab-reports" hidden={rightTab !== 'reports'}><HomeReports projectId={projectId} reports={data.reports} target={reportFile} active={rightTab === 'reports'} busy={busy} onNavigate={onNavigate} returnSearch={returnSearch} onReply={(report, text) => run(async () => {
             await homeApi.replyReport(projectId, report.file, text, report.rev)
             showToast({ kind: 'success', key: 'home.replySaved' })

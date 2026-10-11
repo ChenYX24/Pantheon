@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { watchHomeVisibility } from './polling'
 
-export function useHomeResource<T>(load: (signal: AbortSignal) => Promise<T>, poll = true) {
+export function useHomeResource<T>(load: (signal: AbortSignal) => Promise<T>, poll: boolean | number = true) {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)

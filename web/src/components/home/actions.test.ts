@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { homeApi, type HomeTask } from '../../protocol/home'
 import { answerAsk, currentAsk } from '../ask'
-import { changeHomeTaskFields, changeHomeTaskStatus } from './actions'
+import { changeHomeAutonomy, changeHomeTaskFields, changeHomeTaskStatus } from './actions'
+import { autonomyDraft } from './execution'
 
 const task: HomeTask = {
   priority: '', tags: [], owner: '', due: '', id: 'A2', title: 'Review the backend', status: 'awaiting_review', stage: 'A', primary: '', secondary: '',
@@ -10,6 +11,32 @@ const task: HomeTask = {
 afterEach(() => {
   while (currentAsk()) answerAsk(null)
   vi.restoreAllMocks()
+})
+
+describe('full autonomy consent', () => {
+  it('uses the shared confirmation before writing, and cancellation leaves metadata alone', async () => {
+    const patch = vi.spyOn(homeApi, 'patchMeta').mockResolvedValue({})
+    const draft = { ...autonomyDraft({}, 'seen-rev'), autonomy: 'full' as const }
+    const cancelled = changeHomeAutonomy('pantheon', draft)
+    expect(currentAsk()).not.toBeNull()
+    expect(patch).not.toHaveBeenCalled()
+    answerAsk(null)
+    expect(await cancelled).toBe(false)
+    expect(patch).not.toHaveBeenCalled()
+    const accepted = changeHomeAutonomy('pantheon', draft)
+    answerAsk('')
+    expect(await accepted).toBe(true)
+    expect(patch).toHaveBeenCalledExactlyOnceWith('pantheon', { rev: 'seen-rev', autonomy: 'full', approvedStages: [], autoMerge: false, maxAttempts: 2, attemptMinutes: 30 })
+  })
+
+  it('does not ask again for an existing full-auto project and refuses invalid limits', async () => {
+    const patch = vi.spyOn(homeApi, 'patchMeta').mockResolvedValue({})
+    const draft = autonomyDraft({ autonomy: 'full' }, 'seen')
+    expect(await changeHomeAutonomy('pantheon', draft)).toBe(true)
+    expect(currentAsk()).toBeNull()
+    expect(await changeHomeAutonomy('pantheon', { ...draft, maxAttempts: '4' })).toBe(false)
+    expect(patch).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('explicit task status changes', () => {
