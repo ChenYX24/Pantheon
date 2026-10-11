@@ -32,7 +32,7 @@ export function HomeDialog({ title, onClose, children, anchor }: {
   }, [])
 
   return createPortal(<div className="vp-backdrop @container fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-2" onClick={onClose}>
-    <section ref={panel} role="dialog" aria-modal="true" aria-labelledby={id} data-vp-modal="home" className={`vp-panel-in @container flex max-h-[85dvh] min-w-0 flex-col overflow-hidden rounded-vp-lg border border-hairline bg-surface text-ink shadow-xl @3xl:self-center [overflow-wrap:anywhere] ${anchor ? 'fixed w-72 max-w-[calc(100vw-1rem)]' : 'w-full max-w-2xl'}`} style={anchor} onClick={(event) => event.stopPropagation()}>
+    <section ref={panel} role="dialog" aria-modal="true" aria-labelledby={id} data-vp-modal="home" className={`pantheon-ui vp-panel-in @container flex max-h-[85dvh] min-w-0 flex-col overflow-hidden rounded-vp-lg border border-hairline bg-surface text-ink shadow-xl @3xl:self-center [overflow-wrap:anywhere] ${anchor ? 'fixed w-72 max-w-[calc(100vw-1rem)]' : 'w-full max-w-2xl'}`} style={anchor ? { ...anchor, maxHeight: `min(85dvh, calc(100dvh - ${anchor.top + 16}px))` } : undefined} onClick={(event) => event.stopPropagation()}>
       <header className="flex shrink-0 items-center gap-2 border-b border-hairline px-4 py-3"><h2 id={id} className="min-w-0 flex-1 font-semibold">{safeText(title)}</h2><button type="button" className="vp-control" onClick={onClose} title={t('home.close')}><X size={16} /></button></header>
       <div className="vp-safe-bottom min-h-0 overflow-y-auto p-4">{children}</div>
     </section>
