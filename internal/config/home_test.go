@@ -80,3 +80,28 @@ func TestHomeGPUBoardConfig(t *testing.T) {
 		t.Fatalf("%+v %v", c, err)
 	}
 }
+
+func TestHomeExecutionConfig(t *testing.T) {
+	if Default().HomeExecute != "off" || Default().HomeMaxRuns != 2 {
+		t.Fatal("execution defaults")
+	}
+	t.Setenv("VIBEPANEL_HOME_EXECUTE", "allow")
+	t.Setenv("VIBEPANEL_HOME_MAX_RUNS", "3")
+	c, err := Load(nil, io.Discard)
+	if err != nil || c.HomeExecute != "allow" || c.HomeMaxRuns != 3 {
+		t.Fatal(c, err)
+	}
+	c, err = Load([]string{"--home-execute", "off", "--home-max-runs", "1"}, io.Discard)
+	if err != nil || c.HomeExecute != "off" || c.HomeMaxRuns != 1 {
+		t.Fatal(c, err)
+	}
+	for _, flags := range [][]string{{"--home-execute", "on"}, {"--home-max-runs", "0"}, {"--home-max-runs", "-1"}} {
+		if _, err := Load(flags, io.Discard); err == nil {
+			t.Fatal("invalid flags", flags)
+		}
+	}
+	t.Setenv("VIBEPANEL_HOME_MAX_RUNS", "invalid")
+	if _, err := Load(nil, io.Discard); err == nil {
+		t.Fatal("invalid concurrency env")
+	}
+}

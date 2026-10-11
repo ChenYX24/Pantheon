@@ -1969,17 +1969,19 @@ The home view is read from files: the cyx registry (`--cyx-home`, default
 `~/.cyx/local.json`) and each Harness project folder (`project.json`,
 `ACTIVE_CONTEXT.md`, `agent-docs/tasks/<id>/task.md`, `agent-docs/reports/*.md`).
 The database keeps chat history, notification receipts, sealed resource secrets,
-resource checks and usage receipts. A new database yields the same projects,
+resource checks, usage receipts and home execution runs. A new database yields the same projects,
 tasks, to-dos and resource metadata, without their runtime history or secrets. The full contract, file
 formats and to-do rules are in `docs/pantheon/stage-a-contract.md` and
-`docs/pantheon/stage-a2-contract.md` and `docs/pantheon/stage-b-contract.md`.
+`docs/pantheon/stage-a2-contract.md`, `docs/pantheon/stage-b-contract.md` and
+`docs/pantheon/stage-e1-contract.md`.
 
 ### `GET /api/home`
 
 Query `all=1` includes archived and merged projects. Returns `available`,
 `generatedAt`, `projects`, `todos` and `warnings`; without a readable registry it
 returns `200` with `available: false` and a `reason`. Unreadable files become
-warnings and never fail the request.
+warnings and never fail the request. Project objects include `activeRun: null` or
+`{id, taskId, state, startedAt}` for the current running/reviewing task.
 
 ### `GET /api/home/models`
 
@@ -2024,7 +2026,11 @@ values and allowed colors, then atomically writes the file. Returns `{fields, re
 ### `PATCH /api/home/projects/{id}/meta`
 
 Body: `rev`, optional `labels` (array), `priority`, `owner`, `phase`, `pinned`,
-`resources` (array of resource ids used by default for new sessions).
+`resources` (array of resource ids used by default for new sessions),
+`autonomy` (`off|stage|full`, default `off`), `approvedStages` (array of stage names),
+`autoMerge` (default false), `maxAttempts` (1–3, default 2), `attemptMinutes`
+(5–120, default 30), `verifyScope` (`auto|off`, default `auto`).
+Revoking a stage does not stop an active run.
 Atomically creates or patches the optional project `pantheon.json`; creation uses
 `rev: ""`. Returns `{meta, metaRev}`; `409` on a stale revision. Projects include
 these same keys, and pinned projects sort before all other home projects.
@@ -2254,3 +2260,64 @@ still needs a board-owned integration fixture.
 Returns `{resources, defaultResources, warnings}`. Lists only resources allowing
 `*` or that project id; `defaultResources` comes from `resources` in the project's
 `pantheon.json`, editable through the existing metadata PATCH.
+
+
+### `GET /api/home/execution`
+
+Returns `{flag, enabled, maxRuns, active:[Run]}`. The flag is `off|allow` from
+`--home-execute` / `VIBEPANEL_HOME_EXECUTE` (default `off`). `enabled` is the
+effective runtime switch; the database setting `home.execute.enabled` defaults to
+false. `--home-max-runs` / `VIBEPANEL_HOME_MAX_RUNS` defaults to 2. Active runs
+remain visible and are reconciled even when execution is switched off.
+
+### `PUT /api/home/execution`
+
+Body `{enabled: boolean}`. Requires flag `allow`, otherwise `409` with a reason.
+Returns the same status object as GET. Disabling prevents new claims and does not
+stop existing workers. Eligible tasks are picked on the next five-second tick.
+
+### `GET /api/home/projects/{id}/runs`
+
+Returns an array of the last 50 runs, newest first. A `Run` contains `id`,
+`projectId`, `taskId`, `attempt`, `state`, `harness`, `model`, `reviewer`
+(`harness/model`), `branch`, `worktree`, `sessionId`, `baseCommit`, `headCommit`,
+`startedAt`, `finishedAt` (Unix seconds, 0 before completion), `summary`, and
+`checks:[{command, exitCode, output}]`. Each check retains the last 2 KiB of output.
+States are `running`, `reviewing`, `accepted`, `rejected`, `blocked`, `failed`,
+`stopped`, and `merged`.
+
+### `GET /api/home/projects/{id}/runs/{runId}`
+
+Returns the run fields plus `log` (at most the last 16 KiB of its tmux pane) and
+`handoff` (the task-relative handoff filename, empty until reconciled).
+
+### `POST /api/home/projects/{id}/tasks/{taskId}/run`
+
+Starts one planned task irrespective of project autonomy. Requires enabled
+execution, completed dependencies, a Git checkout with HEAD, no active project
+run and free instance capacity; otherwise `409` with a reason. Returns `201 Run`.
+The task becomes `in_progress` with its session id. The worker starts in a fresh
+`pantheon/<task-id>` branch/worktree at checkout HEAD; existing branch names gain
+a numeric suffix. Dirty checkout changes remain outside the worktree and produce
+a warning. The worker commits changes, runs declared checks, and obtains an
+independent read-only review. Acceptance becomes `awaiting_review`; rejection or
+failure becomes `blocked`, with a handoff and report written for the user.
+
+### `POST /api/home/projects/{id}/runs/{runId}/stop`
+
+Writes a stop request for an active worker; returns `202 Run`, or `409` for a
+terminal run. The worker cancels its agent within ten seconds. Reconciliation
+then marks the run `stopped` and the task `planned`; the writer slot is retained
+until acknowledgement or confirmed disappearance. Autonomy still governs later
+claims of planned tasks.
+
+### `POST /api/home/projects/{id}/runs/{runId}/merge`
+
+Merges an accepted run with `git merge --no-ff` into the checkout's current branch.
+Returns `200 Run` in state `merged` and marks the task `done`; removes the run
+worktree and keeps the branch. Refuses with `409` for a dirty or detached checkout,
+active project writer, changed run branch, or unaccepted run. A conflict is
+aborted, leaves the run `accepted`, and blocks the task with `merge conflict,
+replan`. Never pushes. `autoMerge` attempts the same merge after acceptance only
+when at least one executable check passed and none failed; reviewer-only
+acceptance always requires a manual merge.

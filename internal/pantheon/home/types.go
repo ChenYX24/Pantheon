@@ -119,7 +119,15 @@ type RuntimeProject struct {
 	Sessions []Session
 }
 
+type ActiveRun struct {
+	ID        string `json:"id"`
+	TaskID    string `json:"taskId"`
+	State     string `json:"state"`
+	StartedAt int64  `json:"startedAt"`
+}
+
 type Project struct {
+	ActiveRun      *ActiveRun      `json:"activeRun"`
 	ID             string          `json:"id"`
 	Aliases        []string        `json:"aliases"`
 	Portfolio      string          `json:"portfolio"`

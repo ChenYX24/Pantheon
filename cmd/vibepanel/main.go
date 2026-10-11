@@ -105,6 +105,14 @@ func commandNames() []string {
 
 func init() {
 	commands = map[string]func([]string) error{
+		"home-worker": func(args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("home-worker requires a job path")
+			}
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+			defer stop()
+			return parthenon.HomeWorker(ctx, args[0], nil)
+		},
 		"workflow-worker": func(args []string) error {
 			if len(args) != 1 {
 				return fmt.Errorf("workflow-worker requires a job path")
@@ -372,6 +380,7 @@ func cmdServe(args []string) error {
 	}
 	go srv.RunWorkflow(ctx)
 	go srv.RunHomeNotifications(ctx)
+	go srv.RunHomeExecution(ctx)
 	httpServer := &http.Server{
 		Addr:    a.cfg.Addr,
 		Handler: srv.Routes(),

@@ -24803,3 +24803,89 @@ NODE_OPTIONS='--max-old-space-size=192 --max-semi-space-size=1 --jitless' nice -
 NODE_OPTIONS='--max-old-space-size=128 --max-semi-space-size=1 --jitless' nice -n 19 node node_modules/eslint/bin/eslint.js src/components/HomePage.tsx src/components/home/HomeResource*.tsx src/components/home/HomeProjectResources.tsx src/components/home/HomeNewSession.tsx src/components/home/HomeSuggestionAction.tsx src/components/home/HomeChat.tsx src/components/home/HomeSessions.tsx src/components/home/HomeProjectPage.tsx src/components/home/resources*.ts src/components/home/resourceFixtures.ts src/protocol/home*.ts src/routes*.ts src/i18n.ts
 NODE_OPTIONS='--max-old-space-size=128 --max-semi-space-size=1' RAYON_NUM_THREADS=1 nice -n 19 node node_modules/vite/bin/vite.js build --outDir node_modules/.cache/stage-b-build
 ```
+
+## 2026-10-10 — Stage E1 execution foundations
+
+Home project metadata now carries bounded execution settings, defaulting to off.
+Eligibility is derived from file tasks, approved stages and completed dependencies,
+ordered by priority and age. SQLite reserves one running/reviewing writer per
+Harness project and checks the instance cap in the same insert. Home handoffs and
+reports retain a run marker so reconciliation can be retried after a restart without
+appending duplicate receipts; same-minute reports preserve both runs.
+
+Focused home, configuration and store tests pass, including revision validation,
+symlink containment, stage/dependency eligibility, receipt numbering and the partial
+unique index. Checks run serially at nice 19 with one Go worker and a 600 MiB Go
+memory limit. Build cache and temporary test data stay in the worktree's ignored
+`data/` directory. A cold store compile was cancelled and the existing compiled
+cache copied locally before retrying successfully; no live service was touched.
+
+## 2026-10-10 — Stage E1 file-task worker
+
+`home-worker` uses the existing bounded CLI runner and resource-scope detection,
+with an immutable job outside the worktree. It supports primary/secondary failover,
+permission blocking, stop-file cancellation, declared verification, worker-authored
+commits and independent read-only review by the other harness/model. Verification
+uses nice 19 in the optional user scope and retains exit codes plus output tails.
+Review-only acceptance never triggers automatic merging. File tasks are only
+updated by the server, not by the worker.
+
+Fake Claude/Codex executable tests pass for success, fallback, rejection, failed
+checks, permission blocking, cancellation within ten seconds, and reviewer-only
+acceptance. Existing workflow worker tests also pass; its implementation is
+unchanged. No real model or tmux server was invoked by these tests.
+
+## 2026-10-11 — Stage E1 execution service and reconciliation
+
+The home execution ticker claims eligible file tasks in priority/age order and
+launches a dedicated `home-worker` tmux session in a fresh worktree. The runtime
+switch is subordinate to `--home-execute allow`. Development routes have exact
+method allow-lists; `/api/home` projects expose the active run. Immediate execution
+bypasses autonomy, but still checks dependency completion, checkout validity and
+both concurrency limits. A checkout must be its Git root: Git's upward discovery
+must never select an unrelated parent repository when a directory lacks `.git`.
+
+Reconciliation applies worker receipts to tasks, numbered handoffs and reports,
+including review reasons and unapproved follow-up suggestions for the project
+manager. Receipt markers make replay after an interrupted reconciliation
+idempotent. Missing workers fail only after thirty seconds of observed absence.
+A stop retains the writer slot until acknowledged. Stage completion reports use
+a stable stage key so later ticks do not repeat them.
+
+Accepted runs may merge into a clean, attached checkout with `--no-ff`; changed
+run branches are refused and conflicts are aborted before returning 409. Successful
+merges mark tasks done, retain branches and remove worktrees. Automatic merging
+requires executable checks; reviewer-only acceptance leaves a manual decision.
+Merge receipts accompany the original worker result. The old workflow worker and
+all frontend sources are unchanged.
+
+Contract interpretations: `verifyScope` accepts `auto|off`, like agent scopes;
+reviewer identifiers are `harness/model` strings; run times are Unix seconds,
+matching existing runtime tables. The default executor pair comes from the home
+model catalogue. Missing executable checks permit manual merging after acceptance,
+but never automatic merging. A stop restores `planned`, so still-enabled autonomy
+may claim the task on a later scheduling pass. Receipts contain the data needed to
+rebuild runtime history; there is no automatic database import command in E1.
+
+Validation: focused configuration, store, home-file and worker tests passed, plus
+`go test ./internal/httpapi -run '^TestHome|^TestTheAPIDocCoversEveryRoute$'`.
+These include temporary Git repositories, fake Claude/Codex executables, a fake
+tmux launch function, claims, stop/vanish handling, reconciliation replay, merge
+success/refusals/conflict abort and stage-summary deduplication. No real model,
+tmux server, browser, service or deployment was started. The first HTTP API compile
+was killed by the host; retrying with `GOGC=20` passed, as did the final rerun.
+An optional CLI-dispatch test was cancelled at the work budget while compiling;
+it has no completed result. A prematurely queued CLI attempt briefly overlapped a
+pending home check and was immediately cancelled, then retried serially.
+
+All successful commands ran from the worktree with these environment settings:
+`TMPDIR="$PWD/data/e1-tmp" GOCACHE="$PWD/data/e1-go-cache" GOTOOLCHAIN=auto
+GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB`, followed by
+`nice -n 19`. Final home, worker and HTTP API commands also set `GOGC=20`.
+
+- `go test ./internal/config -run '^TestHome'` — passed.
+- `go test ./internal/store -run '^TestHome'` — passed after cancelling the cold compile and copying an existing cache locally.
+- `go test ./internal/pantheon/home -run '^TestHome'` — passed, including the final rerun.
+- `go test ./internal/parthenon -run '^TestHome|^TestWorker'` — passed, including the final rerun.
+- `go test ./internal/httpapi -run '^TestHome|^TestTheAPIDocCoversEveryRoute$'` — passed, including the final rerun.
+- `go test ./cmd/vibepanel -run '^TestEveryDocumentedCommandExists$|^TestTheHelpTextDescribesEachCommand$'` — cancelled during compilation; pending reviewer validation.

@@ -8,28 +8,40 @@ import (
 )
 
 type ProjectMeta struct {
-	Resources []string `json:"resources"`
-	Labels    []string `json:"labels"`
-	Priority  string   `json:"priority"`
-	Owner     string   `json:"owner"`
-	Phase     string   `json:"phase"`
-	Pinned    bool     `json:"pinned"`
+	Autonomy       string   `json:"autonomy"`
+	ApprovedStages []string `json:"approvedStages"`
+	AutoMerge      bool     `json:"autoMerge"`
+	MaxAttempts    int      `json:"maxAttempts"`
+	AttemptMinutes int      `json:"attemptMinutes"`
+	VerifyScope    string   `json:"verifyScope"`
+	Resources      []string `json:"resources"`
+	Labels         []string `json:"labels"`
+	Priority       string   `json:"priority"`
+	Owner          string   `json:"owner"`
+	Phase          string   `json:"phase"`
+	Pinned         bool     `json:"pinned"`
 }
 
 type PatchMeta struct {
-	Resources *[]string `json:"resources"`
-	Rev       string    `json:"rev"`
-	Labels    *[]string `json:"labels"`
-	Priority  *string   `json:"priority"`
-	Owner     *string   `json:"owner"`
-	Phase     *string   `json:"phase"`
-	Pinned    *bool     `json:"pinned"`
+	Autonomy       *string   `json:"autonomy"`
+	ApprovedStages *[]string `json:"approvedStages"`
+	AutoMerge      *bool     `json:"autoMerge"`
+	MaxAttempts    *int      `json:"maxAttempts"`
+	AttemptMinutes *int      `json:"attemptMinutes"`
+	VerifyScope    *string   `json:"verifyScope"`
+	Resources      *[]string `json:"resources"`
+	Rev            string    `json:"rev"`
+	Labels         *[]string `json:"labels"`
+	Priority       *string   `json:"priority"`
+	Owner          *string   `json:"owner"`
+	Phase          *string   `json:"phase"`
+	Pinned         *bool     `json:"pinned"`
 }
 
 func (i *Index) PatchMeta(cyxHome, project string, req PatchMeta) (ProjectMeta, string, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	meta := ProjectMeta{Labels: []string{}, Resources: []string{}}
+	meta := DefaultMeta()
 	f, base, err := i.writableProject(cyxHome, project)
 	if err != nil {
 		return meta, "", err
@@ -48,6 +60,27 @@ func (i *Index) PatchMeta(cyxHome, project string, req PatchMeta) (ProjectMeta, 
 			return meta, "", err
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
+		return meta, "", err
+	}
+	if req.Autonomy != nil {
+		meta.Autonomy = *req.Autonomy
+	}
+	if req.ApprovedStages != nil {
+		meta.ApprovedStages = *req.ApprovedStages
+	}
+	if req.AutoMerge != nil {
+		meta.AutoMerge = *req.AutoMerge
+	}
+	if req.MaxAttempts != nil {
+		meta.MaxAttempts = *req.MaxAttempts
+	}
+	if req.AttemptMinutes != nil {
+		meta.AttemptMinutes = *req.AttemptMinutes
+	}
+	if req.VerifyScope != nil {
+		meta.VerifyScope = *req.VerifyScope
+	}
+	if err := meta.ValidateExecution(); err != nil {
 		return meta, "", err
 	}
 	if req.Labels != nil {
@@ -94,4 +127,27 @@ func (i *Index) PatchMeta(cyxHome, project string, req PatchMeta) (ProjectMeta, 
 		return meta, "", err
 	}
 	return meta, Revision(data), nil
+}
+
+func DefaultMeta() ProjectMeta {
+	return ProjectMeta{Labels: []string{}, Resources: []string{}, Autonomy: "off", ApprovedStages: []string{}, MaxAttempts: 2, AttemptMinutes: 30, VerifyScope: "auto"}
+}
+
+func (m ProjectMeta) ValidateExecution() error {
+	if m.Autonomy != "off" && m.Autonomy != "stage" && m.Autonomy != "full" {
+		return errors.New("autonomy must be off, stage or full")
+	}
+	if err := validateStrings(m.ApprovedStages); err != nil {
+		return err
+	}
+	if m.MaxAttempts < 1 || m.MaxAttempts > 3 {
+		return errors.New("maxAttempts must be between 1 and 3")
+	}
+	if m.AttemptMinutes < 5 || m.AttemptMinutes > 120 {
+		return errors.New("attemptMinutes must be between 5 and 120")
+	}
+	if m.VerifyScope != "auto" && m.VerifyScope != "off" {
+		return errors.New("verifyScope must be auto or off")
+	}
+	return nil
 }

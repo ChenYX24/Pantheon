@@ -52,6 +52,7 @@ type Server struct {
 	homeNotifications homeNotifications
 	homeDiscussions   homeDiscussions
 	homeResources     homeResources
+	homeExecution     homeExecution
 	Cfg               config.Config
 	DB                *store.DB
 	Tmux              *tmux.Client

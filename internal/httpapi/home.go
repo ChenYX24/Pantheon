@@ -19,6 +19,7 @@ import (
 
 func (s *Server) registerHomeRoutes(r chi.Router) {
 	s.registerHomeResourceRoutes(r)
+	s.registerHomeExecutionRoutes(r)
 	r.Get("/home", s.handleHome)
 	r.Get("/home/models", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"harnesses": parthenon.Models()})
@@ -54,7 +55,7 @@ func homePlanningRoute(method, path string) bool {
 	if !strings.HasPrefix(path, "/api/") {
 		return false
 	}
-	if homeResourceRoute(method, path) {
+	if homeResourceRoute(method, path) || homeExecutionRoute(method, path) {
 		return true
 	}
 	if method == http.MethodGet && (path == "/api/home" || path == "/api/home/notifications" || path == "/api/home/models" || path == "/api/home/fields" || path == "/api/home/tasks" || path == "/api/home/notify-settings") {
@@ -125,7 +126,23 @@ func (s *Server) homeSnapshot(ctx context.Context, all bool) (home.Snapshot, err
 		}
 		runtime = append(runtime, item)
 	}
-	return s.Home.Snapshot(s.Cfg.CyxHome, all, runtime), nil
+	snapshot := s.Home.Snapshot(s.Cfg.CyxHome, all, runtime)
+	active, err := s.DB.ActiveHomeRuns(ctx)
+	if err != nil {
+		return home.Snapshot{}, err
+	}
+	for _, run := range active {
+		for n := range snapshot.Projects {
+			project := &snapshot.Projects[n]
+			if project.ID == run.ProjectID {
+				project.ActiveRun = &home.ActiveRun{ID: run.ID, TaskID: run.TaskID, State: run.State, StartedAt: run.StartedAt}
+				detail := snapshot.Details[project.ID]
+				detail.Project = *project
+				snapshot.Details[project.ID] = detail
+			}
+		}
+	}
+	return snapshot, nil
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
