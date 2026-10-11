@@ -245,6 +245,9 @@ func TestHomeWorkerDoesNotCommitRunArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := readHomeWorkerResult(t, spec)
+	if result.State != "accepted" {
+		t.Fatalf("artifacts left by checks must not block acceptance: %+v", result)
+	}
 	files, err := HomeGit(context.Background(), job.Run.Worktree, "show", "--name-only", "--format=", result.HeadCommit)
 	if err != nil || strings.Contains(files, "pyc") || !strings.Contains(files, "proof.txt") {
 		t.Fatalf("committed files %q, err %v", files, err)

@@ -375,7 +375,7 @@ func HomeWorker(ctx context.Context, spec string, runner Runner) (workerErr erro
 			r.State = "accepted"
 		}
 		head, headErr := HomeGit(ctx, r.Worktree, "rev-parse", "HEAD")
-		dirty, dirtyErr := HomeGit(ctx, r.Worktree, "status", "--porcelain")
+		dirty, dirtyErr := homeGitIgnoringArtifacts(ctx, r.Worktree, "status", "--porcelain")
 		if headErr != nil || dirtyErr != nil || head != r.HeadCommit || dirty != "" {
 			r.State = "blocked"
 			r.Summary += "\nWorktree changed during independent review; review the new changes before acceptance."
@@ -400,6 +400,12 @@ var homeArtifacts = []string{
 }
 
 func homeStageChanges(ctx context.Context, worktree string) (string, error) {
+	return homeGitIgnoringArtifacts(ctx, worktree, "add", "-A")
+}
+
+// The review guard must see the same tree the commit saw: artifacts left by
+// the verify commands are neither staged nor counted as a change.
+func homeGitIgnoringArtifacts(ctx context.Context, worktree string, args ...string) (string, error) {
 	f, err := os.CreateTemp("", "pantheon-exclude-*")
 	if err != nil {
 		return "", err
@@ -412,5 +418,5 @@ func homeStageChanges(ctx context.Context, worktree string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return HomeGit(ctx, worktree, "-c", "core.excludesFile="+f.Name(), "add", "-A")
+	return HomeGit(ctx, worktree, append([]string{"-c", "core.excludesFile=" + f.Name()}, args...)...)
 }
