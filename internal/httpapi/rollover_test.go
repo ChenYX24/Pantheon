@@ -467,3 +467,19 @@ func TestRolloverInputFailureNeverEndsAnAgentUnasked(t *testing.T) {
 		t.Fatal(current, err)
 	}
 }
+
+func TestRolloverStopsWaitingWhenTheAgentExits(t *testing.T) {
+	// Measured: Codex updated itself and exited right after the prompt; the
+	// rollover still waited out the whole grace for a reply nobody could give.
+	s, row, h, _ := rolloverFixture(t)
+	start := h.now()
+	h.gone = func(context.Context, store.Session) bool { return h.now().Sub(start) >= 2*time.Second }
+	result, err := s.runRollover(context.Background(), row.ID, rolloverRequest{Reason: "manual"}, 0)
+	if err != nil || h.now().Sub(start) != 2*time.Second {
+		t.Fatal(err, h.now().Sub(start))
+	}
+	data, err := os.ReadFile(result.Handoff)
+	if err != nil || !strings.Contains(string(data), "agent did not answer") {
+		t.Fatal("fallback handoff expected", err, string(data))
+	}
+}

@@ -76,6 +76,9 @@ type rolloverHooks struct {
 	ready      func(context.Context, store.Session) (bool, error)
 	memory     func() (uint64, uint64)
 	held       func(store.Session) uint64
+	// gone reports that the pane's agent has exited. Nothing can answer a
+	// handoff request after that, so waiting out the grace is pure delay.
+	gone func(context.Context, store.Session) bool
 }
 
 var errRolloverConflict = errors.New("session is already rolling over or archived")
@@ -233,6 +236,12 @@ func (s *Server) rolloverRuntime() rolloverHooks {
 			}, nil
 		},
 		create: s.createRolloverSession,
+		gone: func(ctx context.Context, row store.Session) bool {
+			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			info, err := s.rolloverTerminal().Get(ctx, row.TmuxName)
+			return err == nil && info.Dead
+		},
 		ready: func(ctx context.Context, row store.Session) (bool, error) {
 			ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
@@ -351,7 +360,7 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 	}
 	if rolloverAgent(row) {
 		beforeSend := h.now().Add(time.Minute)
-		for row.State == session.StateWorking && h.now().Before(beforeSend) && !critical() {
+		for row.State == session.StateWorking && h.now().Before(beforeSend) && !critical() && (h.gone == nil || !h.gone(ctx, row)) {
 			if err = h.wait(ctx, time.Second); err != nil {
 				return result, err
 			}
@@ -489,7 +498,7 @@ func (s *Server) waitHandoff(ctx context.Context, h rolloverHooks, row store.Ses
 		if text, err := h.capture(ctx, row, 200); err == nil && markerCount(text) > markersBefore {
 			return nil
 		}
-		if !now.Before(deadline) || critical() {
+		if !now.Before(deadline) || critical() || h.gone != nil && h.gone(ctx, row) {
 			return nil
 		}
 		if err := h.wait(ctx, time.Second); err != nil {
