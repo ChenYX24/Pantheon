@@ -1,8 +1,9 @@
 import { useCallback, useState, type MouseEvent } from 'react'
-import { ArrowLeft, KeyRound, Pencil, Play, RefreshCw, Trash2 } from 'lucide-react'
+import { KeyRound, Pencil, Play, RefreshCw, Trash2 } from 'lucide-react'
 import { t } from '../../i18n'
 import { homeApi, type HomeProject, type HomeResource, type HomeResourceCheck } from '../../protocol/home'
 import { HOME_RESOURCES_PATH, homeProjectLink, panelOpeningSession } from '../../routes'
+import { PageHeader } from '../shell/PageHeader'
 import { askConfirm } from '../ask'
 import { Markdown } from '../panels/Rendered'
 import { safeText } from '../text'
@@ -30,8 +31,9 @@ export function HomeCheckHistory({ checks }: { checks: HomeResourceCheck[] }) {
   </article>)}</section>
 }
 
-export function HomeResourceDetail({ id, projects, aliases, boardURL, onChanged, onNavigate, onGo }: {
+export function HomeResourceDetail({ id, projectError = '', projects, aliases, boardURL, onChanged, onNavigate, onGo }: {
   id: string
+  projectError?: string
   projects: HomeProject[]
   aliases: string[]
   boardURL: string
@@ -47,13 +49,12 @@ export function HomeResourceDetail({ id, projects, aliases, boardURL, onChanged,
   const changed = async () => { await detail.refresh(); await onChanged() }
   const { busy, run } = useHomeMutation(changed)
   const resource = detail.data
-  return <div className="@container min-w-0 space-y-4" data-testid="home-resource-detail">
-    <div className="flex flex-wrap items-center gap-2"><a className="vp-control" href={HOME_RESOURCES_PATH} onClick={onNavigate}><ArrowLeft size={15} />{t('home.res.title')}</a><button type="button" className="vp-control ml-auto" disabled={detail.loading} onClick={() => void detail.refresh()} title={t('home.refresh')}><RefreshCw size={15} /></button></div>
-    {detail.error && <p role="alert" className="text-vp-sm">{safeText(detail.error)}</p>}
+  return <div className="home-resource-detail @container min-w-0 space-y-4" data-testid="home-resource-detail">
+    <PageHeader title={safeText(resource?.title || id)} subtitle={resource ? `${t(`home.res.kind.${resource.kind}`)} · ${safeText(id)}` : ''} breadcrumb={<><a href={HOME_RESOURCES_PATH} onClick={onNavigate}>{t('home.res.title')}</a><span aria-hidden="true">/</span><span>{safeText(resource?.title || id)}</span></>} actions={resource && <button type="button" className="vp-control" disabled={busy} onClick={() => setEditing(resource)}><Pencil size={14} />{t('home.res.edit')}</button>} secondary={<button type="button" className="vp-control" disabled={detail.loading} onClick={() => void detail.refresh()}><RefreshCw size={15} />{t('home.refresh')}</button>} />
+    {(detail.error || projectError) && <p role="alert" className="text-vp-sm">{safeText(detail.error || projectError)}</p>}
     {!resource && detail.loading && <p role="status">{t('home.loading')}</p>}
     {resource && <>
       <section className="min-w-0 space-y-3 rounded-vp-lg border border-hairline bg-surface p-4">
-        <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><h1 className="text-vp-lg font-semibold">{safeText(resource.title)}</h1><p className="mt-1 text-vp-xs text-ink-2">{t(`home.res.kind.${resource.kind}`)} · {safeText(resource.id)}</p></div><button type="button" className="vp-control" disabled={busy} onClick={() => setEditing(resource)}><Pencil size={14} />{t('home.res.edit')}</button></div>
         <dl className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-2 text-vp-sm">
           {resource.kind === 'api' && <><dt className="text-ink-2">{t('home.res.provider')}</dt><dd>{resource.provider ? t(`home.res.provider.${resource.provider}`) : t('home.res.unknown')}</dd><dt className="text-ink-2">{t('home.res.baseUrl')}</dt><dd><HomeResourceURL url={resource.baseUrl} /></dd><dt className="text-ink-2">{t('home.res.balance')}</dt><dd>{t('home.res.unknown')}</dd></>}
           {resource.kind === 'server' && <><dt className="text-ink-2">{t('home.res.sshAlias')}</dt><dd>{safeText(resource.sshAlias)}</dd><dt className="text-ink-2">{t('home.res.gpuBoardId')}</dt><dd>{safeText(resource.gpuBoardId || resource.sshAlias)}</dd></>}

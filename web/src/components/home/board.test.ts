@@ -18,6 +18,14 @@ describe('URL view state', () => {
     expect(new URLSearchParams(search).get('from')).toBe('view=todo')
     expect(new URLSearchParams(search).get('project')).toBeNull()
   })
+  it('keeps summary filters in the URL and distinguishes active projects from running execution', () => {
+    const active = viewFromSearch('?activity=active')
+    const running = viewFromSearch('?activity=running')
+    expect(viewToSearch(running)).toBe('?activity=running')
+    expect(filterProjects([projectFixture], active)).toHaveLength(1)
+    expect(filterProjects([projectFixture], running)).toHaveLength(0)
+    expect(filterProjects([{ ...projectFixture, activeRun: { id: 'run-1', taskId: 'A2', state: 'running', startedAt: '' } }], running)).toHaveLength(1)
+  })
   it('uses defaults for unknown choices, removes defaults and deduplicates multi-selects', () => {
     expect(viewFromSearch('?view=bad&table=bad&sort=bad&group=bad')).toEqual(viewFromSearch(''))
     expect(viewToSearch(viewFromSearch(''))).toBe('')

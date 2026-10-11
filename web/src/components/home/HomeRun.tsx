@@ -3,16 +3,15 @@ import { AlertTriangle, CheckCircle2, GitMerge, LoaderCircle, OctagonX, SearchCh
 import { t } from '../../i18n'
 import { homeApi, type HomeRun, type HomeRunState } from '../../protocol/home'
 import { safeBody, safeText } from '../text'
-import { optionColor } from './board'
+import { StatusPill } from '../shell/StatusPill'
 import { useHomeClock } from './clock'
 import { runChip, runDuration } from './execution'
 import { useHomeResource } from './useHomeResource'
 
 export function HomeRunChip({ state }: { state: HomeRunState }) {
   const chip = runChip(state)
-  const color = optionColor(chip.color)
   const Icon = { running: LoaderCircle, reviewing: SearchCheck, accepted: CheckCircle2, rejected: XCircle, blocked: AlertTriangle, failed: OctagonX, stopped: Square, merged: GitMerge }[chip.icon]
-  return <span className="inline-flex max-w-full items-center gap-1 rounded-vp border px-2 py-0.5 text-vp-xs" style={{ borderColor: color, background: `color-mix(in srgb, ${color} 10%, transparent)` }} data-state={state}><Icon size={13} className="shrink-0" aria-hidden="true" style={{ color }} />{t(chip.label)}</span>
+  return <StatusPill label={t(chip.label)} color={chip.color} icon={Icon} state={state} />
 }
 
 export function HomeRunModels({ run }: { run: HomeRun }) {

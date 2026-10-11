@@ -8,6 +8,7 @@ export interface HomeViewState {
   table: 'tasks' | 'projects'
   q: string
   all: boolean
+  activity: '' | 'active' | 'running'
   project: string
   status: string[]
   priority: string[]
@@ -25,6 +26,7 @@ export function viewFromSearch(search: string): HomeViewState {
   const q = new URLSearchParams(search)
   const list = (key: string) => [...new Set(q.getAll(key).filter(Boolean))]
   return {
+    activity: choice(q.get('activity'), ['', 'active', 'running'], ''),
     view: choice(q.get('view'), HOME_VIEWS, 'cards'), table: q.get('table') === 'projects' ? 'projects' : 'tasks',
     q: q.get('q') ?? '', all: q.get('all') === '1', project: q.get('filterProject') ?? '',
     status: list('status'), priority: list('priority'), tags: list('tags'), owner: q.get('owner') ?? '',
@@ -35,7 +37,7 @@ export function viewFromSearch(search: string): HomeViewState {
 export function viewToSearch(state: HomeViewState, search = ''): string {
   const q = new URLSearchParams(search)
   const defaults = viewFromSearch('')
-  for (const key of ['view', 'table', 'q', 'owner', 'group', 'sort'] as const) {
+  for (const key of ['view', 'table', 'q', 'owner', 'group', 'sort', 'activity'] as const) {
     if (state[key] === defaults[key]) q.delete(key)
     else q.set(key, state[key])
   }
@@ -75,6 +77,8 @@ export function sortTasks(tasks: readonly HomeTaskRow[], sort: HomeViewState['so
 export function filterProjects(projects: readonly HomeProject[], state: HomeViewState, matchingTasks: readonly HomeTaskRow[] = []): HomeProject[] {
   const matches = new Set(matchingTasks.map((row) => row.projectId))
   return projects.filter((row) => (!state.project || row.id === state.project)
+    && (state.activity !== 'active' || row.status === 'active')
+    && (state.activity !== 'running' || !!row.activeRun && ['running', 'reviewing'].includes(row.activeRun.state))
     && selected(state.priority, row.meta.priority) && overlaps(state.tags, row.meta.labels) && includes(row.meta.owner, state.owner)
     && (includes([row.id, ...row.aliases, row.goal, row.meta.phase, ...row.meta.labels].join(' '), state.q) || matches.has(row.id)))
 }

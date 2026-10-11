@@ -17,7 +17,7 @@ describe('home view content', () => {
   it.each(['en', 'zh'] as const)('shows progress, metadata, reports, blockers and session shapes in %s', (lang) => {
     setLang(lang)
     const html = renderToStaticMarkup(createElement(HomeCard, { project: projectFixture, fields: fieldsFixture.fields, onNavigate: vi.fn(), onPin: vi.fn(), returnSearch: '?view=table&tags=backend' }))
-    expect(html).toContain(t('home.usageUnknown'))
+    expect(html).not.toContain(t('home.usageUnknown'))
     expect(html).toContain(t('home.blockers'))
     expect(html).toContain('aria-valuenow="33"')
     expect(html).toContain('role="img"')
@@ -30,6 +30,20 @@ describe('home view content', () => {
     expect(html).toContain('P0')
     expect(html).toContain(t('home.pin'))
     expect(html).not.toContain('<script>')
+  })
+
+  it('shows only current-stage progress and omits empty card sections', () => {
+    const html = renderToStaticMarkup(createElement(HomeCard, {
+      project: { ...projectFixture, sessions: [], blockers: [], latestReport: null, taskCounts: { ...projectFixture.taskCounts, total: 0 }, stages: [{ name: 'A', done: 2, total: 2 }, { name: 'B', done: 1, total: 4 }] },
+      onNavigate: vi.fn(),
+    }))
+    expect(html.match(/role="progressbar"/g)).toHaveLength(1)
+    expect(html).toContain('aria-valuenow="25"')
+    expect(html).not.toContain(t('home.noReports'))
+    expect(html).not.toContain(t('home.sessions', { count: 0 }))
+    expect(html).not.toContain(t('home.taskCount', { count: 0 }))
+    expect(html).not.toContain(t('home.usageUnknown'))
+    expect(html).not.toContain('<footer')
   })
 
   it('renders the same editable task fields in table and card rows without writes', () => {
