@@ -12,7 +12,7 @@ export type HomeTodoKind = 'question' | 'awaiting_approval' | 'blocked' | 'await
 export type HomeSessionStatus = 'ok' | 'rollover_due'
 
 export interface HomeStage { name: string; done: number; total: number }
-export interface HomeSession { id: string; name: string; state: SessionState; agent: string; stateChangedAt: string }
+export interface HomeSession { id: string; name: string; state: SessionState; agent: string; stateChangedAt: string; createdAt?: number }
 export interface HomeReportSummary {
   file: string
   title: string
@@ -31,7 +31,7 @@ export interface HomeExecutionMeta {
   attemptMinutes: number
   verifyScope: string
 }
-export interface HomeProjectMeta extends HomeExecutionMeta { labels: string[]; priority: string; owner: string; phase: string; pinned: boolean }
+export interface HomeProjectMeta extends HomeExecutionMeta { labels: string[]; priority: string; owner: string; phase: string; pinned: boolean; rolloverAfterHours?: number }
 export const HOME_RUN_STATES = ['running', 'reviewing', 'accepted', 'rejected', 'blocked', 'failed', 'stopped', 'merged'] as const
 export type HomeRunState = typeof HOME_RUN_STATES[number]
 // Home files use RFC3339; database receipts elsewhere use Unix seconds. E1

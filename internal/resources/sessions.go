@@ -86,6 +86,7 @@ func (g *Governor) readSessions(l *Layout, ro roster, now time.Time) []SessionVi
 			delete(g.t.growth, id)
 			delete(g.t.cpuPrev, id)
 			delete(g.t.hotSince, id)
+			delete(g.t.coldSince, id)
 			delete(g.t.ooms, id)
 		}
 	}

@@ -239,8 +239,10 @@ function AllocationSection({
       setDraft(null)
       setError(null)
       setSaved((n) => n + 1)
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
+      return false
     } finally {
       setBusy(false)
     }
@@ -253,6 +255,7 @@ function AllocationSection({
       // current mode does.
       const from = view.policy.mode === 'custom' ? view.policy : view.params
       setDraft({
+        ...policyOnly(view.policy),
         mode: 'custom',
         poolPercent: from.poolPercent,
         askPercent: from.askPercent,
@@ -303,6 +306,8 @@ function AllocationSection({
         {shown.dynamic && <li>{t('res.summary.dynamic')}</li>}
       </ul>
 
+      <RolloverPolicyFields policy={view.policy} busy={busy} save={(p) => run(() => api.setResourcePolicy(p))} />
+
       {draft && (
         <CustomFields
           draft={draft}
@@ -345,6 +350,21 @@ function AllocationSection({
       {error && <p className="mt-2 text-vp-sm text-state-crashed">{safeText(error)}</p>}
     </Section>
   )
+}
+
+function RolloverPolicyFields({ policy, busy, save }: { policy: ResourcePolicy; busy: boolean; save: (p: ResourcePolicy) => Promise<boolean> }) {
+  type Fields = Pick<ResourcePolicy, 'rollover' | 'idleMinutes' | 'rolloverGraceSeconds' | 'autoResume'>
+  const [draft, setDraft] = useState<Fields | null>(null)
+  const p = { ...policy, ...draft }
+  const edit = (next: Partial<Fields>) => setDraft({ rollover: p.rollover, idleMinutes: p.idleMinutes, rolloverGraceSeconds: p.rolloverGraceSeconds, autoResume: p.autoResume, ...next })
+  const valid = Number.isInteger(p.idleMinutes) && p.idleMinutes >= 0 && p.idleMinutes <= 1440 && Number.isInteger(p.rolloverGraceSeconds) && p.rolloverGraceSeconds >= 1 && p.rolloverGraceSeconds <= 1800
+  return <div className="mt-3 space-y-2 rounded-vp border border-hairline p-3" data-testid="resources-rollover">
+    <label className={FIELD_ROW}>{t('rollover.policy.enabled')}<input type="checkbox" disabled={busy} checked={p.rollover} onChange={(e) => edit({ rollover: e.target.checked })} /></label>
+    <label className={FIELD_ROW}>{t('rollover.policy.idle')}<input className={FIELD} type="number" min={0} max={1440} disabled={busy} value={Number.isFinite(p.idleMinutes) ? p.idleMinutes : ''} onChange={(e) => edit({ idleMinutes: e.target.valueAsNumber })} /></label>
+    <label className={FIELD_ROW}>{t('rollover.policy.grace')}<input className={FIELD} type="number" min={1} max={1800} disabled={busy} value={Number.isFinite(p.rolloverGraceSeconds) ? p.rolloverGraceSeconds : ''} onChange={(e) => edit({ rolloverGraceSeconds: e.target.valueAsNumber })} /></label>
+    <label className={FIELD_ROW}>{t('rollover.policy.resume')}<input type="checkbox" disabled={busy} checked={p.autoResume} onChange={(e) => edit({ autoResume: e.target.checked })} /></label>
+    {draft && <button type="button" className="vp-control" disabled={busy || !valid} onClick={() => void save(policyOnly(p)).then((saved) => { if (saved) setDraft(null) })}>{t('res.save')}</button>}
+  </div>
 }
 
 const FIELD =
@@ -688,4 +708,3 @@ function clock(unix: number, lang: Lang): string {
     minute: '2-digit',
   })
 }
-

@@ -344,6 +344,41 @@ the frame to a remote page.
 
 ## Sessions
 
+### `POST /api/sessions/{id}/rollover`
+### `GET /api/sessions/{id}/rollover`
+
+Authenticated session rollover (stage E2). Development permits both routes only
+where manual terminal sessions are enabled. POST takes
+`{"reason":"manual"|"memory"|"long","resume":false}` and waits for the operation,
+returning `{"handoff":"/absolute/path.md","newSessionId":"..."}` (the latter
+only when resumed). A second operation on the same session is `409`. Missing
+sessions are `404`; invalid reasons are `400`. Home execution workers and
+archived/exited sessions cannot roll over. Resume requires a recorded Claude
+Code or Codex launch command; a shell is never sent an agent continuation prompt.
+
+GET returns `{state,handoff,startedAt,error,newSessionId?}`. States are `idle`,
+`asking`, `waiting`, `ending`, `done`, `failed`; `startedAt` is Unix seconds.
+Progress belongs to the running panel; an archived row's handoff remains readable
+after a restart. Closing the requesting tab does not cancel a rollover.
+
+A cyx checkout uses its Harness project's `agent-docs/handoffs/` directory;
+other sessions use the panel data directory's `handoffs/`. Claude Code and Codex
+receive one bracketed paste and Enter requesting a handoff. An active turn may
+finish for up to 60 seconds before that request. Completion requires a regular
+file of at least 200 bytes unchanged for five seconds, or a new `HANDOFF-DONE`
+reply line (the prompt's echo and older markers do not count). The resource
+policy's `rolloverGraceSeconds` bounds the reply wait; critical host memory
+shortens it. A missing handoff gets a generated document with metadata, the last
+200 lines and bounded Git status/log output.
+
+The panel captures scrollback before sending SIGTERM to verified session process
+groups, then SIGKILL after ten seconds if necessary. It keeps the row and
+scrollback, sets `archivedAt` and `archiveNote: "rolled over → <path>"`, disables
+boot restoration, records a session event and writes a report for cyx projects.
+A resumed session uses the original launch command, profile and Claude account,
+with a fresh id, and receives the continuation prompt only after it is ready.
+If that fails, GET retains the error and any new session id for recovery.
+
 ### `POST /api/sessions`
 ### `PATCH /api/sessions/{id}`
 ### `DELETE /api/sessions/{id}`
@@ -823,6 +858,20 @@ reads every session's processes to answer.
 (`poolPercent` 30–95, `askPercent` 50–100, `autoAct`, `graceSeconds` 10–1800)
 and a value out of range is a `400` rather than a clamp. The answer is the new
 `GET`.
+
+All modes also persist `rollover` (default true), `idleMinutes` (0–1440,
+default 10), `rolloverGraceSeconds` (1–1800, default 180), and `autoResume`
+(default false). Missing keys preserve existing values; old saved policies gain
+the new defaults. With rollover enabled the governor excludes pinned/high
+priority sessions, home workers, exited sessions and in-progress rollovers, then
+prefers the largest idle session in its pool. Waiting/done becomes idle after
+`idleMinutes`; an unknown state needs a full minute below 2% CPU. Mature waiting
+sessions lose their implicit waiting priority; pinned sessions and recent input
+remain protected. Only when none are idle does the existing growth/size choice
+select a working session. Its reply grace is capped at 60 seconds, separately
+from the pre-prompt wait. Automatic rollovers run serially and pressure is
+reassessed afterwards. `alert.rollover` marks the active handoff and `autoAt`
+bounds its countdown. Disabling rollover retains the previous process-kill flow.
 
 `POST /api/resources/boost` takes `{"minutes": n}` (at most 720) and runs the
 performance preset until then; `0` ends a boost.
@@ -2029,7 +2078,10 @@ Body: `rev`, optional `labels` (array), `priority`, `owner`, `phase`, `pinned`,
 `resources` (array of resource ids used by default for new sessions),
 `autonomy` (`off|stage|full`, default `off`), `approvedStages` (array of stage names),
 `autoMerge` (default false), `maxAttempts` (1–3, default 2), `attemptMinutes`
-(5–120, default 30), `verifyScope` (`auto|off`, default `auto`).
+(5–120, default 30), `verifyScope` (`auto|off`, default `auto`),
+`rolloverAfterHours` (0–8760, fractional hours allowed, default 0/off).
+Idle Claude Code/Codex sessions older than that threshold add a `session_rollover`
+to-do with `link.sessionId`; this is a manual suggestion, never a scheduled action.
 Revoking a stage does not stop an active run.
 Atomically creates or patches the optional project `pantheon.json`; creation uses
 `rev: ""`. Returns `{meta, metaRev}`; `409` on a stale revision. Projects include

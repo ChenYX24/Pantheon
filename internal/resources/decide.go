@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jiangmuran/vibepanel/internal/cgroup"
+	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/sysmon"
 )
 
@@ -18,7 +19,18 @@ func (g *Governor) decide(now time.Time, params Params, level Level, reason Reas
 	g.mu.Lock()
 	alert := g.view.Alert
 	quiet := g.quiet
+	rolling := g.rolling
 	g.mu.Unlock()
+	for _, s := range sessions {
+		if s.CPUPercent >= 2 {
+			delete(g.t.coldSince, s.ID)
+		} else if g.t.coldSince[s.ID].IsZero() {
+			g.t.coldSince[s.ID] = now
+		}
+	}
+	if rolling != "" {
+		return
+	}
 
 	if level == OK {
 		g.t.okTicks++
@@ -36,11 +48,19 @@ func (g *Governor) decide(now time.Time, params Params, level Level, reason Reas
 	// to pause it, and its memory is not growing.
 	candidates := make([]SessionView, 0, len(sessions))
 	for _, s := range sessions {
+		m := ro.byID[s.ID]
+		if params.Rollover && (l == nil || m.Exited || m.HomeWorker || m.Pinned || s.Priority == PriorityHigh ||
+			(g.env.RollingOver != nil && g.env.RollingOver(s.ID))) {
+			continue
+		}
 		if !s.Frozen {
 			candidates = append(candidates, s)
 		}
 	}
 	culprit := g.culprit(candidates, now)
+	if params.Rollover {
+		culprit = g.rolloverCulprit(candidates, ro, params, now)
+	}
 	if level == Warn && g.isSnoozed(culprit, now) {
 		if alert != nil {
 			g.setAlert(nil, now)
@@ -56,7 +76,7 @@ func (g *Governor) decide(now time.Time, params Params, level Level, reason Reas
 		// button would be an answer that does not answer.
 		CanBoost: params.Mode != Performance && reason != ReasonMachine,
 	}
-	if culprit != nil && Named(culprit.Held, r) {
+	if culprit != nil && (Named(culprit.Held, r) || params.Rollover && culprit.Held > 0) {
 		next.SessionID = culprit.ID
 		next.SessionTitle = culprit.Title
 		next.CanPause = l != nil
@@ -66,7 +86,7 @@ func (g *Governor) decide(now time.Time, params Params, level Level, reason Reas
 			next.Proc = keepTarget(alert.Proc, next.Proc, top)
 		}
 	}
-	if alert != nil && alert.SessionID == next.SessionID && sameProc(alert.Proc, next.Proc) {
+	if alert != nil && alert.SessionID == next.SessionID && (params.Rollover || sameProc(alert.Proc, next.Proc)) {
 		// The same question: same session, same process. A change of level is
 		// an update to it, not a new one, and the countdown carries over.
 		next.ID, next.AutoAt = alert.ID, alert.AutoAt
@@ -83,6 +103,9 @@ func (g *Governor) decide(now time.Time, params Params, level Level, reason Reas
 	// countdown start on the process beside her conversation.
 	actable := params.AutoAct && next.Proc != nil && !next.Proc.Root &&
 		culprit != nil && culprit.Priority != PriorityHigh && Responsible(culprit.Held, r, reason)
+	if params.Rollover {
+		actable = params.AutoAct && g.env.Rollover != nil && culprit != nil && culprit.Held > 0
+	}
 	switch {
 	case !actable:
 		next.AutoAt = 0
@@ -110,6 +133,39 @@ func (g *Governor) decide(now time.Time, params Params, level Level, reason Reas
 	if next.AutoAt == 0 || level != Critical || now.Unix() < next.AutoAt || g.quietened() {
 		return
 	}
+	if params.Rollover {
+		grace := time.Duration(params.RolloverGraceSeconds) * time.Second
+		if ro.byID[culprit.ID].State == session.StateWorking && grace > time.Minute {
+			grace = time.Minute
+		}
+		copy := *next
+		next = &copy
+		next.Rollover = true
+		next.AutoAt = now.Add(grace).Unix()
+		if ro.byID[culprit.ID].State == session.StateWorking {
+			next.AutoAt += 60
+		}
+		next.CanPause, next.CanBoost = false, false
+		g.mu.Lock()
+		g.rolling = culprit.ID
+		g.mu.Unlock()
+		g.setAlert(next, now)
+		go func(id string) {
+			err := g.env.Rollover(id, params.AutoResume, grace)
+			if err != nil {
+				g.env.Log.Warn("rolling over session", "session", id, "err", err)
+			}
+			g.mu.Lock()
+			g.rolling = ""
+			g.quiet = time.Now().Add(quietAfterAnswer)
+			if err != nil {
+				g.quiet = time.Now().Add(quietAfterFailure)
+			}
+			g.mu.Unlock()
+			g.setAlert(nil, time.Now())
+		}(culprit.ID)
+		return
+	}
 	act, err := g.kill(culprit.ID, next.Proc.PID, next.Proc.Start, "", true, l, ro, procs)
 	if err != nil {
 		// Not tried again: a process the kernel will not let this user signal
@@ -132,6 +188,32 @@ func (g *Governor) decide(now time.Time, params Params, level Level, reason Reas
 	if g.env.Emit != nil {
 		g.env.Emit(Event{Alert: nil, Acted: &act})
 	}
+}
+
+func idleState(m SessionMeta, p Params, now time.Time) bool {
+	return (m.State == session.StateWaiting || m.State == session.StateDone) &&
+		!m.StateChangedAt.IsZero() && now.Sub(m.StateChangedAt) >= time.Duration(p.IdleMinutes)*time.Minute
+}
+
+func (g *Governor) rolloverCulprit(sessions []SessionView, ro roster, p Params, now time.Time) *SessionView {
+	var idle *SessionView
+	working := []SessionView{}
+	for n := range sessions {
+		s := &sessions[n]
+		m := ro.byID[s.ID]
+		cold := g.t.coldSince[s.ID]
+		if idleState(m, p, now) || !m.State.Valid() && !cold.IsZero() && s.CPUPercent < 2 && now.Sub(cold) >= time.Minute {
+			if idle == nil || s.Held > idle.Held {
+				idle = s
+			}
+		} else if m.State == session.StateWorking {
+			working = append(working, *s)
+		}
+	}
+	if idle != nil {
+		return idle
+	}
+	return g.culprit(working, now)
 }
 
 // keepTarget holds on to the process a question already named while it is
@@ -273,32 +355,9 @@ func (g *Governor) Kill(sessionID string, pid int, start uint64, who string) (Ac
 // exited and something else has the number is not a hypothetical on a machine
 // that has just been through an OOM kill.
 func (g *Governor) kill(sessionID string, pid int, start uint64, who string, auto bool, l *Layout, ro roster, procs Procs) (Action, error) {
-	meta, ok := ro.byID[sessionID]
-	if !ok {
-		return Action{}, ErrUnknownSession
-	}
-	if pid <= 1 {
-		return Action{}, ErrNotInSession
-	}
-	pane := ro.panes[meta.TmuxName].PID
-	p, ok := sysmon.ReadProc(pid)
-	if !ok || p.Start != start {
-		return Action{}, ErrGone
-	}
-	g.mu.Lock()
-	server := g.server
-	g.mu.Unlock()
-	if pid == os.Getpid() || pid == server.PID || pid <= 1 {
-		return Action{}, ErrNotInSession
-	}
-	if l != nil {
-		leaf, ok := l.Session(meta.TmuxName)
-		rel, err := cgroup.Of(pid)
-		if !ok || err != nil || rel != leaf.Rel() {
-			return Action{}, ErrNotInSession
-		}
-	} else if pane <= 0 || !descendsFrom(pid, pane, procs) {
-		return Action{}, ErrNotInSession
+	p, err := g.checkedProcess(sessionID, pid, start, l, ro, procs)
+	if err != nil {
+		return Action{}, err
 	}
 
 	// A person's choice gets a chance to exit cleanly. The panel's own does
@@ -326,6 +385,39 @@ func (g *Governor) kill(sessionID string, pid int, start uint64, who string, aut
 	act := Action{At: time.Now().Unix(), Kind: ActionKill, Auto: auto, SessionID: sessionID, Name: p.Comm, RSS: p.RSS, Who: who}
 	g.record(act, fmt.Sprintf("%q (pid %d, %s)", p.Comm, pid, sysmon.FormatBytes(p.RSS)))
 	return act, nil
+}
+
+// checkedProcess is shared by single-process kills and whole-session rollover.
+func (g *Governor) checkedProcess(sessionID string, pid int, start uint64, l *Layout, ro roster, procs Procs) (sysmon.Proc, error) {
+	meta, ok := ro.byID[sessionID]
+	if !ok {
+		return sysmon.Proc{}, ErrUnknownSession
+	}
+	if pid <= 1 {
+		return sysmon.Proc{}, ErrNotInSession
+	}
+	pane := ro.panes[meta.TmuxName].PID
+	p, ok := sysmon.ReadProc(pid)
+	if !ok || p.Start != start {
+		return sysmon.Proc{}, ErrGone
+	}
+	g.mu.Lock()
+	server := g.server
+	g.mu.Unlock()
+	if pid == os.Getpid() || pid == server.PID || pid <= 1 {
+		return sysmon.Proc{}, ErrNotInSession
+	}
+	if l != nil {
+		leaf, ok := l.Session(meta.TmuxName)
+		rel, err := cgroup.Of(pid)
+		if !ok || err != nil || rel != leaf.Rel() {
+			return sysmon.Proc{}, ErrNotInSession
+		}
+	} else if pane <= 0 || !descendsFrom(pid, pane, procs) {
+		return sysmon.Proc{}, ErrNotInSession
+	}
+
+	return p, nil
 }
 
 // Freeze pauses or resumes a session.

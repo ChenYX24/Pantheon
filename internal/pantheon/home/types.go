@@ -110,6 +110,7 @@ type Session struct {
 	State          string `json:"state"`
 	Agent          string `json:"agent"`
 	StateChangedAt string `json:"stateChangedAt"`
+	CreatedAt      int64  `json:"createdAt"`
 }
 
 // RuntimeProject carries only the panel's live overlay, matched by directory.

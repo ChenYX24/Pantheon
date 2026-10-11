@@ -59,6 +59,7 @@ import type {
   ResourceAction,
   ResourceAlert,
   ResourcePolicy,
+  RolloverStatus,
   ResourcesView,
 } from './wire'
 
@@ -880,6 +881,9 @@ export const api = {
   resources: () => request<ResourcesView>('/api/resources'),
   /** The question alone, for a page that has just opened. */
   resourceAlert: () => request<{ alert: ResourceAlert | null }>('/api/resources/alert'),
+  rolloverStatus: (id: string) => request<RolloverStatus>(`/api/sessions/${encodeURIComponent(id)}/rollover`),
+  rolloverSession: (id: string, resume: boolean, reason: 'manual' | 'long' = 'manual') =>
+    request<Pick<RolloverStatus, 'handoff' | 'newSessionId'>>(`/api/sessions/${encodeURIComponent(id)}/rollover`, { method: 'POST', body: JSON.stringify({ reason, resume }) }),
   setResourcePolicy: (p: ResourcePolicy) =>
     request<ResourcesView>('/api/resources/policy', { method: 'PUT', body: JSON.stringify(p) }),
   /** Performance for this long; 0 ends a boost early. */

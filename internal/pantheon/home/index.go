@@ -457,6 +457,7 @@ func deriveTodos(d Detail) []Todo {
 	if len(d.Project.Blockers) > 0 {
 		add("blocked", "", d.activeRev, d.Project.ID, strings.Join(d.Project.Blockers, "\n"), d.activeAt, TodoLink{})
 	}
+	rolloverDue := map[string]bool{}
 	for _, t := range d.Tasks {
 		at := t.Updated
 		if timestamp(at).IsZero() {
@@ -468,6 +469,7 @@ func deriveTodos(d Detail) []Todo {
 			add(t.Status, t.ID, t.Rev, t.Title, t.BlockedReason, at, link)
 		}
 		if t.SessionStatus == "rollover_due" {
+			rolloverDue[t.Session] = true
 			link.SessionID = t.Session
 			add("session_rollover", t.ID, t.Rev, t.Title, t.BlockedReason, at, link)
 		}
@@ -478,6 +480,11 @@ func deriveTodos(d Detail) []Todo {
 		}
 	}
 	for _, s := range d.Project.Sessions {
+		if !rolloverDue[s.ID] && d.Project.Meta.RolloverAfterHours > 0 && s.CreatedAt > 0 &&
+			(s.Agent == "claude" || s.Agent == "codex") && (s.State == "waiting" || s.State == "done") &&
+			time.Since(time.Unix(s.CreatedAt, 0)).Hours() >= d.Project.Meta.RolloverAfterHours {
+			add("session_rollover", s.ID, "", s.Name, "", s.StateChangedAt, TodoLink{SessionID: s.ID})
+		}
 		if s.State == "waiting" {
 			add("session_waiting", s.ID, s.StateChangedAt, s.Name, "", s.StateChangedAt, TodoLink{SessionID: s.ID})
 		}

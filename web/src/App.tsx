@@ -1,3 +1,5 @@
+import { RolloverActions } from './components/RolloverActions'
+import { canRollover } from './components/rollover'
 import { appStorage } from './basePath'
 import { PROJECTS_PATH } from './routes'
 import { Tour } from './components/Tour'
@@ -1253,6 +1255,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
                 exitStatus={current.exitStatus}
                 onToggle={(st) => void guard(() => api.patchSession(current.id, { state: st }))}
               />
+              {canRollover(current) && <RolloverActions key={current.id} id={current.id} menu disabled={current.exited || current.archivedAt !== null} />}
               <span data-testid="session-title" className="truncate text-vp-md font-medium">
                 {labelOf(current)}
               </span>

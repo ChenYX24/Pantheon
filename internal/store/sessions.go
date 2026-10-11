@@ -124,8 +124,9 @@ type Session struct {
 	// observe how it ended.
 	ExitStatus int `json:"exitStatus"`
 
-	CreatedAt  int64  `json:"createdAt"`
-	ArchivedAt *int64 `json:"archivedAt"`
+	CreatedAt   int64  `json:"createdAt"`
+	ArchivedAt  *int64 `json:"archivedAt"`
+	ArchiveNote string `json:"archiveNote"`
 
 	// Scratch marks a terminal in the strip under the main pane.
 	//
@@ -205,7 +206,7 @@ const sessionColumns = `s.id, s.project_id, s.tmux_name, s.title, s.title_source
 	s.state_source, s.state_changed_at, s.pinned, s.sort_index, s.cwd, s.command, s.cols,
 	s.rows, s.last_output_at, s.created_at, s.archived_at, s.scratch, s.exited,
 	s.exit_status, s.launch_command, s.launch_profile_id, s.claude_account_id, s.restore_on_boot,
-	s.restored_at,
+	s.restored_at, s.archive_note,
 	COALESCE(sb.captured_at, 0)`
 
 // sessionFrom is the FROM clause every session read shares.
@@ -221,7 +222,7 @@ func scanSession(sc interface{ Scan(...any) error }) (Session, error) {
 		&s.CWD, &s.Command, &s.Cols, &s.Rows, &s.LastOutputAt, &s.CreatedAt, &archived,
 		&s.Scratch, &s.Exited, &s.ExitStatus, &launch, &s.LaunchProfileID, &s.ClaudeAccountID,
 		&s.RestoreOnBoot,
-		&s.RestoredAt, &s.ScrollbackAt)
+		&s.RestoredAt, &s.ArchiveNote, &s.ScrollbackAt)
 	if err != nil {
 		return Session{}, err
 	}
@@ -554,4 +555,9 @@ func (d *DB) MarkSessionRestored(ctx context.Context, id string, at int64) error
 // DeleteSession removes a session row.
 func (d *DB) DeleteSession(ctx context.Context, id string) error {
 	return d.exec1(ctx, `DELETE FROM sessions WHERE id = ?`, id)
+}
+
+// ArchiveSession preserves the row and scrollback, and prevents boot restoration.
+func (d *DB) ArchiveSession(ctx context.Context, id, note string) error {
+	return d.exec1(ctx, `UPDATE sessions SET archived_at = ?, archive_note = ?, restore_on_boot = 0 WHERE id = ?`, now(), note, id)
 }

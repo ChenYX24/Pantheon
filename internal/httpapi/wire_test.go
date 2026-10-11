@@ -46,6 +46,7 @@ func TestTypeScriptRowsMatchWhatIsSent(t *testing.T) {
 		row  any
 	}{
 		{"Session", store.Session{}},
+		{"RolloverStatus", rolloverStatus{}},
 		{"Project", store.Project{}},
 		{"Note", store.Note{}},
 		{"Todo", store.Todo{}},

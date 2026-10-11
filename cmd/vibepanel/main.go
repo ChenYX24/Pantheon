@@ -542,15 +542,17 @@ func startResources(ctx context.Context, a *app, srv *httpapi.Server, logger *sl
 		return nil
 	}
 	env := resources.Env{
-		Log:       logger,
-		Prepared:  a.cfg.SessionsPrepared,
-		Disabled:  a.cfg.Isolation == "off",
-		ServerPID: a.tmux.ServerPID,
-		Panes:     srv.ResourcePanes,
-		Sessions:  srv.ResourceSessions,
-		Policy:    srv.ResourcePolicy,
-		Emit:      srv.EmitResources,
-		Audit:     srv.AuditResources,
+		Log:         logger,
+		Prepared:    a.cfg.SessionsPrepared,
+		Disabled:    a.cfg.Isolation == "off",
+		ServerPID:   a.tmux.ServerPID,
+		Panes:       srv.ResourcePanes,
+		Sessions:    srv.ResourceSessions,
+		Policy:      srv.ResourcePolicy,
+		Emit:        srv.EmitResources,
+		Audit:       srv.AuditResources,
+		Rollover:    srv.RolloverMemory,
+		RollingOver: srv.RollingOver,
 		Restart: func() {
 			select {
 			case restartCh <- struct{}{}:

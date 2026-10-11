@@ -69,7 +69,7 @@ export function ResourceAlertBar({
   const procName = proc ? safeText(proc.name) : ''
   const tone = levelTone(alert.level)
   const left = alert.autoAt ? Math.max(0, alert.autoAt - now) : 0
-  const title = t(`res.alert.${alert.reason}`)
+  const title = alert.rollover ? t('rollover.alert', { title: session?.name ?? '' }) : t(`res.alert.${alert.reason}`)
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true)
@@ -121,11 +121,11 @@ export function ResourceAlertBar({
           style={{ color: tone }}
           aria-hidden="true"
         >
-          {t('res.alert.auto', { n: left })}
+          {t(alert.rollover ? 'rollover.countdown' : 'res.alert.auto', { n: left })}
         </span>
       ) : null}
       <span className="flex max-w-full min-w-0 flex-wrap items-center gap-1.5">
-        {proc && session && !proc.root && (
+        {proc && session && !proc.root && !alert.rollover && (
           <button
             type="button"
             data-testid="resource-alert-end"

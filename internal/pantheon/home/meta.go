@@ -8,34 +8,36 @@ import (
 )
 
 type ProjectMeta struct {
-	Autonomy       string   `json:"autonomy"`
-	ApprovedStages []string `json:"approvedStages"`
-	AutoMerge      bool     `json:"autoMerge"`
-	MaxAttempts    int      `json:"maxAttempts"`
-	AttemptMinutes int      `json:"attemptMinutes"`
-	VerifyScope    string   `json:"verifyScope"`
-	Resources      []string `json:"resources"`
-	Labels         []string `json:"labels"`
-	Priority       string   `json:"priority"`
-	Owner          string   `json:"owner"`
-	Phase          string   `json:"phase"`
-	Pinned         bool     `json:"pinned"`
+	Autonomy           string   `json:"autonomy"`
+	ApprovedStages     []string `json:"approvedStages"`
+	AutoMerge          bool     `json:"autoMerge"`
+	MaxAttempts        int      `json:"maxAttempts"`
+	AttemptMinutes     int      `json:"attemptMinutes"`
+	VerifyScope        string   `json:"verifyScope"`
+	Resources          []string `json:"resources"`
+	Labels             []string `json:"labels"`
+	Priority           string   `json:"priority"`
+	Owner              string   `json:"owner"`
+	Phase              string   `json:"phase"`
+	Pinned             bool     `json:"pinned"`
+	RolloverAfterHours float64  `json:"rolloverAfterHours"`
 }
 
 type PatchMeta struct {
-	Autonomy       *string   `json:"autonomy"`
-	ApprovedStages *[]string `json:"approvedStages"`
-	AutoMerge      *bool     `json:"autoMerge"`
-	MaxAttempts    *int      `json:"maxAttempts"`
-	AttemptMinutes *int      `json:"attemptMinutes"`
-	VerifyScope    *string   `json:"verifyScope"`
-	Resources      *[]string `json:"resources"`
-	Rev            string    `json:"rev"`
-	Labels         *[]string `json:"labels"`
-	Priority       *string   `json:"priority"`
-	Owner          *string   `json:"owner"`
-	Phase          *string   `json:"phase"`
-	Pinned         *bool     `json:"pinned"`
+	Autonomy           *string   `json:"autonomy"`
+	ApprovedStages     *[]string `json:"approvedStages"`
+	AutoMerge          *bool     `json:"autoMerge"`
+	MaxAttempts        *int      `json:"maxAttempts"`
+	AttemptMinutes     *int      `json:"attemptMinutes"`
+	VerifyScope        *string   `json:"verifyScope"`
+	Resources          *[]string `json:"resources"`
+	Rev                string    `json:"rev"`
+	Labels             *[]string `json:"labels"`
+	Priority           *string   `json:"priority"`
+	Owner              *string   `json:"owner"`
+	Phase              *string   `json:"phase"`
+	Pinned             *bool     `json:"pinned"`
+	RolloverAfterHours *float64  `json:"rolloverAfterHours"`
 }
 
 func (i *Index) PatchMeta(cyxHome, project string, req PatchMeta) (ProjectMeta, string, error) {
@@ -79,6 +81,9 @@ func (i *Index) PatchMeta(cyxHome, project string, req PatchMeta) (ProjectMeta, 
 	}
 	if req.VerifyScope != nil {
 		meta.VerifyScope = *req.VerifyScope
+	}
+	if req.RolloverAfterHours != nil {
+		meta.RolloverAfterHours = *req.RolloverAfterHours
 	}
 	if err := meta.ValidateExecution(); err != nil {
 		return meta, "", err
@@ -134,6 +139,9 @@ func DefaultMeta() ProjectMeta {
 }
 
 func (m ProjectMeta) ValidateExecution() error {
+	if m.RolloverAfterHours < 0 || m.RolloverAfterHours > 8760 {
+		return errors.New("rolloverAfterHours must be 0–8760")
+	}
 	if m.Autonomy != "off" && m.Autonomy != "stage" && m.Autonomy != "full" {
 		return errors.New("autonomy must be off, stage or full")
 	}

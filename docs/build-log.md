@@ -24904,3 +24904,85 @@ existing home/runtime conventions; E1 does not specify their encoding.
 The first low-priority, single-worker pass passed 35 tests for API shapes,
 eligibility explanations, state glyphs, durations, autonomy defaults and bounds,
 full-auto consent, handoff route selection, and visible three-second polling.
+
+## 2026-10-11 — Verified process groups for session rollover
+
+The rollover end helper records a pane's process identities before requesting a
+handoff, so a voluntarily exiting agent does not leave unaccountable children.
+It shares the governor's PID/start-time and cgroup checks, checks every member of
+a process group, sends SIGTERM, and rechecks before SIGKILL ten seconds later.
+The panel, configured tmux server and unrelated processes remain protected.
+Signals are refused after cancellation or when group ownership cannot be proved.
+
+Focused resource tests cover the legacy kill path, signal ordering, revalidation
+and a disposable shell/child group, without starting tmux or touching user
+sessions. The old question test exposed an RSS assumption: a sleep child's RSS
+is not reliably half its shell's. Its decision fixture now waits for exec and
+supplies deterministic RSS; identity checks and signals still use its own real
+temporary processes. The final focused run passed with the prescribed serial,
+low-priority Go settings.
+
+## 2026-10-11 — Stage E2 session handoff and rollover
+
+Authenticated session routes now run a bounded handoff, expose its progress and
+refuse concurrent requests. Exact cyx checkout matches write under the project's
+Harness handoffs directory; other sessions use the panel data directory. Claude
+Code and Codex receive the contract prompt through bracketed paste and Enter.
+A fresh reply marker or a stable 200-byte file completes the wait; a missing
+document gets the last 200 lines, launch metadata and bounded Git status/log.
+An input failure leaves the agent running. The row, archive note and scrollback
+survive process termination, with a session event and a cyx report recording
+reason, measured memory decrease and handoff path. Resume starts the recorded
+command/profile/account in a fresh session and waits for the detector's prompt
+before sending the continuation. Failures retain progress and a replacement id
+when one exists.
+
+The governor persists rollover, idleMinutes, rolloverGraceSeconds and autoResume
+without discarding older saved policy values. It prefers the largest mature idle
+session, excludes pinned/high-priority sessions, home execution workers and active
+rollovers, and serializes automatic handoffs. The old process-kill path remains
+available when rollover is disabled. Project metadata can set rolloverAfterHours
+to produce a manual session_rollover to-do. Home and terminal actions use the
+existing confirmation and menu components, poll progress and provide both
+languages; the home layouts are unchanged. The resource dialog exposes all four
+policy fields and the memory alert names the active handoff and its countdown.
+
+Interpretations: the up-to-60-second wait for an active turn precedes the reply
+grace; automatic working-session reply grace is capped at 60 seconds. A mature
+waiting session loses its implicit waiting priority, while a pin or recent human
+input still protects it. Resume requires a recorded supported agent launch, so a
+plain shell cannot receive the natural-language continuation as a command. A
+nonempty partial handoff is preserved at timeout. An existing handoff path is
+refused instead of being mistaken for a fresh reply. In-flight progress is held
+in memory; the archived handoff path remains readable after a panel restart.
+
+Validation used only this worktree, temporary data and fake tmux adapters. No
+browser, model, tmux server, service or installed panel was started or changed.
+All builds/tests ran serially at nice 19, with Go parallelism and memory limited.
+The full build succeeded, including CGO_ENABLED=0 and regenerated embedded web
+assets. The final Go-only rebuild includes the additional refusal of reused pane
+PIDs or unaccountable cgroup members. ESLint has zero errors and the same two
+App.tsx fast-refresh warnings; Vite reports its existing advancedChunks
+deprecation. HTTP, home and migration checks pass; the four frontend files pass
+24 tests. Live agent readiness and real cgroup/browser integration remain for an
+isolated reviewer environment, not this production host.
+
+Exact validation commands (from the repository root unless prefixed with `cd web`):
+
+```sh
+TMPDIR="$PWD/.tmp" GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB nice -n 19 go test ./internal/resources -run '^(TestRollover|TestAKillIsRefusedForAnythingButTheProcessShown|TestTheQuestionAsksThenActsOnlyWhenAllowed|TestTheAgentItselfIsNeverEndedUnasked|TestPresetsAreWhatThePageSays|TestValidateRefusesRatherThanClamps|TestABoostRunsPerformanceUntilItEnds|TestTheCulpritIsWhatGrewNotWhatIsBiggest)' -count=1
+TMPDIR="$PWD/.tmp" GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB nice -n 19 go test ./internal/httpapi -run '^TestRollover|^(TestTypeScriptRowsMatchWhatIsSent|TestOnlyOnePlaceInThisPackageWritesASessionState|TestTheAPIDocCoversEveryRoute)$' -count=1
+TMPDIR="$PWD/.tmp" GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB nice -n 19 go test ./internal/pantheon/home -run '^(TestRollover|TestHome)' -count=1
+TMPDIR="$PWD/.tmp" GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB nice -n 19 go test ./internal/store -run '^(TestMigrateIsIdempotent|TestMigrationUpgradesAnExistingDatabase|TestMigrationIsAppliedOnlyOnce|TestSessionOrderMatchesStateSortWeight|TestStateChangedAtOnlyMovesOnChange)$' -count=1
+cd web && NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npx tsc -b
+cd web && NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npx vitest run --pool=forks --maxWorkers=1 src/components/RolloverActions.test.ts src/components/settings/resources.test.ts src/components/home/render.test.ts src/components/home/resources.render.test.ts
+cd web && NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npx eslint src/App.tsx src/components/HomePage.tsx src/components/home/HomeSessions.tsx src/components/RolloverActions.tsx src/components/RolloverActions.test.ts src/components/rollover.ts src/components/resources/ResourceAlert.tsx src/components/settings/ResourcesGroup.tsx src/components/settings/resourcesPolicy.ts src/components/settings/resources.test.ts src/i18n.ts src/protocol/api.ts src/protocol/home.ts src/protocol/wire.ts
+TMPDIR="$PWD/.tmp" GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB NODE_OPTIONS=--max-old-space-size=900 nice -n 19 make -j1 build BIN=.tmp/vibepanel
+TMPDIR="$PWD/.tmp" GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB CGO_ENABLED=0 nice -n 19 go build -o .tmp/vibepanel ./cmd/vibepanel
+```
+
+The temporary directory was created before these commands and removed after
+validation. Frontend dependencies were installed locally with
+`NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npm ci --ignore-scripts --cache ../.tmp/npm-cache`
+from `web/`; the lockfile is unchanged. An initial tsc attempt before dependencies
+were installed failed, then the installed compiler and full build passed.

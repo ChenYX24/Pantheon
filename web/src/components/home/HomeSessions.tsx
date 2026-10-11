@@ -3,6 +3,7 @@ import { Plus, Terminal } from 'lucide-react'
 import { t } from '../../i18n'
 import type { HomeCreateSession, HomeProject, HomeProjectResources } from '../../protocol/home'
 import { panelOpeningSession } from '../../routes'
+import { RolloverActions } from '../RolloverActions'
 import { StateDot } from '../StateDot'
 import { safeText } from '../text'
 import { HomeTime } from './HomeCard'
@@ -21,6 +22,7 @@ export function HomeSessions({ project, resources, resourceError, busy, onCreate
     {project.sessions.map((session) => <article key={session.id} className="min-w-0 rounded-vp border border-hairline bg-surface p-3">
       <h3 className="flex items-start gap-2 font-medium"><span className="mt-1.5 shrink-0"><StateDot state={session.state} /></span><span className="min-w-0">{safeText(session.name || session.id)}</span></h3>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-vp-xs text-ink-2"><span>{safeText(session.agent)}</span><HomeTime at={session.stateChangedAt} /></div>
+      {(session.agent === 'claude' || session.agent === 'codex') && <RolloverActions id={session.id} />}
       <a className="vp-control mt-2" href={panelOpeningSession(session.id)}><Terminal size={14} />{t('home.openTerminal')}</a>
     </article>)}
     {creating && <HomeNewSession resources={creating} busy={busy} onCreate={onCreate} onClose={() => setCreating(null)} />}

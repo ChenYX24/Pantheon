@@ -18,6 +18,10 @@ export function policyOnly(p: ResourcePolicy): ResourcePolicy {
     askPercent: p.askPercent,
     autoAct: p.autoAct,
     graceSeconds: p.graceSeconds,
+    rollover: p.rollover,
+    idleMinutes: p.idleMinutes,
+    rolloverGraceSeconds: p.rolloverGraceSeconds,
+    autoResume: p.autoResume,
   }
 }
 
