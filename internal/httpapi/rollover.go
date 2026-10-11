@@ -371,14 +371,33 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 		}
 		before, _ := h.capture(ctx, row, 200)
 		markersBefore := markerCount(before)
-		if err = h.send(ctx, row, handoffPrompt(req.Reason, path)); err != nil {
+		// The agent writes inside its own working directory: an agent asked to
+		// write anywhere else stops at its own permission prompt (measured with
+		// Claude Code in acceptEdits mode) and nobody is there to answer it.
+		// The panel moves the file to its place afterwards.
+		draft := rolloverDraftPath(row.CWD, project.Path, sid)
+		if draft != "" {
+			_ = os.Remove(draft)
+		}
+		asked := path
+		if draft != "" {
+			asked = draft
+		}
+		if err = h.send(ctx, row, handoffPrompt(req.Reason, asked)); err != nil {
 			return result, err
 		}
 		update("waiting")
 		// Grace belongs to the reply. Spending it before the prompt would
 		// end a working agent immediately after asking it to save its work.
-		if err = s.waitHandoff(ctx, h, row, path, h.now().Add(grace), markersBefore, critical); err != nil {
+		if err = s.waitHandoff(ctx, h, row, asked, h.now().Add(grace), markersBefore, critical); err != nil {
 			return result, err
+		}
+		if draft != "" {
+			if info, statErr := os.Lstat(draft); statErr == nil && info.Mode().IsRegular() && info.Size() > 0 {
+				if data, readErr := os.ReadFile(draft); readErr == nil && os.WriteFile(path, data, 0644) == nil {
+					_ = os.Remove(draft)
+				}
+			}
 		}
 	}
 	info, statErr := os.Lstat(path)
@@ -596,4 +615,19 @@ func (s *Server) createRolloverSession(ctx context.Context, old store.Session) (
 	}
 	s.notifyState()
 	return row, nil
+}
+
+// rolloverDraftPath is where the agent is asked to write: a dot-file at the
+// root of the directory it is working in (its own cwd, else the project's),
+// which every agent may write without asking. Empty when neither exists.
+func rolloverDraftPath(cwd, projectPath, sid string) string {
+	for _, dir := range []string{cwd, projectPath} {
+		if dir == "" {
+			continue
+		}
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			return filepath.Join(dir, ".pantheon-handoff-"+sid+".md")
+		}
+	}
+	return ""
 }

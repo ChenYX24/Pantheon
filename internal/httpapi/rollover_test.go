@@ -124,7 +124,9 @@ func TestRolloverFallbackArchiveReportAndResume(t *testing.T) {
 	if len(*steps) != 5 || (*steps)[1] != "end" || (*steps)[2] != "create:codex:profile" || (*steps)[3] != "ready" || (*steps)[4] != "send:new:请先阅读交接文档 "+result.Handoff+"，确认理解后从“下一步”继续。" {
 		t.Fatal(*steps)
 	}
-	if (*steps)[0] != "send:agent:"+handoffPrompt("long", result.Handoff) {
+	// The agent is asked for a draft in its own workspace; the resumed session
+	// is pointed at the final handoff.
+	if (*steps)[0] != "send:agent:"+handoffPrompt("long", rolloverDraftPath(row.CWD, "", row.ID)) {
 		t.Fatal((*steps)[0])
 	}
 	select {
@@ -147,9 +149,9 @@ func TestRolloverCompletion(t *testing.T) {
 			s, _, h, steps := rolloverFixture(t)
 			started := h.now()
 			if mode == "file" {
-				h.send = func(_ context.Context, _ store.Session, text string) error {
+				h.send = func(_ context.Context, r store.Session, text string) error {
 					*steps = append(*steps, text)
-					return os.WriteFile(s.rolloverStatus("agent").Handoff, []byte(strings.Repeat("saved work\n", 30)), 0600)
+					return os.WriteFile(rolloverDraftPath(r.CWD, "", r.ID), []byte(strings.Repeat("saved work\n", 30)), 0600)
 				}
 			}
 			if mode == "marker" {
@@ -481,5 +483,28 @@ func TestRolloverStopsWaitingWhenTheAgentExits(t *testing.T) {
 	data, err := os.ReadFile(result.Handoff)
 	if err != nil || !strings.Contains(string(data), "agent did not answer") {
 		t.Fatal("fallback handoff expected", err, string(data))
+	}
+}
+
+func TestRolloverAsksForADraftInsideTheWorkingDirectory(t *testing.T) {
+	s, row, h, steps := rolloverFixture(t)
+	h.send = func(_ context.Context, r store.Session, text string) error {
+		*steps = append(*steps, "send:"+text)
+		draft := rolloverDraftPath(r.CWD, "", r.ID)
+		if !strings.Contains(text, draft) {
+			t.Errorf("prompt must name the in-workspace draft %s: %s", draft, text)
+		}
+		return os.WriteFile(draft, []byte(strings.Repeat("agent handoff ", 20)), 0644)
+	}
+	result, err := s.runRollover(context.Background(), row.ID, rolloverRequest{Reason: "manual"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(result.Handoff)
+	if err != nil || !strings.HasPrefix(string(data), "agent handoff") {
+		t.Fatal("the agent's draft must become the handoff", err, string(data))
+	}
+	if _, err := os.Stat(rolloverDraftPath(row.CWD, "", row.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("draft left in the workspace", err)
 	}
 }
