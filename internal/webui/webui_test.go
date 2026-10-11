@@ -1,6 +1,10 @@
 package webui
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -161,5 +165,46 @@ func TestTheManifestIsServedAsAManifest(t *testing.T) {
 		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, tc.want) {
 			t.Errorf("%s: Content-Type %q, want %q", tc.path, got, tc.want)
 		}
+	}
+}
+
+func TestHashedAssetsAreServedGzippedWhenAccepted(t *testing.T) {
+	entries, err := fs.ReadDir(dist, "dist/assets")
+	if err != nil || len(entries) == 0 {
+		t.Skip("no embedded build")
+	}
+	var name string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".js") {
+			name = e.Name()
+		}
+	}
+	h := Handler("")
+	plain := httptest.NewRecorder()
+	h.ServeHTTP(plain, httptest.NewRequest("GET", "/assets/"+name, nil))
+	if plain.Code != 200 || plain.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("plain: %d %q", plain.Code, plain.Header().Get("Content-Encoding"))
+	}
+	req := httptest.NewRequest("GET", "/assets/"+name, nil)
+	req.Header.Set("Accept-Encoding", "br, gzip;q=0.8")
+	zipped := httptest.NewRecorder()
+	h.ServeHTTP(zipped, req)
+	if zipped.Code != 200 || zipped.Header().Get("Content-Encoding") != "gzip" || !strings.HasPrefix(zipped.Header().Get("Content-Type"), "text/javascript") {
+		t.Fatalf("gzip: %d %v", zipped.Code, zipped.Header())
+	}
+	zr, err := gzip.NewReader(zipped.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(zr)
+	if !bytes.Equal(raw, plain.Body.Bytes()) || zipped.Body.Len() >= plain.Body.Len() {
+		t.Fatal("compressed body differs from the asset or is not smaller")
+	}
+	refused := httptest.NewRequest("GET", "/assets/"+name, nil)
+	refused.Header.Set("Accept-Encoding", "gzip;q=0")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, refused)
+	if rec.Header().Get("Content-Encoding") != "" {
+		t.Fatal("gzip;q=0 must not be compressed")
 	}
 }

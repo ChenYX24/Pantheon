@@ -3,6 +3,7 @@ package webui
 
 import (
 	"bytes"
+	"compress/gzip"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -152,6 +154,9 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setCacheHeaders(w, name)
+	if h.serveCompressed(w, r, name, st, rs) {
+		return
+	}
 	// `.webmanifest` is not in Go's MIME table, so ServeContent falls through
 	// to content sniffing and answers `text/plain; charset=utf-8`. Measured
 	// against the real binary, which is the only way this shows up at all: the
@@ -250,4 +255,62 @@ func setCacheHeaders(w http.ResponseWriter, name string) {
 	if strings.HasPrefix(name, "assets/") {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
+}
+
+// Hashed build assets never change for the life of the binary, so each is
+// gzipped once, on first request, and served from memory afterwards. The
+// panel is reached over long links (and phones); the main bundle is 1.4 MB
+// raw and about a quarter of that compressed. Only gzip: every browser sends
+// it, and it needs no dependency.
+var gzipped sync.Map // name -> []byte
+
+func (h spaHandler) serveCompressed(w http.ResponseWriter, r *http.Request, name string, st fs.FileInfo, rs io.ReadSeeker) bool {
+	if h.root != "" || !strings.HasPrefix(name, "assets/") || r.Header.Get("Range") != "" || !acceptsGzip(r) {
+		return false
+	}
+	ext := path.Ext(name)
+	if ext != ".js" && ext != ".css" && ext != ".svg" && ext != ".json" {
+		return false
+	}
+	body, ok := gzipped.Load(name)
+	if !ok {
+		var buf bytes.Buffer
+		zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+		if _, err := io.Copy(zw, rs); err != nil || zw.Close() != nil {
+			_, _ = rs.Seek(0, io.SeekStart)
+			return false
+		}
+		body, _ = gzipped.LoadOrStore(name, buf.Bytes())
+	}
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Header().Add("Vary", "Accept-Encoding")
+	if ctype := mimeFor(ext); ctype != "" {
+		w.Header().Set("Content-Type", ctype)
+	}
+	http.ServeContent(w, r, name, st.ModTime(), bytes.NewReader(body.([]byte)))
+	return true
+}
+
+func acceptsGzip(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		coding, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		if strings.EqualFold(strings.TrimSpace(coding), "gzip") && strings.ReplaceAll(strings.TrimSpace(params), " ", "") != "q=0" {
+			return true
+		}
+	}
+	return false
+}
+
+func mimeFor(ext string) string {
+	switch ext {
+	case ".js":
+		return "text/javascript; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".svg":
+		return "image/svg+xml"
+	case ".json":
+		return "application/json"
+	}
+	return ""
 }

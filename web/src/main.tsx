@@ -1,14 +1,9 @@
 import { appURL } from './basePath'
-import { ProjectWorkspace } from './components/ProjectWorkspace'
-import { StrictMode } from 'react'
+import { StrictMode, Suspense, lazy } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
-import { App } from './App'
 import { AuthGate } from './components/AuthGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import { ChatPage } from './components/ChatPage'
-import { HomePage } from './components/HomePage'
-import { SharingPage } from './components/SharingPage'
 import { routeFor } from './routes'
 import { watchSystemTheme } from './components/theme'
 
@@ -41,8 +36,18 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 // the sign-in screen.
 const route = routeFor(location.pathname)
 
+// Each page is its own chunk. The home and resource pages are what a phone
+// opens most, and they need none of the terminal (xterm and its addons are
+// most of the bundle); the terminal panel likewise needs none of the home.
+const HomePage = lazy(() => import('./components/HomePage').then((m) => ({ default: m.HomePage })))
+const ProjectWorkspace = lazy(() => import('./components/ProjectWorkspace').then((m) => ({ default: m.ProjectWorkspace })))
+const SharingPage = lazy(() => import('./components/SharingPage').then((m) => ({ default: m.SharingPage })))
+const ChatPage = lazy(() => import('./components/ChatPage').then((m) => ({ default: m.ChatPage })))
+const App = lazy(() => import('./App').then((m) => ({ default: m.App })))
+
 createRoot(root).render(
   <StrictMode>
+    <Suspense fallback={null}>
     {route.kind === 'home' ? (
       <ErrorBoundary label="Project home"><AuthGate>{(_auth, signOut) => <HomePage onSignOut={signOut} />}</AuthGate></ErrorBoundary>
     ) : route.kind === 'projects' ? (
@@ -60,5 +65,6 @@ createRoot(root).render(
         <AuthGate>{(auth, signOut) => <App auth={auth} onSignOut={signOut} />}</AuthGate>
       </ErrorBoundary>
     )}
+    </Suspense>
   </StrictMode>,
 )

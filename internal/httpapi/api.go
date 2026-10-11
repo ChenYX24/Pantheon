@@ -490,7 +490,13 @@ func (s *Server) Routes() http.Handler {
 			s.registerClaudeAccountRoutes(r)
 			s.registerProjectBoardRoutes(r)
 			s.registerWorkflowRoutes(r)
-			s.registerHomeRoutes(r)
+			// Home pages poll several JSON views every few seconds over a
+			// long-distance link; compress them. Scoped to /home so streamed
+			// downloads, previews and the socket are untouched.
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.Compress(5, "application/json"))
+				s.registerHomeRoutes(r)
+			})
 			s.registerPanelRoutes(r)
 			s.registerGitRoutes(r)
 			s.registerUpdateRoutes(r)

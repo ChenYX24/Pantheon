@@ -53,7 +53,8 @@ describe('every module', () => {
       if (EXPECTED_UNIMPORTED.has(rel)) return false
       const base = rel.replace(/\.tsx?$/, '').split('/').pop()!
       // Relative depth varies, so what identifies an import is its tail.
-      const re = new RegExp(`from '[^']*/${base}'|from '\\./${base}'`)
+      // A route page loaded with import('./components/Page') counts too.
+      const re = new RegExp(`from '[^']*/${base}'|from '\\./${base}'|import\\('[^']*/${base}'\\)`)
       return !files.some((other) => other !== f && re.test(bodies.get(other)!))
     })
     expect(orphans.map((f) => f.slice(ROOT.length))).toEqual([])
