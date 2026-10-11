@@ -259,7 +259,7 @@ func (s *Server) mergeHomeCheckout(ctx context.Context, detail home.Detail, task
 	}
 	run.State = "merged"
 	if _, err := os.Stat(run.Worktree); err == nil {
-		if _, err := parthenon.HomeGit(ctx, checkout, "worktree", "remove", run.Worktree); err != nil {
+		if _, err := parthenon.HomeGit(ctx, checkout, "worktree", "remove", "--force", run.Worktree); err != nil {
 			run.Summary += "\nMerged, but worktree cleanup needs attention."
 		}
 	}

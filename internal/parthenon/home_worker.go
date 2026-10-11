@@ -306,7 +306,7 @@ func HomeWorker(ctx context.Context, spec string, runner Runner) (workerErr erro
 		if ctx.Err() != nil {
 			return nil
 		}
-		if _, err = HomeGit(ctx, r.Worktree, "add", "-A"); err == nil {
+		if _, err = homeStageChanges(ctx, r.Worktree); err == nil {
 			// A no-op implementation still needs a durable commit identifying the
 			// exact tree independently reviewed for this run.
 			_, err = HomeGit(ctx, r.Worktree, "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", j.Task.ID+": "+j.Task.Title+"\n\n"+HomeTrailer(r.Harness, r.Model))
@@ -387,4 +387,30 @@ func HomeWorker(ctx context.Context, spec string, runner Runner) (workerErr erro
 		return nil
 	}
 	return nil
+}
+
+// homeArtifacts are files a run produces by running code, never by intending
+// to change the project: a reviewer rightly rejects a commit that carries them
+// (a real run committed __pycache__ next to a one-line fix). They are excluded
+// only from staging, and only while untracked; a project that tracks one of
+// them keeps it.
+var homeArtifacts = []string{
+	"__pycache__/", "*.py[cod]", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/",
+	".ipynb_checkpoints/", "node_modules/", ".DS_Store", "*.egg-info/", ".coverage", ".tox/",
+}
+
+func homeStageChanges(ctx context.Context, worktree string) (string, error) {
+	f, err := os.CreateTemp("", "pantheon-exclude-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(f.Name())
+	_, err = f.WriteString(strings.Join(homeArtifacts, "\n") + "\n")
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return "", err
+	}
+	return HomeGit(ctx, worktree, "-c", "core.excludesFile="+f.Name(), "add", "-A")
 }

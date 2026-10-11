@@ -236,3 +236,17 @@ func TestHomeWorkerAssignmentsAndFenceBoundaries(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestHomeWorkerDoesNotCommitRunArtifacts(t *testing.T) {
+	// The verify command leaves the kind of file running code produces; a real
+	// run committed __pycache__ beside a one-line fix and the reviewer rejected it.
+	job, spec := homeWorkerFixture(t, "success", "## Verify\n```sh\nmkdir -p __pycache__ && printf x > __pycache__/m.cpython-311.pyc && printf x > stray.pyc && test -s proof.txt\n```\n")
+	if err := HomeWorker(context.Background(), spec, nil); err != nil {
+		t.Fatal(err)
+	}
+	result := readHomeWorkerResult(t, spec)
+	files, err := HomeGit(context.Background(), job.Run.Worktree, "show", "--name-only", "--format=", result.HeadCommit)
+	if err != nil || strings.Contains(files, "pyc") || !strings.Contains(files, "proof.txt") {
+		t.Fatalf("committed files %q, err %v", files, err)
+	}
+}
