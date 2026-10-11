@@ -46,13 +46,14 @@ describe('home view content', () => {
     expect(onChanged).not.toHaveBeenCalled()
   })
 
-  it('offers five page tabs and opens a linked task without a side-sheet dialog', () => {
+  it('offers six page tabs and opens a linked task without a side-sheet dialog', () => {
     setLang('en')
     const html = renderToStaticMarkup(createElement(HomeProjectPage, {
       selection: { projectId: 'pantheon', taskId: 'A2', tab: 'tasks' }, settings: fieldsFixture, state: viewFromSearch(''),
       onState: vi.fn(), onTab: vi.fn(), onThread: vi.fn(), onChanged: vi.fn(), onNavigate: vi.fn(),
     }))
     for (const tab of ['chat', 'tasks', 'reports', 'sessions', 'info'] as const) expect(html).toContain(t(`home.tab.${tab}`))
+    expect(html).toContain(t('home.exec.title'))
     expect(html).toContain('id="home-tab-tasks" type="button" role="tab" aria-selected="true"')
     expect(html).toContain('home-project-page')
     expect(html).not.toContain('aria-modal="true"')

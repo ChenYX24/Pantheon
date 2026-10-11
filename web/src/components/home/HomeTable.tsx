@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
-import { Filter, Plus, Settings2 } from 'lucide-react'
+import { Filter, Play, Plus, Settings2 } from 'lucide-react'
 import { t } from '../../i18n'
-import { homeApi, type HomeFields, type HomeFieldSettings, type HomePatchTask, type HomeProject, type HomeTaskRow, type HomeTodo } from '../../protocol/home'
+import { homeApi, type HomeExecution, type HomeFields, type HomeFieldSettings, type HomePatchTask, type HomeProject, type HomeTaskRow, type HomeTodo } from '../../protocol/home'
 import { homeProjectLink, panelOpeningSession } from '../../routes'
 import { Markdown } from '../panels/Rendered'
 import { safeText } from '../text'
@@ -12,6 +12,8 @@ import { HomeDialog } from './HomeDialog'
 import { HomeField } from './HomeField'
 import { HomeFieldsDialog } from './HomeFieldsDialog'
 import { NewTask } from './HomeNewTask'
+import { HomeTaskRun } from './HomeRun'
+import { taskRunReason } from './execution'
 import { useHomeMutation } from './useHomeMutation'
 
 export interface HomeTableProps {
@@ -26,9 +28,11 @@ export interface HomeTableProps {
   projectId?: string
   target?: string
   returnSearch?: string
+  execution?: HomeExecution | null
+  runId?: string
 }
 
-export function HomeTable({ projects, tasks, todos, settings, state, onState, onChanged, onNavigate, projectId, target, returnSearch }: HomeTableProps) {
+export function HomeTable({ projects, tasks, todos, settings, state, onState, onChanged, onNavigate, projectId, target, returnSearch, execution = null, runId }: HomeTableProps) {
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [fieldsOpen, setFieldsOpen] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -43,6 +47,20 @@ export function HomeTable({ projects, tasks, todos, settings, state, onState, on
   const selectedTask = tasks.find((row) => row.id === target && (!projectId || row.projectId === projectId))
   const patch = (row: HomeTaskRow, changes: Omit<HomePatchTask, 'rev'>) => run(() => changeHomeTaskFields(row.projectId, row, changes))
   const meta = (row: HomeProject, changes: Partial<HomeProject['meta']>) => run(() => homeApi.patchMeta(row.id, { ...changes, rev: row.metaRev }))
+  const tasksByProject = new Map<string, HomeTaskRow[]>()
+  for (const task of tasks) {
+    const rows = tasksByProject.get(task.projectId) ?? []
+    rows.push(task)
+    tasksByProject.set(task.projectId, rows)
+  }
+  const start = (row: HomeTaskRow) => {
+    if (row.status !== 'planned') return '—'
+    const reason = busy ? t('home.saving') : taskRunReason(row, projects.find((project) => project.id === row.projectId), execution, tasksByProject.get(row.projectId) ?? [])
+    return <span className="inline-flex max-w-full flex-col items-start gap-1" title={reason || undefined} tabIndex={reason ? 0 : undefined} aria-label={reason || undefined}>
+      <button type="button" className="vp-control home-wrap-control" disabled={!!reason} onClick={() => void run(() => homeApi.runTask(row.projectId, row.id))}><Play size={14} className="shrink-0" />{t('home.exec.runNow')}</button>
+      {reason && <span className="text-vp-xs text-ink-2 @3xl:sr-only">{reason}</span>}
+    </span>
+  }
 
   useEffect(() => {
     if (target) root.current?.querySelector<HTMLElement>('[data-home-task-detail]')?.scrollIntoView({ block: 'nearest' })
@@ -63,6 +81,7 @@ export function HomeTable({ projects, tasks, todos, settings, state, onState, on
     <HomeField label={t('home.primary')} value={row.primary} disabled={busy} onSave={(value) => patch(row, { primary: String(value) })} />,
     <HomeField label={t('home.table.due')} value={row.due} type="date" disabled={busy} onSave={(value) => patch(row, { due: String(value) })} />,
     <HomeTime at={row.updated} />,
+    start(row),
   ]
   const projectCells = (row: HomeProject): ReactNode[] => [
     <a className="vp-control" href={homeProjectLink({ projectId: row.id }, returnSearch)} onClick={onNavigate}>{safeText(row.id)}</a>,
@@ -76,7 +95,7 @@ export function HomeTable({ projects, tasks, todos, settings, state, onState, on
     <HomeTime at={row.updatedAt} />,
   ]
   const headers = kind === 'tasks'
-    ? [t('home.table.project'), t('home.table.title'), t('home.status'), t('home.table.priority'), t('home.table.tags'), t('home.table.stage'), t('home.table.owner'), t('home.primary'), t('home.table.due'), t('home.table.updated')]
+    ? [t('home.table.project'), t('home.table.title'), t('home.status'), t('home.table.priority'), t('home.table.tags'), t('home.table.stage'), t('home.table.owner'), t('home.primary'), t('home.table.due'), t('home.table.updated'), t('home.exec.title')]
     : [t('home.table.project'), t('home.table.goal'), t('home.table.labels'), t('home.table.priority'), t('home.table.phase'), t('home.table.owner'), t('home.table.taskCount'), t('home.table.todoCount'), t('home.table.updated')]
   const groups = kind === 'tasks' ? taskGroups.map((group) => ({ ...group, rows: group.rows.map((row) => ({ key: `${row.projectId}:${row.id}`, cells: taskCells(row) })) })) : projectGroups.map((group) => ({ ...group, rows: group.rows.map((row) => ({ key: row.id, cells: projectCells(row) })) }))
   const filterProps = { state, onState, projects, fields, projectId, kind }
@@ -110,6 +129,7 @@ export function HomeTable({ projects, tasks, todos, settings, state, onState, on
         {selectedTask.session && <a className="vp-control justify-self-start" href={panelOpeningSession(selectedTask.session)}>{t('home.openTerminal')}</a>}
       </div>
       <div className="min-w-0 overflow-hidden"><Markdown text={selectedTask.body} /></div>
+      {runId && <HomeTaskRun key={runId} projectId={selectedTask.projectId} taskId={selectedTask.id} runId={runId} />}
     </article>}
     {target && !selectedTask && <p role="status">{t('home.taskMissing')}</p>}
     {filtersOpen && <HomeDialog title={t('home.filter')} onClose={() => setFiltersOpen(false)}><HomeFilters {...filterProps} /></HomeDialog>}
