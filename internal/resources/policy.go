@@ -55,7 +55,11 @@ type Policy struct {
 	// nobody has answered.
 	AutoAct bool `json:"autoAct"`
 	// GraceSeconds is how long it waits for that answer.
-	GraceSeconds int `json:"graceSeconds"`
+	GraceSeconds         int  `json:"graceSeconds"`
+	Rollover             bool `json:"rollover"`
+	IdleMinutes          int  `json:"idleMinutes"`
+	RolloverGraceSeconds int  `json:"rolloverGraceSeconds"`
+	AutoResume           bool `json:"autoResume"`
 	// BoostUntil, while in the future, runs Performance whatever Mode says.
 	// It is how "give it more for an hour" is answered without a person having
 	// to remember to switch back.
@@ -64,11 +68,15 @@ type Policy struct {
 
 // Params are the numbers a policy comes to at a moment.
 type Params struct {
-	Mode         Mode `json:"mode"`
-	PoolPercent  int  `json:"poolPercent"`
-	AskPercent   int  `json:"askPercent"`
-	AutoAct      bool `json:"autoAct"`
-	GraceSeconds int  `json:"graceSeconds"`
+	Mode                 Mode `json:"mode"`
+	PoolPercent          int  `json:"poolPercent"`
+	AskPercent           int  `json:"askPercent"`
+	AutoAct              bool `json:"autoAct"`
+	GraceSeconds         int  `json:"graceSeconds"`
+	Rollover             bool `json:"rollover"`
+	IdleMinutes          int  `json:"idleMinutes"`
+	RolloverGraceSeconds int  `json:"rolloverGraceSeconds"`
+	AutoResume           bool `json:"autoResume"`
 	// Dynamic shrinks the budget when the rest of the host needs the memory.
 	Dynamic bool `json:"dynamic"`
 	Boosted bool `json:"boosted"`
@@ -89,7 +97,8 @@ var Presets = map[Mode]Params{
 func DefaultPolicy() Policy {
 	p := Presets[Balanced]
 	return Policy{Mode: Balanced, PoolPercent: p.PoolPercent, AskPercent: p.AskPercent,
-		AutoAct: p.AutoAct, GraceSeconds: p.GraceSeconds}
+		AutoAct: p.AutoAct, GraceSeconds: p.GraceSeconds,
+		Rollover: true, IdleMinutes: 10, RolloverGraceSeconds: 180}
 }
 
 // Bounds on a custom policy. The pool floor is not about safety -- a small
@@ -112,6 +121,12 @@ const (
 // quietly storing a different number than the one sent is how a setting
 // "does not stick".
 func (p Policy) Validate() error {
+	if p.IdleMinutes < 0 || p.IdleMinutes > 1440 {
+		return errors.New("idleMinutes must be 0–1440")
+	}
+	if p.RolloverGraceSeconds < 1 || p.RolloverGraceSeconds > 1800 {
+		return errors.New("rolloverGraceSeconds must be 1–1800")
+	}
 	switch p.Mode {
 	case Conservative, Balanced, Performance:
 		return nil
@@ -137,7 +152,11 @@ func (p Policy) Validate() error {
 var ErrBoostTooLong = errors.New("a boost lasts at most twelve hours")
 
 // At resolves the policy into the numbers in force at now.
-func (p Policy) At(now time.Time) Params {
+func (p Policy) At(now time.Time) (out Params) {
+	defer func() {
+		out.Rollover, out.IdleMinutes = p.Rollover, p.IdleMinutes
+		out.RolloverGraceSeconds, out.AutoResume = p.RolloverGraceSeconds, p.AutoResume
+	}()
 	if p.BoostUntil > now.Unix() {
 		out := Presets[Performance]
 		out.Boosted = true

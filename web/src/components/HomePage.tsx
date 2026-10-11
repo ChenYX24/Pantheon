@@ -1,3 +1,4 @@
+import { RolloverActions } from './RolloverActions'
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { ArrowLeft, Bell, Boxes, ClipboardList, LogOut, RefreshCw, Search } from 'lucide-react'
 import { t, useLang } from '../i18n'
@@ -145,5 +146,6 @@ function HomeTodos({ todos, onNavigate, returnSearch }: { todos: HomeTodo[]; onN
   const kinds = [...new Set(todos.map((todo) => todo.kind))]
   return <div className="space-y-4">{kinds.map((kind) => <section key={kind}><h2 className="mb-2 text-vp-sm font-semibold">{t(todoLabelKey(kind))}</h2><ul className="space-y-2">{todos.filter((todo) => todo.kind === kind).map((todo) => <li key={todo.id} className="min-w-0 border-t border-hairline pt-2">
     <a href={todoLink(todo, returnSearch)} onClick={onNavigate} className="block rounded-vp px-2 py-1.5 hover:bg-surface-2"><p className="text-vp-xs text-ink-2">{safeText(todo.projectId)}</p><p className="mt-1 text-vp-base font-medium">{safeText(todo.title)}</p>{todo.detail && <p className="mt-1 text-vp-sm text-ink-2">{safeText(todo.detail)}</p>}<p className="mt-1 text-vp-xs text-ink-3"><HomeTime at={todo.at} /></p></a>
+    {todo.kind === 'session_rollover' && todo.link.sessionId && <RolloverActions id={todo.link.sessionId} onlyResume reason="long" />}
   </li>)}</ul></section>)}</div>
 }

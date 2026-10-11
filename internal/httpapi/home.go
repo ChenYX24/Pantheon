@@ -122,7 +122,10 @@ func (s *Server) homeSnapshot(ctx context.Context, all bool) (home.Snapshot, err
 					agent = name
 				}
 			}
-			item.Sessions = append(item.Sessions, home.Session{ID: row.ID, Name: row.Title, State: string(row.State), Agent: agent, StateChangedAt: time.Unix(row.StateChangedAt, 0).Format(time.RFC3339)})
+			if homeWorkerSession(row) {
+				agent = ""
+			}
+			item.Sessions = append(item.Sessions, home.Session{ID: row.ID, Name: row.Title, State: string(row.State), Agent: agent, StateChangedAt: time.Unix(row.StateChangedAt, 0).Format(time.RFC3339), CreatedAt: row.CreatedAt})
 		}
 		runtime = append(runtime, item)
 	}

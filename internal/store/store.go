@@ -1114,6 +1114,10 @@ var migrations = []func(tx *sql.Tx) error{
 	migrateHomeThreads,
 	migrateHomeResources,
 	migrateHomeRuns,
+	func(tx *sql.Tx) error {
+		_, err := tx.Exec(`ALTER TABLE sessions ADD COLUMN archive_note TEXT NOT NULL DEFAULT ''`)
+		return err
+	},
 }
 
 // scanner is *sql.Row and *sql.Rows both, so one scan function serves a

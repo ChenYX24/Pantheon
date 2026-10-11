@@ -208,6 +208,7 @@ export interface Session {
   rows: number
   createdAt: number
   archivedAt: number | null
+  archiveNote: string
 
   /**
    * The argv this session was created with — the only version of it that can be
@@ -553,6 +554,10 @@ export interface ResourcePolicy {
   askPercent: number
   autoAct: boolean
   graceSeconds: number
+  rollover: boolean
+  idleMinutes: number
+  rolloverGraceSeconds: number
+  autoResume: boolean
   boostUntil?: number
 }
 
@@ -562,6 +567,10 @@ export interface ResourceParams {
   askPercent: number
   autoAct: boolean
   graceSeconds: number
+  rollover: boolean
+  idleMinutes: number
+  rolloverGraceSeconds: number
+  autoResume: boolean
   dynamic: boolean
   boosted: boolean
 }
@@ -635,6 +644,7 @@ export interface ResourceAlert {
   total: number
   /** When the panel ends `proc` on its own; absent when it will not. */
   autoAt?: number
+  rollover?: boolean
   canPause?: boolean
   canBoost?: boolean
 }
@@ -2163,4 +2173,12 @@ export interface ChatRoutePreview {
   change: { sessionId: string; projectId: string; tool: string; state: string; kind: string }
   /** Who would be told, as "channel:peer", after pairing and mutes. */
   peers: string[]
+}
+
+export interface RolloverStatus {
+  state: 'idle' | 'asking' | 'waiting' | 'ending' | 'done' | 'failed'
+  handoff: string
+  startedAt: number
+  error: string
+  newSessionId?: string
 }

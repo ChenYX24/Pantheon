@@ -103,6 +103,9 @@ func (g *Governor) PrepareRolloverEnd(ctx context.Context, sessionID string) (fu
 			return nil, ErrGone
 		}
 		current := sysmon.ProcTable()
+		if live, ok := current[pane]; ok && live.Start != owned[pane] {
+			return nil, ErrGone
+		}
 		for pid, p := range current {
 			start, tracked := owned[pid]
 			if tracked && start != p.Start {
@@ -118,6 +121,11 @@ func (g *Governor) PrepareRolloverEnd(ctx context.Context, sessionID string) (fu
 					if live, ok := current[root]; ok && live.Start == born && descendsFrom(pid, root, procs) {
 						belongs = true
 						break
+					}
+				}
+				if !belongs && l != nil {
+					if _, err := g.checkedProcess(sessionID, pid, p.Start, l, ro, LazyProcs()); err == nil {
+						return nil, ErrNotInSession
 					}
 				}
 				if !belongs || pid <= 1 || pid == os.Getpid() || pid == server.PID {

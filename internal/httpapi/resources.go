@@ -96,8 +96,13 @@ func (s *Server) ResourceSessions() []resources.SessionMeta {
 func (s *Server) publishResourceSessions(rows []store.Session) {
 	metas := make([]resources.SessionMeta, 0, len(rows))
 	for _, row := range rows {
+		if row.ArchivedAt != nil {
+			continue
+		}
 		metas = append(metas, resources.SessionMeta{
 			ID: row.ID, TmuxName: row.TmuxName, Title: row.Title, Waiting: row.State == session.StateWaiting,
+			State: row.State, StateChangedAt: time.Unix(row.StateChangedAt, 0), Pinned: row.Pinned,
+			HomeWorker: homeWorkerSession(row), Exited: row.Exited,
 		})
 	}
 	s.res.mu.Lock()
@@ -150,7 +155,7 @@ func (s *Server) storedPolicy(ctx context.Context) (resources.Policy, error) {
 	}
 	p := resources.DefaultPolicy()
 	if raw != "" {
-		var stored resources.Policy
+		stored := resources.DefaultPolicy()
 		if json.Unmarshal([]byte(raw), &stored) == nil && stored.Validate() == nil {
 			p = stored
 		}
@@ -243,10 +248,6 @@ func (s *Server) handleResourceAlert(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePutResourcePolicy(w http.ResponseWriter, r *http.Request) {
-	var req resources.Policy
-	if !decode(w, r, &req) {
-		return
-	}
 	s.res.write.Lock()
 	defer s.res.write.Unlock()
 	// A boost is its own route, with its own bound. Carried over rather than
@@ -257,6 +258,10 @@ func (s *Server) handlePutResourcePolicy(w http.ResponseWriter, r *http.Request)
 	prev, err := s.storedPolicy(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, "the stored policy could not be read; nothing was saved")
+		return
+	}
+	req := prev
+	if !decode(w, r, &req) {
 		return
 	}
 	req.BoostUntil = prev.BoostUntil

@@ -512,7 +512,7 @@ func (s *Server) RestoreFlagged(ctx context.Context) {
 		if !Restorable(row) {
 			continue
 		}
-		if !row.RestoreOnBoot {
+		if !row.RestoreOnBoot || row.ArchivedAt != nil {
 			waiting++
 			continue
 		}

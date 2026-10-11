@@ -67,6 +67,9 @@ func developmentTerminalRoute(method, path string) bool {
 		}
 	}
 	if len(parts) == 3 {
+		if parts[0] == "sessions" && parts[2] == "rollover" {
+			return method == http.MethodPost || method == http.MethodGet
+		}
 		if parts[0] == "sessions" && parts[2] == "restart" {
 			return method == http.MethodPost
 		}

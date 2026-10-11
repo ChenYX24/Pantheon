@@ -33,7 +33,7 @@ func TestPresetsAreWhatThePageSays(t *testing.T) {
 }
 
 func TestValidateRefusesRatherThanClamps(t *testing.T) {
-	ok := Policy{Mode: Custom, PoolPercent: 60, AskPercent: 80, AutoAct: true, GraceSeconds: 30}
+	ok := Policy{RolloverGraceSeconds: 180, Mode: Custom, PoolPercent: 60, AskPercent: 80, AutoAct: true, GraceSeconds: 30}
 	if err := ok.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +47,7 @@ func TestValidateRefusesRatherThanClamps(t *testing.T) {
 		{Mode: Custom, PoolPercent: 60, AskPercent: 80, AutoAct: true, GraceSeconds: 1801},
 	}
 	for _, p := range bad {
+		p.RolloverGraceSeconds = 180
 		if p.Validate() == nil {
 			t.Errorf("accepted %+v", p)
 		}

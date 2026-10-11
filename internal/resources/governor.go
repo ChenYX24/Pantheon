@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jiangmuran/vibepanel/internal/cgroup"
+	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/sysmon"
 )
 
@@ -68,8 +69,13 @@ type SessionMeta struct {
 	Title string
 	// Waiting is the session asking for a person, the one state where being
 	// slow costs a human's time rather than a machine's.
-	Waiting   bool
-	LastInput time.Time
+	Waiting        bool
+	LastInput      time.Time
+	State          session.State
+	StateChangedAt time.Time
+	Pinned         bool
+	HomeWorker     bool
+	Exited         bool
 }
 
 // Env is everything the governor reads or calls outside this package. What
@@ -112,6 +118,10 @@ type Env struct {
 	Audit func(event, who, detail string)
 	// Restart asks the process to be restarted by its supervisor.
 	Restart func()
+	// Rollover waits for a handoff and ends the session. It runs off the tick;
+	// otherwise the governor could not observe critical pressure during grace.
+	Rollover    func(sessionID string, resume bool, grace time.Duration) error
+	RollingOver func(sessionID string) bool
 }
 
 // Event is what is pushed to viewers: the question as it stands now, and what
@@ -220,7 +230,8 @@ type Alert struct {
 	Total        uint64    `json:"total"`
 	// AutoAt is when the panel ends Proc on its own if nobody answers; 0 when
 	// it will not.
-	AutoAt int64 `json:"autoAt,omitempty"`
+	AutoAt   int64 `json:"autoAt,omitempty"`
+	Rollover bool  `json:"rollover,omitempty"`
 	// CanPause and CanBoost say which answers mean anything now: pausing needs
 	// the sessions isolated, a boost is nothing under Performance, and neither
 	// is a boost under machine pressure, which is about the host and not the
@@ -325,13 +336,15 @@ type Governor struct {
 	actions  []Action
 	quiet    time.Time
 	lastEmit time.Time
+	rolling  string
 }
 
 type tickState struct {
 	growth     map[string][]memSample // by session id
 	cpuPrev    map[string]cpuSample   // by session id
 	hotSince   map[string]time.Time   // by session id
-	ooms       map[string]uint64      // by session id: oom_kill as last read
+	coldSince  map[string]time.Time
+	ooms       map[string]uint64 // by session id: oom_kill as last read
 	refaults   memSample
 	unkillable map[procKey]bool
 	lastMax    uint64
@@ -366,6 +379,7 @@ func New(env Env) *Governor {
 			growth:     map[string][]memSample{},
 			cpuPrev:    map[string]cpuSample{},
 			hotSince:   map[string]time.Time{},
+			coldSince:  map[string]time.Time{},
 			ooms:       map[string]uint64{},
 			unkillable: map[procKey]bool{},
 			started:    time.Now(),
@@ -468,6 +482,20 @@ func (g *Governor) Tick(ctx context.Context) {
 	}
 
 	sessions := g.readSessions(layout, ro, now)
+	if params.Rollover {
+		// Waiting usually raises priority for the human it is waiting on. Once
+		// the idle threshold expires, only a pin or recent input protects it;
+		// otherwise the policy could never choose a waiting agent for handoff.
+		for n := range sessions {
+			m := ro.byID[sessions[n].ID]
+			if m.Pinned {
+				sessions[n].Priority = PriorityHigh
+			}
+			if !m.Pinned && now.Sub(m.LastInput) >= inputWindow && idleState(m, params, now) {
+				sessions[n].Priority = PriorityNormal
+			}
+		}
+	}
 	g.demote(sessions, hostPressure("cpu").Some10, now)
 	g.applyWeights(layout, sessions)
 
