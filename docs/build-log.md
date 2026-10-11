@@ -24904,3 +24904,20 @@ existing home/runtime conventions; E1 does not specify their encoding.
 The first low-priority, single-worker pass passed 35 tests for API shapes,
 eligibility explanations, state glyphs, durations, autonomy defaults and bounds,
 full-auto consent, handoff route selection, and visible three-second polling.
+
+## 2026-10-11 — Verified process groups for session rollover
+
+The rollover end helper records a pane's process identities before requesting a
+handoff, so a voluntarily exiting agent does not leave unaccountable children.
+It shares the governor's PID/start-time and cgroup checks, checks every member of
+a process group, sends SIGTERM, and rechecks before SIGKILL ten seconds later.
+The panel, configured tmux server and unrelated processes remain protected.
+Signals are refused after cancellation or when group ownership cannot be proved.
+
+Focused resource tests cover the legacy kill path, signal ordering, revalidation
+and a disposable shell/child group, without starting tmux or touching user
+sessions. The old question test exposed an RSS assumption: a sleep child's RSS
+is not reliably half its shell's. Its decision fixture now waits for exec and
+supplies deterministic RSS; identity checks and signals still use its own real
+temporary processes. The final focused run passed with the prescribed serial,
+low-priority Go settings.

@@ -273,32 +273,9 @@ func (g *Governor) Kill(sessionID string, pid int, start uint64, who string) (Ac
 // exited and something else has the number is not a hypothetical on a machine
 // that has just been through an OOM kill.
 func (g *Governor) kill(sessionID string, pid int, start uint64, who string, auto bool, l *Layout, ro roster, procs Procs) (Action, error) {
-	meta, ok := ro.byID[sessionID]
-	if !ok {
-		return Action{}, ErrUnknownSession
-	}
-	if pid <= 1 {
-		return Action{}, ErrNotInSession
-	}
-	pane := ro.panes[meta.TmuxName].PID
-	p, ok := sysmon.ReadProc(pid)
-	if !ok || p.Start != start {
-		return Action{}, ErrGone
-	}
-	g.mu.Lock()
-	server := g.server
-	g.mu.Unlock()
-	if pid == os.Getpid() || pid == server.PID || pid <= 1 {
-		return Action{}, ErrNotInSession
-	}
-	if l != nil {
-		leaf, ok := l.Session(meta.TmuxName)
-		rel, err := cgroup.Of(pid)
-		if !ok || err != nil || rel != leaf.Rel() {
-			return Action{}, ErrNotInSession
-		}
-	} else if pane <= 0 || !descendsFrom(pid, pane, procs) {
-		return Action{}, ErrNotInSession
+	p, err := g.checkedProcess(sessionID, pid, start, l, ro, procs)
+	if err != nil {
+		return Action{}, err
 	}
 
 	// A person's choice gets a chance to exit cleanly. The panel's own does
@@ -326,6 +303,39 @@ func (g *Governor) kill(sessionID string, pid int, start uint64, who string, aut
 	act := Action{At: time.Now().Unix(), Kind: ActionKill, Auto: auto, SessionID: sessionID, Name: p.Comm, RSS: p.RSS, Who: who}
 	g.record(act, fmt.Sprintf("%q (pid %d, %s)", p.Comm, pid, sysmon.FormatBytes(p.RSS)))
 	return act, nil
+}
+
+// checkedProcess is shared by single-process kills and whole-session rollover.
+func (g *Governor) checkedProcess(sessionID string, pid int, start uint64, l *Layout, ro roster, procs Procs) (sysmon.Proc, error) {
+	meta, ok := ro.byID[sessionID]
+	if !ok {
+		return sysmon.Proc{}, ErrUnknownSession
+	}
+	if pid <= 1 {
+		return sysmon.Proc{}, ErrNotInSession
+	}
+	pane := ro.panes[meta.TmuxName].PID
+	p, ok := sysmon.ReadProc(pid)
+	if !ok || p.Start != start {
+		return sysmon.Proc{}, ErrGone
+	}
+	g.mu.Lock()
+	server := g.server
+	g.mu.Unlock()
+	if pid == os.Getpid() || pid == server.PID || pid <= 1 {
+		return sysmon.Proc{}, ErrNotInSession
+	}
+	if l != nil {
+		leaf, ok := l.Session(meta.TmuxName)
+		rel, err := cgroup.Of(pid)
+		if !ok || err != nil || rel != leaf.Rel() {
+			return sysmon.Proc{}, ErrNotInSession
+		}
+	} else if pane <= 0 || !descendsFrom(pid, pane, procs) {
+		return sysmon.Proc{}, ErrNotInSession
+	}
+
+	return p, nil
 }
 
 // Freeze pauses or resumes a session.

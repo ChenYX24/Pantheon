@@ -41,6 +41,15 @@ func spawnPane(t *testing.T) (pane, child int) {
 		t.Fatalf("child pid %q: %v", buf[:n], err)
 	}
 	t.Cleanup(func() { _ = syscall.Kill(child, syscall.SIGKILL) })
+	// The shell prints the pid before the child execs sleep. Reading /proc at
+	// that point sometimes names a second shell with no resident pages yet.
+	for until := time.Now().Add(3 * time.Second); time.Now().Before(until); time.Sleep(5 * time.Millisecond) {
+		p, ok := sysmon.ReadProc(child)
+		if ok && p.Comm == "sleep" {
+			return cmd.Process.Pid, child
+		}
+	}
+	t.Fatal("pane child did not finish starting")
 	return cmd.Process.Pid, child
 }
 
@@ -103,7 +112,21 @@ func oneSession(t *testing.T) (*world, *Governor, int, int) {
 func (g *Governor) tickDecide(now time.Time, p Params, l Level, reason Reason, r Reading, s []SessionView) {
 	g.tickMu.Lock()
 	defer g.tickMu.Unlock()
-	g.decide(now, p, l, reason, r, s, nil, g.roster(), LazyProcs())
+	ro := g.roster()
+	read := LazyProcs()
+	procs := func(pid int) (sysmon.Proc, bool) {
+		proc, ok := read(pid)
+		// RSS varies even between these tiny shell/sleep pairs. The question
+		// tests a larger child, while the pid/start and signal checks stay real.
+		proc.RSS = 2 * mib
+		for _, pane := range ro.panes {
+			if pane.PID == pid {
+				proc.RSS = mib
+			}
+		}
+		return proc, ok
+	}
+	g.decide(now, p, l, reason, r, s, nil, ro, procs)
 }
 
 // A pool of 8 GiB holding 4, and session "a" holding all of it: named and
