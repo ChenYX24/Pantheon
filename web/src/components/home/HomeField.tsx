@@ -3,13 +3,13 @@ import { Check } from 'lucide-react'
 import { t } from '../../i18n'
 import type { HomeFieldOption } from '../../protocol/home'
 import { safeText } from '../text'
-import { optionColor, optionFor } from './board'
+import { optionFor } from './board'
+import { StatusPill } from '../shell/StatusPill'
 import { HomeDialog } from './HomeDialog'
 
 export function HomeChip({ value, options }: { value: string; options?: HomeFieldOption[] }) {
   const option = optionFor(value, options)
-  const color = optionColor(option.color)
-  return <span className="inline-flex max-w-full items-center gap-1 rounded-vp border px-1.5 py-0.5 text-vp-xs" style={{ borderColor: `color-mix(in srgb, ${color} 45%, transparent)`, background: `color-mix(in srgb, ${color} 10%, transparent)` }}><span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} /><span className="min-w-0 break-words">{safeText(option.label || option.value) || t('home.emptyField')}</span></span>
+  return <StatusPill label={safeText(option.label || option.value) || t('home.emptyField')} color={option.color} />
 }
 
 interface FieldProps {

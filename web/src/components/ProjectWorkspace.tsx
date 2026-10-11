@@ -9,6 +9,7 @@ import { ArrowLeft, CheckCircle2, CircleDot, House, Layers3, MessageSquare, Refr
 import { api } from '../protocol/api'
 import type { Project, Session } from '../protocol/wire'
 import { HOME_PATH, PANEL_PATH, panelOpeningSession } from '../routes'
+import { usePanelHomeLinks } from './home/usePanelHomeLinks'
 import { ProjectBoard } from './ProjectBoard'
 import { CapabilityInventory, StageNotifications, ProposalChanges } from './ProjectWorkflowDetails'
 import type { Assignment, Board } from './ProjectBoard'
@@ -27,6 +28,7 @@ type Tab = typeof tabs[number][0]
 
 export function ProjectWorkspace({ onSignOut }: { onSignOut: () => void }) {
   const lang = useLang()
+  const homeLinks = usePanelHomeLinks()
   useEffect(() => { document.title = `Parthenon · ${t('pm.workspace')}` }, [lang])
   const [projects, setProjects] = useState<Project[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
@@ -78,6 +80,7 @@ export function ProjectWorkspace({ onSignOut }: { onSignOut: () => void }) {
     setBusy(true); setError('')
     try { await fn(); await refresh() } catch (e) { setError(String(e)) } finally { setBusy(false) }
   }
+  const homeLink = homeLinks.get(selected)
   const project = projects.find((p) => p.id === selected)
   const tasks = board?.tasks ?? []
   const done = tasks.filter((t) => t.status === 'done').length
@@ -95,6 +98,7 @@ export function ProjectWorkspace({ onSignOut }: { onSignOut: () => void }) {
       <LanguageSwitch testid="projects" />
     </header>
     <main className="@container mx-auto max-w-[1500px] p-4">
+      {homeLink && <a className="mb-4 flex items-center gap-2 rounded-vp border border-hairline bg-surface p-4 text-vp-base hover:underline" href={homeLink} data-testid="legacy-project-home" onClick={async (event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); if (await discard()) location.assign(homeLink) }}><House size={16} />{t('home.shell.legacy')}</a>}
       <div className="mb-5 flex flex-wrap items-end gap-3">
         <label className="w-full max-w-md text-vp-base">{t('pm.currentProject')}<select aria-label={t('pm.currentProject')} className={`${input} mt-1`} value={selected} disabled={busy} onChange={(e) => changeProject(e.target.value)}>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
         <p className="min-w-0 break-all text-vp-xs text-ink-2">{project?.path}</p>

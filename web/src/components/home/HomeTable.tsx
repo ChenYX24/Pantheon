@@ -33,7 +33,7 @@ export interface HomeTableProps {
 }
 
 export function HomeTable({ projects, tasks, todos, settings, state, onState, onChanged, onNavigate, projectId, target, returnSearch, execution = null, runId }: HomeTableProps) {
-  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState<{ top: number; left: number } | null>(null)
   const [fieldsOpen, setFieldsOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createProject, setCreateProject] = useState(projectId ?? projects[0]?.id ?? '')
@@ -72,7 +72,7 @@ export function HomeTable({ projects, tasks, todos, settings, state, onState, on
   }
   const taskCells = (row: HomeTaskRow): ReactNode[] => [
     <a className="vp-control" href={homeProjectLink({ projectId: row.projectId, taskId: row.id }, returnSearch)} onClick={onNavigate}>{safeText(row.projectId)}</a>,
-    <div><a className="text-vp-xs text-ink-2 hover:text-accent" href={homeProjectLink({ projectId: row.projectId, taskId: row.id }, returnSearch)} onClick={onNavigate}>{safeText(row.id)}</a><div><HomeField label={t('home.table.title')} value={row.title} required disabled={busy} onSave={(value) => patch(row, { title: String(value) })} /></div></div>,
+    <div className="flex min-w-0 items-center gap-2"><a className="shrink-0 text-vp-xs text-ink-2 hover:underline" href={homeProjectLink({ projectId: row.projectId, taskId: row.id }, returnSearch)} onClick={onNavigate}>{safeText(row.id)}</a><div className="min-w-0"><HomeField label={t('home.table.title')} value={row.title} required disabled={busy} onSave={(value) => patch(row, { title: String(value) })} /></div></div>,
     <HomeField label={t('home.status')} value={row.status} options={fields?.task.status.options} required disabled={busy || !fields} onSave={(value) => patch(row, { status: value as HomeTaskRow['status'] })} />,
     <HomeField label={t('home.table.priority')} value={row.priority} options={fields?.task.priority.options} disabled={busy || !fields} onSave={(value) => patch(row, { priority: String(value) })} />,
     <HomeField label={t('home.table.tags')} value={row.tags} options={fields?.task.tags.options} disabled={busy || !fields} onSave={(value) => patch(row, { tags: value as string[] })} />,
@@ -97,28 +97,30 @@ export function HomeTable({ projects, tasks, todos, settings, state, onState, on
   const headers = kind === 'tasks'
     ? [t('home.table.project'), t('home.table.title'), t('home.status'), t('home.table.priority'), t('home.table.tags'), t('home.table.stage'), t('home.table.owner'), t('home.primary'), t('home.table.due'), t('home.table.updated'), t('home.exec.title')]
     : [t('home.table.project'), t('home.table.goal'), t('home.table.labels'), t('home.table.priority'), t('home.table.phase'), t('home.table.owner'), t('home.table.taskCount'), t('home.table.todoCount'), t('home.table.updated')]
+  const columns = kind === 'tasks' ? ['project', 'title', 'status', 'priority', 'tags', 'stage', 'owner', 'primary', 'due', 'updated', 'execution'] : ['project', 'title', 'labels', 'priority', 'phase', 'owner', 'tasks', 'todos', 'updated']
   const groups = kind === 'tasks' ? taskGroups.map((group) => ({ ...group, rows: group.rows.map((row) => ({ key: `${row.projectId}:${row.id}`, cells: taskCells(row) })) })) : projectGroups.map((group) => ({ ...group, rows: group.rows.map((row) => ({ key: row.id, cells: projectCells(row) })) }))
   const filterProps = { state, onState, projects, fields, projectId, kind }
 
   return <section ref={root} className="@container min-w-0 space-y-3" aria-label={t(kind === 'tasks' ? 'home.table.tasks' : 'home.table.projects')}>
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="home-table-toolbar">
       {!projectId && <div className="vp-segmented" role="group" aria-label={t('home.view.table')}>{(['tasks', 'projects'] as const).map((value) => <button type="button" key={value} className="vp-tab px-3 text-vp-sm" data-active={kind === value} aria-pressed={kind === value} onClick={() => onState({ ...state, table: value })}>{t(`home.table.${value}`)}</button>)}</div>}
-      <button type="button" className="vp-control @3xl:hidden" onClick={() => setFiltersOpen(true)}><Filter size={15} />{t('home.filter')} / {t('home.group')}</button>
+      <button type="button" className="vp-control" aria-haspopup="dialog" aria-expanded={!!filtersOpen} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setFiltersOpen({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 296)), top: Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 420)) }) }}><Filter size={15} />{t('home.filter')}</button>
+      <label><span className="sr-only">{t('home.group')}</span><select className="home-input" value={state.group} onChange={(event) => onState({ ...state, group: event.target.value as HomeViewState['group'] })}>{HOME_GROUPS.map((group) => <option key={group} value={group}>{t(`home.group.${group}`)}</option>)}</select></label>
+      <label><span className="sr-only">{t('home.sort')}</span><select className="home-input" value={state.sort} onChange={(event) => onState({ ...state, sort: event.target.value as HomeViewState['sort'] })}>{HOME_SORTS.filter((sort) => kind === 'tasks' || sort !== 'due').map((sort) => <option key={sort} value={sort}>{t(`home.sort.${sort}`)}</option>)}</select></label>
       <button type="button" className="vp-control" disabled={busy || !projects.length} onClick={() => { setCreateProject(projectId ?? (state.project || projects[0]?.id || '')); setCreating(true) }}><Plus size={15} />{t('home.newTask')}</button>
       <button type="button" className="vp-control" disabled={!settings} onClick={() => setFieldsOpen(true)}><Settings2 size={15} />{t('home.fields')}</button>
     </div>
-    <div className="hidden @3xl:block"><HomeFilters {...filterProps} /></div>
-    {!groups.length && <p className="rounded-vp border border-hairline bg-surface p-4 text-ink-2">{t('home.noMatches')}</p>}
+    {!groups.length && <p className="text-ink-2">{t('home.noMatches')}</p>}
     <div className="hidden max-h-[65dvh] min-w-0 max-w-full overflow-auto rounded-vp border border-hairline @3xl:block">
-      <table className="home-table"><thead><tr>{headers.map((header, index) => <th key={index} scope="col">{header}</th>)}</tr></thead><tbody>
-        {groups.map((group) => <Fragment key={group.value}>{state.group !== 'none' && <tr><td colSpan={headers.length} className="bg-surface-2 font-semibold">{t('home.groupCount', { group: groupLabel(group.value), count: group.rows.length })}</td></tr>}{group.rows.map((row) => <tr key={row.key} data-testid="home-table-row">{row.cells.map((cell, index) => <td key={index}>{cell}</td>)}</tr>)}</Fragment>)}
+      <table className="home-table"><colgroup>{columns.map((column) => <col key={column} data-column={column} />)}</colgroup><thead><tr>{headers.map((header, index) => <th key={index} scope="col" data-column={columns[index]}>{header}</th>)}</tr></thead><tbody>
+        {groups.map((group) => <Fragment key={group.value}>{state.group !== 'none' && <tr><td colSpan={headers.length} className="bg-surface-2 font-semibold">{t('home.groupCount', { group: groupLabel(group.value), count: group.rows.length })}</td></tr>}{group.rows.map((row) => <tr key={row.key} data-testid="home-table-row">{row.cells.map((cell, index) => <td key={index} data-column={columns[index]}>{cell}</td>)}</tr>)}</Fragment>)}
       </tbody></table>
     </div>
     <div className="space-y-4 @3xl:hidden">{groups.map((group) => <section key={group.value} className="space-y-3">
       {state.group !== 'none' && <h3 className="font-semibold">{t('home.groupCount', { group: groupLabel(group.value), count: group.rows.length })}</h3>}
-      {group.rows.map((row) => <article key={row.key} className="min-w-0 rounded-vp border border-hairline bg-surface p-3" data-testid="home-table-card"><dl className="grid min-w-0 grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-x-2 gap-y-1">{row.cells.map((cell, index) => <Fragment key={index}><dt className="py-1 text-vp-xs text-ink-2">{headers[index]}</dt><dd className="min-w-0 text-vp-sm">{cell}</dd></Fragment>)}</dl></article>)}
+      {group.rows.map((row) => <article key={row.key} className="min-w-0 rounded-vp border border-hairline bg-surface p-4" data-testid="home-table-card"><dl className="grid min-w-0 grid-cols-[minmax(0,5rem)_minmax(0,1fr)] items-start gap-x-2 gap-y-1">{row.cells.map((cell, index) => <Fragment key={index}><dt className="py-1 text-vp-xs text-ink-2">{headers[index]}</dt><dd className="min-w-0 text-vp-sm">{cell}</dd></Fragment>)}</dl></article>)}
     </section>)}</div>
-    {selectedTask && <article data-home-task-detail className="scroll-mt-4 rounded-vp border border-accent bg-surface p-3">
+    {selectedTask && <article data-home-task-detail className="scroll-mt-4 rounded-vp border border-hairline bg-surface p-4">
       <h3 className="font-semibold">{safeText(selectedTask.id)} · {safeText(selectedTask.title)}</h3>
       <div className="mt-3 grid gap-2 text-vp-sm">
         <label>{t('home.secondary')}<HomeField label={t('home.secondary')} value={selectedTask.secondary} onSave={(value) => patch(selectedTask, { secondary: String(value) })} /></label>
@@ -132,7 +134,7 @@ export function HomeTable({ projects, tasks, todos, settings, state, onState, on
       {runId && <HomeTaskRun key={runId} projectId={selectedTask.projectId} taskId={selectedTask.id} runId={runId} />}
     </article>}
     {target && !selectedTask && <p role="status">{t('home.taskMissing')}</p>}
-    {filtersOpen && <HomeDialog title={t('home.filter')} onClose={() => setFiltersOpen(false)}><HomeFilters {...filterProps} /></HomeDialog>}
+    {filtersOpen && <HomeDialog title={t('home.filter')} anchor={filtersOpen} onClose={() => setFiltersOpen(null)}><HomeFilters {...filterProps} /></HomeDialog>}
     {fieldsOpen && settings && <HomeFieldsDialog settings={settings} onClose={() => setFieldsOpen(false)} onChanged={onChanged} />}
     {creating && <HomeDialog title={t('home.newTask')} onClose={() => { if (!busy) setCreating(false) }}>
       {!projectId && <label className="mb-3 block text-vp-sm">{t('home.chooseProject')}<select className="home-input mt-1" value={createProject} disabled={busy} onChange={(event) => setCreateProject(event.target.value)}>{projects.map((project) => <option key={project.id} value={project.id}>{safeText(project.id)}</option>)}</select></label>}

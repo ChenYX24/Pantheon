@@ -141,17 +141,18 @@ export function HomeChat({ projectId, thread, onThread, busy, onSuggestion, revi
     </header>
     {(readError || models.error || state.error) && <div role="alert" className="shrink-0 border-b border-hairline p-3 text-vp-sm"><p>{safeText(state.error || readError || models.error)}</p><button type="button" className="vp-control mt-1" onClick={() => { refreshThreads(); void models.refresh() }}>{t('home.retry')}</button></div>}
     {state.run && state.run.thread !== thread && <p className="shrink-0 border-b border-hairline p-2 text-vp-xs text-ink-2">{t('home.pendingElsewhere')} <button type="button" className="vp-control" onClick={() => onThread(state.run!.thread)}>{t('home.goPending')}</button></p>}
-    <div ref={scroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto p-3" onScroll={() => {
+    <div ref={scroll} className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4" onScroll={() => {
       if (!scroll.current) return
       nearBottom.current = scroll.current.scrollHeight - scroll.current.scrollTop - scroll.current.clientHeight < 80
       setScrolledThread(nearBottom.current ? null : thread)
     }}>
+      <div className="home-chat-column h-full">
       {loadedThread !== thread && !state.messages.length && <p role="status" className="text-ink-2">{t('home.loading')}</p>}
-      {loadedThread === thread && !state.messages.length && <div className="flex h-full min-h-48 flex-col items-start justify-center gap-3">
-        <p className="text-vp-md font-medium">{t('home.noMessages')}</p>
-        {(['progress', 'next', 'blockers'] as const).map((key) => <button type="button" className="vp-control home-wrap-control whitespace-normal border border-hairline px-3 py-2 text-left" key={key} onClick={() => { setMessage(t(`home.starter.${key}`)); textarea.current?.focus() }}>{t(`home.starter.${key}`)}</button>)}
+      {loadedThread === thread && !state.messages.length && <div className="flex min-h-48 flex-col items-start justify-center gap-4">
+        <p className="text-vp-base font-medium">{t('home.noMessages')}</p>
+        <div className="home-starters">{(['progress', 'next', 'blockers'] as const).map((key) => <button type="button" className="vp-control home-wrap-control whitespace-normal border border-hairline px-3 py-1 text-left" key={key} onClick={() => { setMessage(t(`home.starter.${key}`)); textarea.current?.focus() }}>{t(`home.starter.${key}`)}</button>)}</div>
       </div>}
-      <div role="log" aria-label={t('home.tab.chat')} aria-live="polite" className="space-y-4">{state.messages.map((entry) => <article key={entry.id} className={`min-w-0 rounded-vp-lg p-3 ${entry.role === 'user' ? 'ml-auto max-w-[85%] border border-hairline bg-surface-2' : 'mr-auto max-w-[95%] bg-surface'}`}>
+      <div role="log" aria-label={t('home.tab.chat')} aria-live="polite" className="space-y-4">{state.messages.map((entry) => <article key={entry.id} className={`min-w-0 rounded-vp-lg p-4 ${entry.role === 'user' ? 'ml-auto max-w-[85%] border border-hairline bg-surface-2' : 'mr-auto max-w-[95%] bg-surface'}`}>
         <div className="mb-1 flex flex-wrap items-center gap-2 text-vp-xs text-ink-2"><strong>{t(entry.role === 'user' ? 'home.you' : 'home.manager')}</strong><HomeTime at={entry.at} /></div>
         {entry.role === 'user' ? <p className="whitespace-pre-wrap text-vp-base">{entry.text.replace(/\r\n?/g, '\n').split(/(\n|\t)/).map((part, index) => <span key={index}>{part === '\n' || part === '\t' ? part : safeText(part)}</span>)}</p> : <div className="min-w-0 overflow-hidden"><Markdown text={entry.text} /></div>}
         {entry.status === 'pending' && <p role="status" className="flex items-center gap-2 text-vp-sm text-ink-2"><RotateCw size={14} className="animate-spin" />{t('home.thinkingElapsed', { seconds: Math.max(0, Math.floor((now - (Date.parse(entry.at) || now)) / 1000)) })}</p>}
@@ -176,9 +177,10 @@ export function HomeChat({ projectId, thread, onThread, busy, onSuggestion, revi
           }} />
         })}
       </article>)}</div>
+      </div>
     </div>
     {scrolledUp && <button type="button" className="vp-control mx-auto shrink-0" onClick={() => { nearBottom.current = true; setScrolledThread(null); if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight }}><ArrowDown size={14} />{t('home.toBottom')}</button>}
-    <form className="shrink-0 space-y-2 border-t border-hairline bg-surface p-3" onSubmit={(event) => { event.preventDefault(); void send() }}>
+    <form className="home-composer shrink-0 space-y-3" onSubmit={(event) => { event.preventDefault(); void send() }}>
       <textarea ref={textarea} className="home-input max-h-40 resize-none" rows={2} value={message} disabled={pending} aria-label={t('home.message')} placeholder={t('home.messagePlaceholder')} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => {
         if (enterSends({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode })) { event.preventDefault(); void send() }
       }} />

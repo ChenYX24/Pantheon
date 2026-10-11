@@ -70,6 +70,9 @@ describe('home links', () => {
   it('opens waiting sessions in the terminal and rollover tasks in their project', () => {
     expect(todoLink(todo('session_waiting'))).toBe('/?session=vp_123')
     expect(todoLink(todo('session_rollover'))).toBe('/home/p/pantheon?tab=tasks&task=A2')
+    const session = todo('session_rollover')
+    session.link.taskId = ''
+    expect(todoLink(session)).toBe('/?session=vp_123')
     const question = todo('question')
     question.link = { projectId: 'pantheon', taskId: '', reportFile: 'question.md', sessionId: '' }
     expect(todoLink(question)).toBe('/home/p/pantheon?tab=reports&report=question.md')
