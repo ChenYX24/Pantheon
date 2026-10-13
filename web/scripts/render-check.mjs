@@ -4847,6 +4847,77 @@ browser = await chromium.launch({ headless: true })
     await openSettings.click()
     await sleep(900)
 
+    // ── dialog focus ───────────────────────────────────────────────────────
+    //
+    // Tab stays inside, Escape closes from anywhere inside, and the keyboard
+    // goes back to the control that opened the dialog. All three were missing
+    // in every engine: Tab walked into the page behind, and closing left the
+    // focus on <body>.
+    {
+      const inside = (sel) =>
+        page.evaluate((q) => document.querySelector(q)?.contains(document.activeElement) === true, sel)
+      const onOpener = (testid) =>
+        page.evaluate((id) => document.activeElement === document.querySelector(`[data-testid="${id}"]`), testid)
+      let escaped = 0
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press('Tab')
+        if (!(await inside('[data-testid="settings"]'))) escaped++
+      }
+      if (escaped) note('FAIL', 'dialog-focus', `Tab left the settings dialog ${escaped} times in 30 presses`)
+      // Backwards too, from the first element.
+      let escapedBack = 0
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press('Shift+Tab')
+        if (!(await inside('[data-testid="settings"]'))) escapedBack++
+      }
+      if (escapedBack) note('FAIL', 'dialog-focus', `Shift+Tab left the settings dialog ${escapedBack} times in 30 presses`)
+      // Escape from inside the body, not from the rail.
+      await page.locator('[data-testid="settings-body"] button:visible, [data-testid="settings-body"] input:visible').first().focus()
+      await page.keyboard.press('Escape')
+      await sleep(400)
+      if ((await page.locator('[data-testid="settings"]').count()) !== 0) {
+        note('FAIL', 'dialog-focus', 'Escape with the focus inside the settings body did not close it')
+      } else if (!(await onOpener('settings-open'))) {
+        note('FAIL', 'dialog-focus', 'closing the settings did not return the focus to the gear')
+      } else {
+        note('PASS', 'dialog-focus', 'settings: Tab contained both ways, Escape closes, focus back on the gear')
+      }
+      await openSettings.click()
+      await sleep(900)
+
+      // The directory picker, from the sidebar's add button.
+      const add = page.locator('[data-testid="add-project"]:visible').first()
+      if (await add.count()) {
+        // The settings dialog is covering the sidebar's button.
+        await page.locator('[data-testid="settings-close"]').click()
+        await sleep(400)
+        await add.focus()
+        await add.click()
+        await page.waitForSelector('[data-testid="dir-picker"]', { timeout: 5000 }).catch(() => {})
+        await sleep(500)
+        let out = 0
+        for (let i = 0; i < 30; i++) {
+          await page.keyboard.press('Tab')
+          if (!(await inside('[data-testid="dir-picker"]'))) out++
+        }
+        if (out) note('FAIL', 'dialog-focus', `Tab left the directory picker ${out} times in 30 presses`)
+        await page.keyboard.press('Escape')
+        await sleep(400)
+        const gone = (await page.locator('[data-testid="dir-picker"]').count()) === 0
+        const back = await page.evaluate(
+          () => document.activeElement === document.querySelector('[data-testid="add-project"]:not([hidden])') ||
+            document.activeElement?.getAttribute('data-testid') === 'add-project',
+        )
+        if (!gone) note('FAIL', 'dialog-focus', 'Escape did not close the directory picker')
+        else if (!back) note('FAIL', 'dialog-focus', 'closing the directory picker did not return the focus to the add button')
+        else if (!out) note('PASS', 'dialog-focus', 'directory picker: Tab contained, Escape closes, focus back on the add button')
+        await openSettings.click()
+        await sleep(900)
+      } else {
+        note('FAIL', 'dialog-focus', 'no add-project control to open the directory picker from')
+      }
+    }
+
     // ── settings ───────────────────────────────────────────────────────────
     //
     // Five groups on a rail, one on screen, and a link to the sharing page.

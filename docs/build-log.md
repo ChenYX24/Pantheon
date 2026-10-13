@@ -26194,3 +26194,21 @@ opening the drawer on a phone. A row takes the focus; Enter or Space chooses,
 F2 renames, the arrows move; pin and kill carry the session's name.
 `shortcuts.test.ts` pins the keys and that Alt+arrow, Ctrl+K and Tab stay the
 terminal's; render-check drives the whole round from inside a real terminal.
+
+**A dialog keeps the keyboard inside it and gives it back.** None of the
+modals trapped focus or returned it: Tab left Settings for the page behind it
+(the directory picker let go on the fifth press), closing left the focus on
+`<body>`, and Escape did nothing while the focus was in Settings' body because
+that handler deferred to any control there. The confirmation and the token view
+had no dialog role. One hook, `components/useDialogFocus.ts`, now records the
+opener while rendering (an `autoFocus` has already moved the focus by the time
+an effect runs), moves focus in only when nothing inside has it, wraps Tab and
+Shift+Tab over the tabbable elements, closes on Escape for the topmost dialog
+only (a module-level stack, so a confirmation raised over Settings does not
+close both), and on unmount restores focus only if it is on the body or inside
+the dying dialog. A click somewhere else after asking to close wins. The pure
+rules are in `dialogFocus.ts` with `dialogFocus.test.ts`; render-check's
+`dialog-focus` step presses Tab 30 times each way in Settings and the picker,
+Escape from inside the body, and asserts the focus is back on the opener.
+Removing the wrap or the restore turns both red. A control that needs Escape
+for itself calls `preventDefault`, which the hook honours.

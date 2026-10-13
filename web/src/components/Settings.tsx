@@ -6,6 +6,7 @@ import { api } from '../protocol/api'
 import type { Session, SettingsInfo } from '../protocol/wire'
 import { t, useLang } from '../i18n'
 import { CHAT_PATH, PLUGINS_PATH, SHARING_PATH } from '../routes'
+import { useDialogFocus } from './useDialogFocus'
 import { LanguageSwitch } from './LanguageSwitch'
 import { PluginSections } from './plugins/slots'
 import { AccountGroup } from './settings/AccountGroup'
@@ -70,6 +71,7 @@ export function Settings({
   const [error, setError] = useState<string | null>(null)
   const railRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   // Polled while open, not fetched once.
   //
@@ -105,27 +107,12 @@ export function Settings({
     }
   }, [])
 
-  // Escape closes — but only when nothing inside is already using it.
-  //
-  // Both exceptions were found by breaking them. A dialog that swallows every
-  // Escape closes itself *and* the confirmation asking for a passkey name,
-  // which is a cancel that throws away the page behind the question. And a
-  // control inside may use Escape for itself: the render check once watched a
-  // drag in progress survive its own cancel because this listener had closed
-  // the dialog out from under the gesture.
-  //
-  // So: not while another modal is over this one, and not while the keyboard
-  // is inside a group, where Escape belongs to whatever is holding it.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      if (document.querySelector('[data-vp-modal]:not([data-vp-modal="settings"])')) return
-      if (bodyRef.current?.contains(document.activeElement)) return
-      onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Escape, Tab containment and the way back to the gear are useDialogFocus's.
+  // Escape used to be ignored whenever the keyboard was inside the body, so a
+  // person who had tabbed to a setting could not leave with the key that
+  // leaves everything else. A control that needs Escape for itself calls
+  // preventDefault, which the hook honours.
+  useDialogFocus(dialogRef, onClose)
 
   // The keyboard starts on the rail, which is where the dialog's own
   // navigation is: arrows move between groups from the first keystroke, and
@@ -138,11 +125,12 @@ export function Settings({
   return (
     <div className="vp-backdrop absolute inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-8">
       <div
+        ref={dialogRef}
         data-testid="settings"
         data-vp-modal="settings"
         role="dialog"
         aria-modal="true"
-        aria-label={t('settings.title')}
+        aria-labelledby="vp-settings-title"
         // A reading measure. Every group is label/value lines and a handful
         // of controls, which read badly past about seventy characters. The
         // one surface that wanted more — sharing — is a page now.
@@ -158,7 +146,7 @@ export function Settings({
             and a select for two options is a click that buys nothing. Each
             option is written in its own language. */}
         <div className="flex flex-wrap items-center gap-2 border-b border-hairline px-5 py-3">
-          <h2 className="mr-auto text-vp-lg font-semibold tracking-tight text-ink">
+          <h2 id="vp-settings-title" className="mr-auto text-vp-lg font-semibold tracking-tight text-ink">
             {t('settings.title')}
           </h2>
           <LanguageSwitch testid="settings" />

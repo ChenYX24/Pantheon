@@ -4,6 +4,7 @@ import { ArchiveRestore, ChevronRight, Folder, FolderPlus, Pencil } from 'lucide
 import { api } from '../protocol/api'
 import type { ArchivedProject, DirListing, FileEntry } from '../protocol/wire'
 import { safeText } from './text'
+import { useDialogFocus } from './useDialogFocus'
 import { t, useLang } from '../i18n'
 import {
   absOf,
@@ -126,6 +127,7 @@ export function DirectoryPicker({
   const listRef = useRef<HTMLDivElement | null>(null)
   const crumbRef = useRef<HTMLDivElement | null>(null)
   const boxRef = useRef<HTMLInputElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
 
   const reason = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -178,15 +180,9 @@ export function DirectoryPicker({
   }, [])
 
   // Escape closes, for the focus that is not in the field -- a button, a row.
-  // The field handles its own Escape and stops it here, because there it means
+  // The field handles its own Escape and stops it, because there it means
   // "clear what I typed" first and "close" second.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useDialogFocus(dialogRef, onClose)
 
   // The highlight follows the keyboard into view. Without the scroll, a held
   // arrow key walks the selection off the bottom of a long directory and
@@ -388,6 +384,7 @@ export function DirectoryPicker({
         onClick={(e) => e.stopPropagation()}
         // Read by focusTerminal: while this is up the keyboard is the picker's,
         // and a terminal must not take it back mid-choice.
+        ref={dialogRef}
         data-vp-modal="directory"
         data-testid="dir-picker"
         role="dialog"
