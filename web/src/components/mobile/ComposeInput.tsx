@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { CornerDownLeft, ImagePlus, Send, WifiOff } from 'lucide-react'
 import { t, useLang } from '../../i18n'
+import { isEnter } from '../enter'
 
 /**
  * Whether this submission is a new one.
@@ -184,7 +185,7 @@ export function ComposeInput({
           // that report it without setting isComposing are the transcription
           // and dictation ones -- the same family as the double-send above.
           if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
-          if (e.key === 'Enter' && !e.shiftKey) {
+          if (isEnter(e) && !e.shiftKey) {
             e.preventDefault()
             send()
           }

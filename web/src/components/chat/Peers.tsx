@@ -11,6 +11,7 @@ import { Card, Section } from './Chat'
 import { codeDigits } from './code'
 import { chatError } from './errors'
 import { INPUT_SHORT, Primary, SELECT, Secondary } from './form'
+import { isEnter } from '../enter'
 
 /**
  * Who may talk to the panel from a chat app.
@@ -183,7 +184,7 @@ export function Peers({ data, onChange }: { data: ChatSettings; onChange: () => 
                         onChange={(e) => setRenaming({ key, name: e.target.value })}
                         onBlur={() => void rename(p, renaming.name)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') void rename(p, renaming.name)
+                          if (isEnter(e)) void rename(p, renaming.name)
                           if (e.key === 'Escape') setRenaming(null)
                         }}
                         data-testid={`chat-peer-name-${p.peerId}`}

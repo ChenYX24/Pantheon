@@ -34,6 +34,7 @@ import { Menu } from '../Menu'
 import { ManageDialog } from './ManageDialog'
 import { PageLinks } from './PageLinks'
 import { BlockTitle, Chip, Empty, Field, INPUT, IconTile } from './bits'
+import { isEnter } from '../enter'
 
 /**
  * Sharing, as one list: pages, and under each page the links that show it.
@@ -387,7 +388,7 @@ function PagesRootLine({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void save(value.trim())
+              if (isEnter(e)) void save(value.trim())
             }}
             placeholder={t('page.rootPlaceholder')}
             className={`${INPUT} min-w-0 flex-1 font-mono @md:max-w-xl`}
@@ -530,7 +531,7 @@ function NewPage({
             autoFocus
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void create()
+              if (isEnter(e)) void create()
             }}
             placeholder={t('page.namePlaceholder')}
             className={INPUT}

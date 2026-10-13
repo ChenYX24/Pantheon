@@ -24,6 +24,7 @@ import {
 import { DataForm } from './DataForm'
 import { AdminFrame } from './ManageDialog'
 import { useNow } from './usePages'
+import { isEnter } from '../enter'
 
 /**
  * The Preview pane: a page's draft, drawn next to the agent writing it.
@@ -590,7 +591,7 @@ export function PagePreview({
               maxLength={200}
               onChange={(e) => setNote(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') void publish()
+                if (isEnter(e)) void publish()
               }}
               placeholder={t('page.note')}
               className={`${INPUT} flex-1`}

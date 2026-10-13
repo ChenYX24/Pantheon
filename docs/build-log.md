@@ -25965,3 +25965,15 @@ taken before the create can still arrive after the reply to it, and
 so the new id is kept as `wanted` until a snapshot carries it. The selected
 row says so with `aria-current`, which is also what render-check reads after
 picking Shell; `App.test.ts` covers the stale snapshot and a scratch id.
+
+**An input method's Enter chooses a candidate everywhere.** Seven handlers
+read `key === 'Enter'` alone -- the sidebar's rename, the API token name,
+plugins (add a directory, a new plugin, mint a token), a plugin's settings,
+chat peers' rename, sharing's two forms, the page preview's publish -- so the
+Enter that picks a word in a Chinese input method submitted what was
+half-typed. Measured on the rename, which saved a name with a pinyin
+syllable in it, and on the token form, which minted one. Three places had
+the guard, each written by hand. Now one `isEnter` (`isComposing` or
+keyCode 229 is not a submit) used at all ten, and `enter.test.ts` scans the
+source for an event's bare `.key === 'Enter'` so the next form cannot
+reintroduce it.

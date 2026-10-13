@@ -13,6 +13,7 @@ import { InstallScreen } from './InstallScreen'
 import { PluginSettingsForm } from './PluginSettingsForm'
 import { rungsOf, stateOf, textIn } from './screen'
 import { refreshPlugins } from './slots'
+import { isEnter } from '../enter'
 
 /**
  * Plugins, as one list: a card per plugin, and under each the install screen
@@ -214,7 +215,7 @@ export function Plugins({ onOpenProject }: { onOpenProject?: (projectId: string)
             value={dir}
             onChange={(e) => setDir(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void addDir()
+              if (isEnter(e)) void addDir()
             }}
             placeholder={t('plg.dirPath')}
             data-testid="plugin-dir"
@@ -698,7 +699,7 @@ function NewPlugin({
             autoFocus
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void create()
+              if (isEnter(e)) void create()
             }}
             className={`${INPUT} w-full`}
           />
@@ -901,7 +902,7 @@ function DoorBlock({ id, st, onError }: { id: string; st: PluginProcessStatus; o
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') void mint()
+                if (isEnter(e)) void mint()
               }}
               placeholder={t('plg.door.tokenName')}
               maxLength={64}

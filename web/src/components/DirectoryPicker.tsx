@@ -16,6 +16,7 @@ import {
   resolveKey,
   type Act,
 } from './dirpicker'
+import { isEnter } from './enter'
 
 /**
  * Where a project should live.
@@ -544,7 +545,7 @@ export function DirectoryPicker({
                   onChange={(ev) => setNewName(ev.target.value)}
                   onKeyDown={(ev) => {
                     if (ev.nativeEvent.isComposing || ev.nativeEvent.keyCode === 229) return
-                    if (ev.key === 'Enter') {
+                    if (isEnter(ev)) {
                       ev.preventDefault()
                       void create()
                     }

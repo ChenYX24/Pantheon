@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { isEnter } from './enter'
 
 interface Base {
   value: string
@@ -125,7 +126,7 @@ export function InlineName({ value, onCommit, className, title, ...controlled }:
         onBlur={commit}
         onKeyDown={(e) => {
           e.stopPropagation()
-          if (e.key === 'Enter') commit()
+          if (isEnter(e)) commit()
           if (e.key === 'Escape') setEditing(false)
         }}
         onClick={(e) => e.stopPropagation()}

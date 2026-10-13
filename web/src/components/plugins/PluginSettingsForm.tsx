@@ -6,6 +6,7 @@ import type { PluginDetail, PluginFieldSpec, PluginSettings } from '../../protoc
 import { Field, INPUT } from '../pages/bits'
 import { safeText } from '../text'
 import { listLines, textIn } from './screen'
+import { isEnter } from '../enter'
 
 /**
  * A plugin's settings, drawn by the panel from the schema the manifest
@@ -197,7 +198,7 @@ function SettingField({
               if (draft !== value) onSave(draft)
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              if (isEnter(e)) (e.target as HTMLInputElement).blur()
             }}
             className={INPUT}
           />
@@ -272,7 +273,7 @@ function SecretField({
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') void save()
+          if (isEnter(e)) void save()
         }}
         data-testid={`${id}-value`}
         className="min-w-0 flex-1 rounded-vp border border-hairline bg-surface-2 px-2 py-1 text-vp-sm text-ink outline-none focus:border-accent"
