@@ -59,6 +59,7 @@ const (
 	pluginServiceTick    = 30 * time.Second
 	pluginStampTick      = 2 * time.Second
 	pluginInboundRate    = 60
+	pluginInboundRejects = 10
 	pluginLogLines       = 200
 	pluginLogLineMax     = 1000
 	pluginProgramEntries = 256
@@ -929,6 +930,44 @@ func (s *Server) registerPluginInboundRoute(r chi.Router) {
 	r.Post("/plugin-hook/{pluginID}/{path}", s.handlePluginInbound)
 }
 
+// inboundOver reports whether key has had limit events in the last minute,
+// and when record is set and it has not, counts this one.
+func (s *Server) inboundOver(key string, limit int, record bool) bool {
+	st := &s.psv
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.inbound == nil {
+		st.inbound = map[string][]time.Time{}
+	}
+	now := time.Now()
+	if len(st.inbound) > 4096 {
+		// Keys are per address now, so a spread of addresses would otherwise
+		// leave one behind for each; a key whose last event is a minute old
+		// says nothing any more.
+		for k, ts := range st.inbound {
+			if len(ts) == 0 || now.Sub(ts[len(ts)-1]) >= time.Minute {
+				delete(st.inbound, k)
+			}
+		}
+	}
+	recent := st.inbound[key][:0]
+	for _, t := range st.inbound[key] {
+		if now.Sub(t) < time.Minute {
+			recent = append(recent, t)
+		}
+	}
+	over := len(recent) >= limit
+	if record && !over {
+		recent = append(recent, now)
+	}
+	if len(recent) == 0 {
+		delete(st.inbound, key)
+	} else {
+		st.inbound[key] = recent
+	}
+	return over
+}
+
 func (s *Server) handlePluginInbound(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := s.clientIP(r)
@@ -942,26 +981,15 @@ func (s *Server) handlePluginInbound(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "no such route")
 		return
 	}
-	// The rate limit before the body: a flood costs a lookup.
-	st := &s.psv
-	st.mu.Lock()
-	if st.inbound == nil {
-		st.inbound = map[string][]time.Time{}
-	}
-	now := time.Now()
-	recent := st.inbound[p.ID][:0]
-	for _, t := range st.inbound[p.ID] {
-		if now.Sub(t) < time.Minute {
-			recent = append(recent, t)
-		}
-	}
-	over := len(recent) >= pluginInboundRate
-	if !over {
-		recent = append(recent, now)
-	}
-	st.inbound[p.ID] = recent
-	st.mu.Unlock()
-	if over {
+	// Two limits, and the order is the point. Counting every request against
+	// one per-plugin limit before verifying meant anybody who knew the URL
+	// could spend the plugin's whole minute on junk, and the real sender --
+	// GitHub, which gives up after a few retries -- got 429. Failures are
+	// counted per address, before the body so a flood costs a lookup; the
+	// plugin's own limit counts only verified deliveries, because those are
+	// what run server.js.
+	rejectKey := p.ID + "|" + ip
+	if s.inboundOver(rejectKey, pluginInboundRejects, false) {
 		w.Header().Set("Retry-After", "60")
 		writeErr(w, http.StatusTooManyRequests, "too many requests")
 		return
@@ -973,13 +1001,20 @@ func (s *Server) handlePluginInbound(w http.ResponseWriter, r *http.Request) {
 	}
 	secret, err := s.pluginSecretValue(ctx, p.ID, c.manifest.Inbound.Secret)
 	if err != nil {
+		s.inboundOver(rejectKey, pluginInboundRejects, true)
 		s.auditFromOutside(ctx, "plugin.inbound_rejected", "", ip, p.ID+": its secret is not set")
 		writeErr(w, http.StatusUnauthorized, "not verified")
 		return
 	}
 	if !inboundVerified(r, raw, secret) {
+		s.inboundOver(rejectKey, pluginInboundRejects, true)
 		s.auditFromOutside(ctx, "plugin.inbound_rejected", "", ip, p.ID+": bad signature")
 		writeErr(w, http.StatusUnauthorized, "not verified")
+		return
+	}
+	if s.inboundOver(p.ID, pluginInboundRate, true) {
+		w.Header().Set("Retry-After", "60")
+		writeErr(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
 	var body any

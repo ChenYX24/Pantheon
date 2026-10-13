@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jiangmuran/vibepanel/internal/auth"
 	"github.com/jiangmuran/vibepanel/internal/plugins"
 	"github.com/jiangmuran/vibepanel/internal/store"
 )
@@ -457,4 +458,45 @@ func TestAnEventWorkerOutlivesAFailedRead(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("no event reached onEvent after the read recovered (events = %v)", serviceData(t, srv, "events"))
+}
+
+// Junk from one address does not lock out the real sender. Every request used
+// to count against the plugin's one limit before it was verified, so sixty
+// unsigned posts a minute from anybody who knew the URL turned every real
+// delivery into a 429.
+func TestJunkAtTheInboundDoorDoesNotLockOutTheSender(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installService(t, ts, srv, nil, serviceJS)
+	nets, err := auth.ParseCIDRs([]string{"127.0.0.1/32", "::1/128"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Auth.TrustedProxies = nets
+	client := anonymousClient(t)
+	call := func(from, bearer string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/plugin-hook/svc/hook", strings.NewReader(`{"a":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", from)
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	limited := false
+	for i := 0; i < pluginInboundRate+5; i++ {
+		if call("198.51.100.7", "wrong") == http.StatusTooManyRequests {
+			limited = true
+		}
+	}
+	if !limited {
+		t.Error("an address sending nothing but bad signatures was never slowed down")
+	}
+	if status := call("192.0.2.10", "s3cret"); status != http.StatusOK {
+		t.Fatalf("the real sender after a flood from elsewhere: %d", status)
+	}
 }

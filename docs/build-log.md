@@ -25755,3 +25755,15 @@ with the server, and gives Shutdown, the plugin processes and the last
 capture a budget each. `TestStoppingWithAStreamOpenLeavesTheLaterStepsTheirBudget`
 holds a stream open across it; with the registration removed it takes the
 whole budget, and with one shared context the two later steps run dead.
+
+**Junk at a plugin's inbound door locked out the real sender.** The door is
+open at the router and verifies the signature itself, but the per-plugin
+limit of sixty a minute was counted before verification, so anybody who
+knew the URL could spend the minute on unsigned posts and every real
+delivery got 429 -- GitHub retries a few times and gives up. Failures now
+count per plugin and address (ten a minute, checked before the body is
+read, so a flood still costs only a lookup), and the plugin's limit counts
+only verified deliveries, which are what run `server.js`. The map is keyed
+by address now, so it is pruned of quiet keys past 4096.
+`TestJunkAtTheInboundDoorDoesNotLockOutTheSender` floods from one address
+through a trusted proxy and then delivers from another: 429 before, 200 now.
