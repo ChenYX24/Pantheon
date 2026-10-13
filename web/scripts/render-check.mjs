@@ -4634,7 +4634,15 @@ browser = await chromium.launch({ headless: true })
     if (crash.label?.startsWith('Exited')) break
     await sleep(500)
   }
-  const clean = await glyphOf('quits')
+  // Waited for as well. Only the crash was, and the clean exit is a second
+  // session the poller reaches on its own schedule: read once straight after
+  // the first, it was still the "Working" glyph on a slow tick -- one failure
+  // in a full run with nothing in that run touching exits.
+  let clean = await glyphOf('quits')
+  for (let i = 0; i < 40 && !clean.label?.startsWith('Exited'); i++) {
+    await sleep(500)
+    clean = await glyphOf('quits')
+  }
   const running = await glyphOf('scratchpad')
 
   if (crash?.label !== 'Exited with status 3') {
