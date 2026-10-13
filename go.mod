@@ -2,11 +2,14 @@ module github.com/jiangmuran/vibepanel
 
 go 1.26.0
 
-// go1.26.6 fixes five standard-library vulnerabilities reachable from this
-// code (GO-2026-6089 slowloris via net/http, GO-2026-6090 post-handshake TLS,
-// GO-2026-6218, GO-2026-5972, GO-2026-5026); pinned so release binaries are
-// built with the fixed stdlib, not whichever the runner happens to have.
-toolchain go1.26.6
+// go1.26.9 fixes ten standard-library vulnerabilities reachable from this
+// code, mostly in net/http's HTTP/2 server (GO-2026-6617, -6613, -6612, -6611,
+// -6610, -6609, -6608, -6607, -6605, -6603), on top of the five go1.26.6 was
+// pinned for (GO-2026-6089, -6090, -6218, -5972, -5026); pinned so release
+// binaries are built with the fixed stdlib, not whichever the runner happens
+// to have. govulncheck is how this was found; it is worth running before a
+// release, because nothing else will say.
+toolchain go1.26.9
 
 require (
 	github.com/caddyserver/certmagic v0.25.4
@@ -47,7 +50,7 @@ require (
 	go.uber.org/zap v1.27.1 // indirect
 	go.uber.org/zap/exp v0.3.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect

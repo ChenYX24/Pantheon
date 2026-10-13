@@ -25834,3 +25834,11 @@ status text, and the reason goes to the health line and the log where the
 owner reads it. `TestTheWebhookSaysNothingAboutWhyItRefused` sends a bad
 padding, a good padding over non-JSON and an unsigned event, and wants the
 three answers identical; before, all three differed.
+
+**The pinned toolchain had ten reachable vulnerabilities again.** go1.26.6
+was pinned for five; `govulncheck` found ten more reachable from this code
+(GO-2026-6617, -6613, -6612, -6611, -6610, -6609, -6608, -6607, -6605,
+-6603), mostly net/http's HTTP/2 server, fixed in go1.26.9 and, for the five
+also vendored there, `golang.org/x/net` v0.60.0. Both bumped; govulncheck
+now reports none reachable. Nothing in CI runs it, which is how the gap
+opened between two audits.
