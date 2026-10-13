@@ -25878,3 +25878,18 @@ never reached the panel is a `NetworkError` with the panel's own sentence.
 `disconnected.test.ts` pins the grace both ways and the error's words;
 render-check takes the network away at 1280 and 390 and reads the strip, the
 two faded regions, the drawer, and the strip gone after reconnect.
+
+**The bundle is sent compressed.** `internal/webui` served the frontend byte for byte: the main chunk is 1.35 MB
+and a phone on 3G sat on the spinner for about 29 s, with `Accept-Encoding:
+gzip, br` answered by an identical body and no `Content-Encoding`. Vite is not
+asked to precompress, so the handler does it: gzip (level 9, standard library,
+no cgo, no brotli because nothing pure-Go is in `go.mod`) once per file on
+first request, kept in memory and keyed by size and mtime so a rebuilt
+`--static-dir` replaces it. Only js, css, html, svg, json, webmanifest, map,
+txt and wasm; PNG and the like are left alone. Every compressible answer
+carries `Vary: Accept-Encoding`, the gzip form has its own ETag and an explicit
+`Content-Length` (ServeContent omits it once `Content-Encoding` is set), and it
+still goes through ServeContent so HEAD, Range and `If-None-Match` work. Cache
+headers and the SPA fallback are unchanged. `TestBundleIsServedGzippedWhenAccepted`
+and `TestAnImageIsNeverCompressed`; the first goes red with the gzip branch
+removed.

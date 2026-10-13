@@ -1,11 +1,15 @@
 package webui
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -161,5 +165,105 @@ func TestTheManifestIsServedAsAManifest(t *testing.T) {
 		if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, tc.want) {
 			t.Errorf("%s: Content-Type %q, want %q", tc.path, got, tc.want)
 		}
+	}
+}
+
+func gzTestHandler(t *testing.T) (http.Handler, string) {
+	t.Helper()
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "assets"), 0o755)
+	js := strings.Repeat("console.log('vibepanel');\n", 400)
+	for rel, body := range map[string]string{
+		"index.html":       `<div id="root"></div>`,
+		"assets/app-1.js":  js,
+		"assets/pic-1.png": strings.Repeat("x", 5000),
+	} {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(rel)), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return Handler(dir), js
+}
+
+func TestBundleIsServedGzippedWhenAccepted(t *testing.T) {
+	h, js := gzTestHandler(t)
+	do := func(method, enc string, hdr ...string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "/assets/app-1.js", nil)
+		if enc != "" {
+			req.Header.Set("Accept-Encoding", enc)
+		}
+		for i := 0; i+1 < len(hdr); i += 2 {
+			req.Header.Set(hdr[i], hdr[i+1])
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := do("GET", "gzip, br")
+	if rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("no gzip: %v", rec.Header())
+	}
+	if rec.Header().Get("Vary") != "Accept-Encoding" {
+		t.Errorf("Vary = %q", rec.Header().Get("Vary"))
+	}
+	wire := rec.Body.Len()
+	zr, err := gzip.NewReader(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(zr)
+	if string(got) != js {
+		t.Error("body does not gunzip to the original")
+	}
+	if wire >= len(js) || rec.Header().Get("Content-Length") != strconv.Itoa(wire) {
+		t.Errorf("length %d / header %q", wire, rec.Header().Get("Content-Length"))
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
+		t.Errorf("Cache-Control = %q", cc)
+	}
+	gzTag := rec.Header().Get("ETag")
+
+	id := do("GET", "")
+	if id.Header().Get("Content-Encoding") != "" || id.Body.String() != js {
+		t.Error("identity request got an encoded body")
+	}
+	if id.Header().Get("Vary") != "Accept-Encoding" {
+		t.Error("identity answer lacks Vary")
+	}
+	if id.Header().Get("ETag") == gzTag {
+		t.Error("ETag is the same for both encodings")
+	}
+	if rec := do("GET", "gzip;q=0"); rec.Header().Get("Content-Encoding") != "" {
+		t.Error("gzip;q=0 was compressed")
+	}
+	if head := do("HEAD", "gzip"); head.Code != 200 || head.Body.Len() != 0 || head.Header().Get("Content-Encoding") != "gzip" {
+		t.Errorf("HEAD = %d %v", head.Code, head.Header())
+	}
+	if part := do("GET", "gzip", "Range", "bytes=0-9"); part.Code != http.StatusPartialContent || part.Body.Len() != 10 {
+		t.Errorf("Range = %d len %d", part.Code, part.Body.Len())
+	}
+	if nm := do("GET", "gzip", "If-None-Match", gzTag); nm.Code != http.StatusNotModified {
+		t.Errorf("If-None-Match = %d", nm.Code)
+	}
+
+	// The SPA fallback is index.html and is compressible too.
+	req := httptest.NewRequest("GET", "/projects/x", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != 200 || rr.Header().Get("Cache-Control") != "no-cache" {
+		t.Errorf("fallback = %d %v", rr.Code, rr.Header())
+	}
+}
+
+func TestAnImageIsNeverCompressed(t *testing.T) {
+	h, _ := gzTestHandler(t)
+	req := httptest.NewRequest("GET", "/assets/pic-1.png", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Header().Get("Content-Encoding") != "" || rec.Body.Len() != 5000 {
+		t.Errorf("png encoded: %v len %d", rec.Header(), rec.Body.Len())
 	}
 }
