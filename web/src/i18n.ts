@@ -118,6 +118,8 @@ const DICT = {
   'conn.open': { zh: '已连接', en: 'open' },
   'conn.connecting': { zh: '连接中', en: 'connecting' },
   'conn.closed': { zh: '已断开', en: 'closed' },
+  'conn.lost': { zh: '未连接面板，正在重连。显示的是断开前的状态', en: 'Not connected to the panel. Reconnecting; showing the last known state' },
+  'net.unreachable': { zh: '连不上面板', en: 'Cannot reach the panel' },
   'app.gridSize': { zh: '所有观看端看到的网格', en: 'The grid every viewer of this session is seeing' },
   'app.restart': { zh: '重启', en: 'restart' },
   'app.hidePanel': { zh: '收起面板', en: 'Hide panel' },

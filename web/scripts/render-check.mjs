@@ -2278,6 +2278,55 @@ browser = await chromium.launch({ headless: true })
     if (over > 1) note('FAIL', `layout/${label}`, `page scrolls horizontally by ${over}px`)
     await page.screenshot({ path: join(SHOTS, `${label}.png`) })
   }
+  // ── a lost connection says so ────────────────────────────────────────────
+  // It used to be a 6px dot at the end of the header going hollow, and
+  // nothing else: the session states, the terminal and the compose box went
+  // on looking live, and on a phone the open drawer covered the dot. Past the
+  // grace there is a strip that says it, the states and the terminal are drawn
+  // as the last known ones, and the drawer carries the strip itself.
+  {
+    const ctx = page.context()
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await sleep(800)
+    await ctx.setOffline(true)
+    await sleep(1000)
+    if (await page.locator('[data-testid="disconnected"]').isVisible().catch(() => false)) {
+      note('FAIL', 'disconnect', 'the strip is up within a second; a laptop waking would flash it every time')
+    }
+    let shown = false
+    for (let i = 0; i < 40; i++) {
+      if (await page.locator('[data-testid="disconnected"]').first().isVisible().catch(() => false)) { shown = true; break }
+      await sleep(250)
+    }
+    if (!shown) note('FAIL', 'disconnect', 'ten seconds offline and nothing says the panel is not connected')
+    if ((await page.locator('[data-disconnected="true"]').count()) < 2) {
+      note('FAIL', 'disconnect', 'the terminal and the session list still look live while disconnected')
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
+    await sleep(800)
+    const menu = page.locator('[data-testid="menu-button"]')
+    if (await menu.isVisible().catch(() => false)) {
+      await menu.click()
+      await sleep(500)
+      if (!(await page.locator('[data-testid="sidebar"] [data-testid="disconnected"]').isVisible().catch(() => false))) {
+        note('FAIL', 'disconnect', 'the phone drawer covers the header and says nothing about the connection')
+      }
+      // The scrim, right of the 288px drawer.
+      await page.mouse.click(370, 400).catch(() => {})
+      await sleep(400)
+    } else {
+      note('FAIL', 'disconnect', 'no menu button at phone width to open the drawer with')
+    }
+    await ctx.setOffline(false)
+    let back = false
+    for (let i = 0; i < 60; i++) {
+      if (!(await page.locator('[data-testid="disconnected"]').first().isVisible().catch(() => false))) { back = true; break }
+      await sleep(250)
+    }
+    if (!back) note('FAIL', 'disconnect', 'the strip stayed up after the connection came back')
+    else note('PASS', 'disconnect', 'said after the grace, in the drawer too, and gone on reconnect')
+  }
+
   // ── the phone layout ─────────────────────────────────────────────────────
   // Not a squeezed desktop: typing into a raw terminal is unusable with an
   // input method, so input arrives through a compose box and a bar of the keys
@@ -2345,7 +2394,9 @@ browser = await chromium.launch({ headless: true })
         await sleep(250)
       }
       await compose.fill('echo SENT_WHILE_OFFLINE')
-      await page.locator('[data-testid="compose-send"]').click()
+      // Enter rather than the button: past the grace the button is off (see
+      // the disconnected step below), and Enter is the road that still tries.
+      await compose.press('Enter')
       await sleep(400)
       if ((await compose.inputValue()) !== 'echo SENT_WHILE_OFFLINE') {
         note('FAIL', 'mobile', 'a send made while disconnected cleared the compose box')

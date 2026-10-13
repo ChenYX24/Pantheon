@@ -25862,3 +25862,19 @@ resend on reconnect -- a command typed a minute ago may no longer be the
 one to run, so that is the person's call. `socket.test.ts` pins the return
 for every non-open state; render-check takes the network away at phone
 width and reads the box and the notice.
+
+**A lost connection says so.** The only sign used to be the 6px dot at the
+end of the header going hollow. The session states, the terminal and the
+compose box went on looking live; on a phone the open drawer covered the
+dot; and the token block printed the browser's own "Failed to fetch" into
+the Chinese panel. Three seconds after the socket leaves `open` -- long
+enough that a laptop waking does not flash it -- a strip under the header
+says the panel is not connected and that what is shown is the last known
+state; the session list and the terminal are drawn faded and without colour;
+Send is off (typing a draft is not); and the phone drawer carries the same
+strip. The clock is not restarted by the closed/connecting alternation of
+the retries, or a panel that stayed down would never say so. A request that
+never reached the panel is a `NetworkError` with the panel's own sentence.
+`disconnected.test.ts` pins the grace both ways and the error's words;
+render-check takes the network away at 1280 and 390 and reads the strip, the
+two faded regions, the drawer, and the strip gone after reconnect.

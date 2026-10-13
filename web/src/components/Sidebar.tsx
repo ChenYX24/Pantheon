@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react'
+import { DisconnectedBar } from './Disconnected'
 import {
   Archive,
   ChevronLeft,
@@ -84,6 +85,13 @@ export interface SidebarProps {
   onAutoOrderProjects: () => void
   hasProjectOrder: boolean
   onRestoreProjectOrder: () => void
+
+  /**
+   * The panel has lost its connection. The states shown are the last ones it
+   * heard, so they are drawn as such; and the drawer covers the header on a
+   * phone, so it says so itself.
+   */
+  disconnected?: boolean
 
   /** An agent is running and nothing is reporting its state. */
   stateGuessed: boolean
@@ -397,7 +405,11 @@ export function Sidebar(props: SidebarProps) {
         </button>
       </header>
 
-      <nav className="flex-1 overflow-y-auto px-2 pb-3">
+      {props.disconnected && overlay && <DisconnectedBar className="border-t" />}
+      <nav
+        data-disconnected={props.disconnected === true}
+        className={`flex-1 overflow-y-auto px-2 pb-3 ${props.disconnected ? 'vp-disconnected' : ''}`}
+      >
         {projects.length === 0 && (
           <p data-testid="sidebar-empty" className="px-2 py-6 text-vp-base leading-relaxed text-ink-2">
             {/* Not the fresh-install line when everything is only archived:

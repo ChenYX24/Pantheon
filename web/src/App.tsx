@@ -35,6 +35,7 @@ import { SETTINGS_SECTIONS } from './components/settings/groups'
 import { TokenUsageView } from './components/TokenUsageView'
 import { MobileKeyBar } from './components/mobile/MobileKeyBar'
 import { ComposeInput } from './components/mobile/ComposeInput'
+import { DisconnectedBar, useDisconnected } from './components/Disconnected'
 import { TouchControls, TouchKeys } from './components/mobile/TouchControls'
 import { SelectionCopy } from './components/mobile/SelectionCopy'
 import {
@@ -259,6 +260,7 @@ const KEEP_TERMINALS = 3
 export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => void }) {
   useLang()
   const socket = useMemo(() => new PanelSocket(), [])
+  const disconnected = useDisconnected(socket)
   const narrow = useMediaQuery(NARROW_QUERY)
   // Width decides the layout; the pointer decides the gestures. A tablet in
   // landscape is not narrow and still has nothing but fingers, so keying
@@ -1325,6 +1327,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           onAutoOrderProjects={() => void guard(() => api.autoOrderProjects())}
           hasProjectOrder={state.hasProjectOrder}
           onRestoreProjectOrder={() => void guard(() => api.restoreProjectOrder())}
+          disconnected={disconnected}
           stateGuessed={state.stateGuessed}
           hooksInstalled={state.hooksInstalled}
           onOpenSettings={() => {
@@ -1529,6 +1532,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           </div>
         </header>
 
+        {disconnected && <DisconnectedBar />}
+
         {/* safeText, because a server error message is a name-carrying channel
             nobody funnels. Several of them echo a filename back: `base + " already
             exists"` on an upload conflict, `"writing " + base + ": "`, `abs + " is
@@ -1703,7 +1708,10 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             and a few pixels of chrome showing around it are what say "this is
             the thing, that was the frame". */}
         <div
-          className="relative m-2 min-h-0 flex-1 overflow-hidden rounded-vp border border-hairline"
+          className={`relative m-2 min-h-0 flex-1 overflow-hidden rounded-vp border border-hairline ${
+            disconnected ? 'vp-disconnected' : ''
+          }`}
+          data-disconnected={disconnected}
           style={{ background: 'var(--vp-terminal-bg)' }}
           onDragOver={(e) => {
             // Both handlers, and both preventDefault: without dragover the
@@ -1809,6 +1817,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             <SelectionCopy selection={selection} />
             <ComposeInput
               sessionId={current.id}
+              disconnected={disconnected}
               onPaste={pasteToCurrent}
               // The same road a dropped or pasted file takes: into the project,
               // then the path on the command line.

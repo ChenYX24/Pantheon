@@ -35,10 +35,13 @@ export function isNewSubmission(text: string, last: string): boolean {
  */
 export function ComposeInput({
   sessionId,
+  disconnected = false,
   onPaste,
   onFiles,
 }: {
   sessionId: string
+  /** Send is off while the panel is not connected; typing a draft is not. */
+  disconnected?: boolean
   /** False when nothing was sent, and then the box keeps what was typed. */
   onPaste: (text: string, submit: boolean) => boolean
   /**
@@ -233,7 +236,7 @@ export function ComposeInput({
       <button
         type="button"
         onClick={send}
-        disabled={!text}
+        disabled={!text || disconnected}
         title={t('compose.send')}
         data-testid="compose-send"
         className="flex h-8 w-9 shrink-0 items-center justify-center rounded-vp transition-opacity duration-150 ease-vp disabled:opacity-40"

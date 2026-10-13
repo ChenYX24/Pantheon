@@ -1462,6 +1462,16 @@ body {
   animation: vp-breathe 2s var(--vp-ease) infinite;
 }
 
+/* What the panel shows while it is not connected is what it last heard, not
+   what is true now: the session states and the terminal are drawn faded and
+   without colour so they stop reading as live. The strip that says why is
+   DisconnectedBar; this is the half that keeps the rest from contradicting it. */
+.vp-disconnected {
+  filter: grayscale(1);
+  opacity: 0.55;
+  transition: opacity 200ms var(--vp-ease), filter 200ms var(--vp-ease);
+}
+
 /* xterm sizes itself against the element it is given; without an explicit
    height it collapses and renders a single row. */
 .xterm,

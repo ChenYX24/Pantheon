@@ -1,3 +1,4 @@
+import { t } from '../i18n'
 import type {
   ApiToken,
   AuditEntry,
@@ -73,10 +74,21 @@ import type {
 } from './wire'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  })
+  let res: Response
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    })
+  } catch (e) {
+    // A request that never reached the panel rejects with the browser's own
+    // words -- "Failed to fetch", "NetworkError when attempting to fetch
+    // resource.", "Load failed" -- and every caller that shows an error showed
+    // those, in English, in the Chinese panel. An abort is the caller's own
+    // doing and keeps its identity.
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
+    throw new NetworkError()
+  }
   if (!res.ok) {
     // The server always sends {"error": "..."} on failure, but a proxy or a
     // crash can produce something else; fall back to the status rather than
@@ -194,6 +206,14 @@ export function blobTypeFor(kind: 'image' | 'pdf', header: string | null): strin
  * Carries what the server currently holds so the caller can show both without
  * a second round trip.
  */
+/** The request never reached the panel: offline, or the panel is down. */
+export class NetworkError extends Error {
+  constructor() {
+    super(t('net.unreachable'))
+    this.name = 'NetworkError'
+  }
+}
+
 export class ConflictError extends Error {
   readonly current: Note
   constructor(message: string, current: Note) {
