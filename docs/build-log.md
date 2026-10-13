@@ -25938,6 +25938,16 @@ a file that does not exist yet also race on switching it to WAL, which
 SQLite refuses with SQLITE_BUSY without consulting busy_timeout; that is a
 first start rather than an upgrade, was not changed, and the test seeds the
 file to keep the two apart.
+
+**A viewer that stopped answering pings was kept forever.** The keepalive
+returned on a failed ping and left the socket open; coder/websocket does not
+close on a pong timeout either (v1.8.15, `conn.go`, read to check). A peer
+gone without a FIN -- a laptop lid, a phone off the network -- kept its
+connection, its stream subscriptions and their queues until a write timed
+out, which for an idle terminal is never. A failed ping now closes the
+connection. `TestAViewerThatStopsAnsweringPingsIsClosed` dials with a client
+that reads nothing, so never pongs, then reads: closed now, still open
+before.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

@@ -79,6 +79,9 @@ type Handler struct {
 	// RevalidateEvery overrides how often that question is asked. Zero means
 	// revalidateInterval. Tests set it short; nothing else should.
 	RevalidateEvery time.Duration
+	// PingEvery and PongWait override pingInterval and writeTimeout for the
+	// keepalive; zero means those. For tests.
+	PingEvery, PongWait time.Duration
 }
 
 // stream is one subscribed session on one connection.
@@ -319,7 +322,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	go conn.keepalive(ctx)
+	every, wait := h.PingEvery, h.PongWait
+	if every <= 0 {
+		every = pingInterval
+	}
+	if wait <= 0 {
+		wait = writeTimeout
+	}
+	go conn.keepalive(ctx, every, wait)
 	go conn.stateWriter(ctx)
 	go h.revalidate(ctx, cancel, r)
 
@@ -384,18 +394,27 @@ func (h *Handler) revalidate(ctx context.Context, cancel context.CancelFunc, r *
 }
 
 // keepalive pings until the connection goes away.
-func (c *Conn) keepalive(ctx context.Context) {
-	t := time.NewTicker(pingInterval)
+//
+// A ping that gets no pong ends the connection. coder/websocket returns the
+// error and leaves the socket open, and this returned quietly: a peer that
+// vanished without a FIN (a laptop shut, a phone off the network) left its
+// connection, its stream subscriptions and their queues alive until a write
+// happened to time out -- for an idle terminal, never.
+func (c *Conn) keepalive(ctx context.Context, every, wait time.Duration) {
+	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			pctx, cancel := context.WithTimeout(ctx, writeTimeout)
+			pctx, cancel := context.WithTimeout(ctx, wait)
 			err := c.ws.Ping(pctx)
 			cancel()
 			if err != nil {
+				if ctx.Err() == nil {
+					_ = c.ws.CloseNow()
+				}
 				return
 			}
 		}
