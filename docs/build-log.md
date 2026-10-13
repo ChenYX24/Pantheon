@@ -25497,3 +25497,14 @@ waiting, pinned, shown by `status`, killed; a note and todos; a token
 minted and the CLI's own revoked and re-minted; the log oldest first; and
 the offline fallbacks with the panel's port closed.
 
+`make release-check` then found two things the unit tests could not: the
+check's throwaway data directory had no panel, and the CLI computed the
+loopback URL from the configuration and knocked on the real panel on this
+machine's default port, which answered 401 to a token minted into the
+wrong database; and inside the container `project add` ran before the
+first account existed, so there was nothing to mint a token for. So `serve`
+writes `<data>/panel.url` and the CLI reads the address from there -- the
+panel that owns the data directory, or none -- and a running panel with no
+account is treated as none for the commands that have an offline path. Two
+tests pin both.
+

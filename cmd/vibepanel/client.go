@@ -42,9 +42,22 @@ import (
 // an offline implementation (the ones the first CLI had) fall back to it
 // and say so; the rest say the panel is not running.
 
-const cliTokenFile = "cli.token"
+const (
+	cliTokenFile = "cli.token"
+	// panelURLFile is written by `serve` with the loopback URL of the panel
+	// that owns the data directory, and removed when it stops.
+	panelURLFile = "panel.url"
+)
 
-var errPanelDown = errors.New("the panel is not running")
+var (
+	errPanelDown = errors.New("the panel is not running")
+	// errNoAccount is a running panel with no account yet: nothing can be
+	// minted, so a command with an offline path takes it, as before setup
+	// the first CLI always did.
+	errNoAccount = errors.New("the panel has no account yet")
+)
+
+func panelURLPath(dataDir string) string { return filepath.Join(dataDir, panelURLFile) }
 
 type panelClient struct {
 	cfg   config.Config
@@ -65,13 +78,21 @@ func openClient(ctx context.Context, args []string) (*panelClient, error) {
 	}
 	base := strings.TrimRight(os.Getenv("VIBEPANEL_CLI_URL"), "/")
 	if base == "" {
-		base = strings.TrimRight(cfg.LoopbackURL(), "/")
+		// The address the panel wrote, not the one the configuration would
+		// compute: the configuration says where a panel *would* listen, and
+		// on a machine with two of them that is somebody else's.
+		if raw, rerr := os.ReadFile(panelURLPath(cfg.DataDir)); rerr == nil { //nolint:gosec // our own file
+			base = strings.TrimRight(strings.TrimSpace(string(raw)), "/")
+		}
 	}
-	u, err := url.Parse(base)
-	if err != nil || u.Host == "" {
-		return nil, fmt.Errorf("VIBEPANEL_CLI_URL %q is not an http(s) URL", base)
+	c := &panelClient{cfg: cfg, base: base, http: &http.Client{Timeout: 30 * time.Second}}
+	if base != "" {
+		u, err := url.Parse(base)
+		if err != nil || u.Host == "" {
+			return nil, fmt.Errorf("the panel's address %q is not an http(s) URL", base)
+		}
+		c.http.Transport = mcpTransport(u.Hostname())
 	}
-	c := &panelClient{cfg: cfg, base: base, http: &http.Client{Timeout: 30 * time.Second, Transport: mcpTransport(u.Hostname())}}
 	c.token = strings.TrimSpace(os.Getenv("VIBEPANEL_CLI_TOKEN"))
 	if c.token == "" {
 		raw, rerr := os.ReadFile(c.tokenPath()) //nolint:gosec // our own 0600 file
@@ -98,7 +119,7 @@ func (c *panelClient) mint(ctx context.Context) error {
 	defer db.Close()
 	owner, err := db.FirstUserID(ctx)
 	if err != nil {
-		return errors.New("the panel has no account yet; finish setup first (or `vibepanel account`)")
+		return errNoAccount
 	}
 	token, err := auth.NewToken()
 	if err != nil {
@@ -140,6 +161,9 @@ func (c *panelClient) do(ctx context.Context, method, path string, body any, out
 		if payload, err = json.Marshal(body); err != nil {
 			return err
 		}
+	}
+	if c.base == "" {
+		return fmt.Errorf("%w: no %s under %s (and VIBEPANEL_CLI_URL is not set)", errPanelDown, panelURLFile, c.cfg.DataDir)
 	}
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(payload))

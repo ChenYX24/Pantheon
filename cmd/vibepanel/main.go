@@ -200,6 +200,15 @@ func cmdServe(args []string) error {
 	}
 	defer unlock()
 
+	// Where this data directory's panel answers, for the command line
+	// (client.go): the CLI must never mistake another panel on the default
+	// port for this one, and a throwaway data directory with no panel must
+	// fall back to working on the database, not knock on whatever listens.
+	if err := os.WriteFile(panelURLPath(a.cfg.DataDir), []byte(a.cfg.LoopbackURL()+"\n"), 0o600); err != nil {
+		logger.Warn("write panel.url", "err", err)
+	}
+	defer os.Remove(panelURLPath(a.cfg.DataDir)) //nolint:errcheck // best effort at exit
+
 	// Expired sign-ins are already refused — AuthSessionByToken filters on
 	// expires_at — so this is housekeeping rather than security. It is done at
 	// all because nothing called it: the table only grew, one row per sign-in
@@ -588,9 +597,11 @@ func cmdProject(args []string) error {
 	// Through the running panel first (cli.go): the same handler the browser
 	// uses, audited, every open tab told. The switch below is the offline
 	// path for the subcommands that had one before the panel could be asked.
-	if handled, err := projectViaAPI(context.Background(), args[0], args[1:]); handled {
+	handled, offline, err := projectViaAPI(context.Background(), args[0], args[1:])
+	if handled {
 		return err
 	}
+	args = append([]string{args[0]}, offline...)
 	ctx := context.Background()
 	sub, rest := args[0], args[1:]
 
@@ -760,9 +771,11 @@ func cmdSession(args []string) error {
 	if len(args) == 0 {
 		return errors.New(sessionUsage)
 	}
-	if handled, err := sessionViaAPI(context.Background(), args[0], args[1:]); handled {
+	handled, offline, err := sessionViaAPI(context.Background(), args[0], args[1:])
+	if handled {
 		return err
 	}
+	args = append([]string{args[0]}, offline...)
 	ctx := context.Background()
 	sub, rest := args[0], args[1:]
 

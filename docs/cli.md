@@ -10,8 +10,10 @@ shell, for a panel in a container where there is no browser at hand.
 A command that changes what the panel shows -- a rename, a restart, text
 typed into a session -- goes through the running panel's own API, so it is
 the same handler the browser uses: audited, pushed to every open tab, tmux
-asked by the process that owns it. The address is the panel's own loopback
-URL from its configuration; `VIBEPANEL_CLI_URL` names another.
+asked by the process that owns it. The address is the one the panel wrote
+into `<data dir>/panel.url` when it started (and removes when it stops),
+so the CLI reaches the panel that owns its data directory and never another
+one on the default port; `VIBEPANEL_CLI_URL` names one across a wire.
 
 The credential is an API token named `cli`. The CLI mints it itself on
 first use, into the panel's token table -- it runs as the panel's user with
@@ -22,10 +24,11 @@ cli`) locks the shell out until the next command mints a new one, which the
 activity log records. `VIBEPANEL_CLI_TOKEN` supplies a token instead, for a
 panel across a wire.
 
-Without a running panel, the subcommands that existed before the panel
-could be asked -- `project ls|add|archive|restore|rm`, `session ls|new|kill`
--- work on the database and tmux directly and say so on stderr. The rest
-say the panel is not running.
+Without a running panel -- or before the first account exists, when there
+is nothing to mint a token for -- the subcommands that existed before the
+panel could be asked (`project ls|add|archive|restore|rm`, `session
+ls|new|kill`) work on the database and tmux directly and say so on stderr.
+The rest say the panel is not running.
 
 ## Naming things
 

@@ -38,7 +38,10 @@ type cliPanel struct {
 	dir string
 }
 
-func startCLIPanel(t *testing.T) *cliPanel {
+func startCLIPanel(t *testing.T) *cliPanel { return startCLIPanelWith(t, true) }
+
+// startCLIPanelWith starts the panel and, with an account, finishes setup.
+func startCLIPanelWith(t *testing.T, withAccount bool) *cliPanel {
 	t.Helper()
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux not installed")
@@ -73,14 +76,16 @@ func startCLIPanel(t *testing.T) *cliPanel {
 	}
 	ts := httptest.NewServer(srv.Routes())
 	t.Cleanup(ts.Close)
-	res, err := http.Post(ts.URL+"/api/auth/setup", "application/json",
-		strings.NewReader(`{"token":"cli-setup-token","username":"tester","password":"a sufficiently long password"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Body.Close()
-	if res.StatusCode != http.StatusCreated {
-		t.Fatalf("setup: %d", res.StatusCode)
+	if withAccount {
+		res, err := http.Post(ts.URL+"/api/auth/setup", "application/json",
+			strings.NewReader(`{"token":"cli-setup-token","username":"tester","password":"a sufficiently long password"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusCreated {
+			t.Fatalf("setup: %d", res.StatusCode)
+		}
 	}
 	t.Setenv("VIBEPANEL_DATA_DIR", dir)
 	t.Setenv("VIBEPANEL_TMUX_SOCKET", socket)
@@ -259,5 +264,49 @@ func TestTheCLIFallsBackWhenThePanelIsDown(t *testing.T) {
 	}
 	if _, err := runCLI(t, "status"); err == nil || !strings.Contains(err.Error(), "not running") {
 		t.Errorf("status offline: %v", err)
+	}
+}
+
+// A data directory with no panel.url and no VIBEPANEL_CLI_URL is one whose
+// panel is not running, whatever listens on the default port: the CLI
+// works on the database and never knocks on another panel's door.
+func TestTheCLIReadsThePanelsAddressFromItsDataDirectory(t *testing.T) {
+	p := startCLIPanel(t)
+	mustRun(t, "project", "add", t.TempDir(), "--name", "Omega")
+	os.Unsetenv("VIBEPANEL_CLI_URL")
+	if out := mustRun(t, "project", "ls"); !strings.Contains(out, "Omega") {
+		t.Errorf("ls with no address: %s", out)
+	}
+	if _, err := runCLI(t, "status"); err == nil || !strings.Contains(err.Error(), panelURLFile) {
+		t.Errorf("status with no address: %v", err)
+	}
+	// The file the panel writes is what points the CLI at it.
+	if err := os.WriteFile(filepath.Join(p.dir, panelURLFile), []byte(p.ts.URL+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := mustRun(t, "status"); !strings.Contains(out, "Omega") {
+		t.Errorf("status through panel.url: %s", out)
+	}
+}
+
+// Before setup there is no account to mint a token for; a running panel is
+// then no better than none, and the commands that can work on the database
+// do, which is what `project add` and `session new` always did before the
+// first account.
+func TestBeforeSetupTheCLIWorksOnTheDatabase(t *testing.T) {
+	p := startCLIPanelWith(t, false)
+	out := mustRun(t, "project", "add", t.TempDir(), "--name", "Early")
+	if !strings.Contains(out, "created project") {
+		t.Fatalf("add: %s", out)
+	}
+	projects, _ := p.db.ListProjects(context.Background())
+	if len(projects) != 1 || projects[0].Name != "Early" {
+		t.Errorf("projects: %+v", projects)
+	}
+	if _, err := runCLI(t, "project", "rename", "Early", "Late"); err == nil || !strings.Contains(err.Error(), "no account") {
+		t.Errorf("rename before setup: %v", err)
+	}
+	if tokens, _ := p.db.ListAPITokens(context.Background()); len(tokens) != 0 {
+		t.Errorf("a token was minted with no account: %+v", tokens)
 	}
 }
