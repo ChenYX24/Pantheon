@@ -298,7 +298,12 @@ func (s *Server) pluginEventWorker(ctx context.Context, id string, w *pluginWork
 		case ev := <-w.ch:
 			p, err := s.DB.PluginByID(ctx, id)
 			if err != nil {
-				return
+				// This event is lost, the worker is not. Returning here
+				// stopped onEvent until the panel restarted, because nothing
+				// starts a worker again while the plugin stays enabled; a
+				// plugin that was removed has its worker retired through done.
+				s.Log.Debug("plugin onEvent", "plugin", id, "err", err)
+				continue
 			}
 			c, ok, err := s.pluginServiceCred(ctx, p)
 			if err != nil || !ok || c.manifest.Server == nil || !contains(c.manifest.Server.On, ev.Name) {

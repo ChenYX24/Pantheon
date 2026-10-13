@@ -25646,3 +25646,12 @@ A worker is now retired through a `done` channel and its event channel is
 never closed; a send to a retired one lands in a buffer nobody reads and is
 collected with it. `TestARetiredWorkerCanStillBeSentTo` holds the sender's
 stale copy across a disable and sends to it.
+
+**A plugin's events stopped for good on one failed read.** The event worker
+returned on any error from `PluginByID`, and nothing starts a worker again
+while the plugin stays enabled, so one locked or failing read silenced
+`onEvent` until the panel restarted, with nothing on the Plugins page saying
+so. It now drops that event, logs it, and carries on; a removed plugin's
+worker still stops, through `done`. `TestAnEventWorkerOutlivesAFailedRead`
+makes the plugins table unreadable for one event and expects the next to
+arrive.

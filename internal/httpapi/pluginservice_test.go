@@ -423,3 +423,38 @@ func TestTogglingAPluginWhileEventsFlowDoesNotPanic(t *testing.T) {
 	close(stop)
 	<-done
 }
+
+// A read that fails once costs the plugin that one event, not every event
+// until the panel restarts. The worker used to return on any error from
+// PluginByID, and nothing restarted it while the plugin stayed enabled: its
+// onEvent went quiet with no line anywhere saying so. The failure here is
+// the plugins table being briefly unreadable.
+func TestAnEventWorkerOutlivesAFailedRead(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installService(t, ts, srv, nil, serviceJS)
+	srv.psv.mu.Lock()
+	w := srv.psv.workers["svc"]
+	srv.psv.mu.Unlock()
+	if _, err := srv.DB.SQL().Exec(`ALTER TABLE plugins RENAME TO plugins_away`); err != nil {
+		t.Fatal(err)
+	}
+	srv.pluginEventRaised(pluginEvent{Name: "session.created", SessionID: "s", ProjectID: "p"})
+	deadline := time.Now().Add(5 * time.Second)
+	for len(w.ch) > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The worker has taken the event; give it the moment to fail on it.
+	time.Sleep(100 * time.Millisecond)
+	if _, err := srv.DB.SQL().Exec(`ALTER TABLE plugins_away RENAME TO plugins`); err != nil {
+		t.Fatal(err)
+	}
+	srv.pluginEventRaised(pluginEvent{Name: "session.created", SessionID: "s", ProjectID: "p"})
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if n, _ := serviceData(t, srv, "events").(float64); n >= 1 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("no event reached onEvent after the read recovered (events = %v)", serviceData(t, srv, "events"))
+}
