@@ -26293,3 +26293,15 @@ through a ref instead of being re-added on every render. `shortcuts.test.ts`
 covers a textarea, text and search inputs and contenteditable (the field's)
 against the xterm textarea, a button and a checkbox (the panel's); each half
 goes red with its guard removed.
+
+## 2026-10-13 — The release runner needs more than ten minutes a package
+
+v1.29.0's first build died in `internal/httpapi` with `panic: test timed
+out after 10m0s`, one test running and one second into it: the package as a
+whole had crossed go's default per-package budget, not any one test. It took
+500 s on the same runner at v1.28.0 (two cores, `-race`; about two minutes
+here), and the October audit's tests -- fourteen test files, a thousand
+lines -- added the rest. `make test` passes `-timeout 30m` now. That is a
+ceiling for a hung test and not an answer: the two heaviest additions
+(`TestOneFailedWriteDoesNotEndTheTick`, `TestAPassthroughTitleDoesNotStompAManualRename`,
+about nine seconds each here) are the ones to make cheaper next.

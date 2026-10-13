@@ -12,8 +12,13 @@ web:                  ## Build the frontend into internal/webui/dist
 	cd web && npm run build
 
 .PHONY: test
+# Thirty minutes a package, not go's ten. internal/httpapi takes about two
+# minutes here and took 500 s on the release runner (two cores, -race) at
+# v1.28.0; the audit's tests pushed it past 600 s and v1.29.0's first build
+# died in "panic: test timed out" with nothing wrong. A ceiling for a hung
+# test, not a target: the package itself is the thing to make cheaper.
 test:                 ## Go tests with the race detector, plus frontend units
-	go test -race ./...
+	go test -race -timeout 30m ./...
 	cd web && npm run test
 
 .PHONY: lint
