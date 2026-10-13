@@ -25750,5 +25750,8 @@ leaving process groups behind, and `ArchiveAll`'s last capture of every pane
 `TestAnOpenEventStreamDoesNotHoldShutdownOpen` and
 `TestAStreamThroughTheDoorDoesNotHoldShutdownOpen` register it with the test
 server's `Shutdown`, as serve must, and go red with either watch removed.
-`cmd/vibepanel` registering it, and giving the three steps budgets of their
-own, is a separate change.
+`stopServing` in `cmd/vibepanel` now does both: it registers `EndStreams`
+with the server, and gives Shutdown, the plugin processes and the last
+capture a budget each. `TestStoppingWithAStreamOpenLeavesTheLaterStepsTheirBudget`
+holds a stream open across it; with the registration removed it takes the
+whole budget, and with one shared context the two later steps run dead.

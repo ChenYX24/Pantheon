@@ -503,15 +503,45 @@ func cmdServe(args []string) error {
 
 	// Shut the HTTP server down, then detach. Detaching is not the same as
 	// killing: every tmux session, and every agent inside it, keeps running.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = httpServer.Shutdown(shutdownCtx)
+	stopServing(httpServer, srv, 10*time.Second)
+	mgr.DetachAll()
+	if restarting {
+		fmt.Println("\nrestarting; tmux sessions keep running")
+		return errRestart
+	}
+	fmt.Println("\nstopped; tmux sessions keep running")
+	return nil
+}
+
+// stopper is what stopServing needs from the server; an interface so the
+// order and the budgets can be tested without a panel.
+type stopper interface {
+	EndStreams()
+	StopPluginProcesses(context.Context)
+	ArchiveAll(context.Context)
+}
+
+// stopServing ends the HTTP server, the plugin processes and takes the last
+// capture of every pane, each within its own budget.
+//
+// They shared one budget, and an open plugin stream held Shutdown for all of
+// it -- Shutdown waits for requests without cancelling them -- so the two
+// steps after it ran on an expired context: plugin process groups were left
+// behind and the last capture was skipped. EndStreams is what lets Shutdown
+// finish with a frame open.
+func stopServing(httpServer *http.Server, srv stopper, budget time.Duration) {
+	step := func(run func(context.Context)) {
+		ctx, cancel := context.WithTimeout(context.Background(), budget)
+		defer cancel()
+		run(ctx)
+	}
+	httpServer.RegisterOnShutdown(srv.EndStreams)
+	step(func(ctx context.Context) { _ = httpServer.Shutdown(ctx) })
 	// Plugin processes are the panel's children on purpose (docs/plugins.md
 	// §5, rung 3): SIGTERM now, SIGKILL after the grace, before the panel
 	// goes. Sessions are untouched; they were never children.
-	srv.StopPluginProcesses(shutdownCtx)
-
-	// One last capture of every session, before detaching.
+	step(srv.StopPluginProcesses)
+	// One last capture of every session, before the caller detaches.
 	//
 	// This is what makes an orderly reboot lossless. systemd stops the unit
 	// first and only then goes on to kill the tmux server, so the panel is the
@@ -521,16 +551,9 @@ func cmdServe(args []string) error {
 	//
 	// After Shutdown so no request is still writing, before DetachAll because
 	// capture-pane talks to tmux and not to our PTY, so the order only matters
-	// for tidiness. Bounded by the same context: a machine going down is not a
-	// place to block forever.
-	srv.ArchiveAll(shutdownCtx)
-	mgr.DetachAll()
-	if restarting {
-		fmt.Println("\nrestarting; tmux sessions keep running")
-		return errRestart
-	}
-	fmt.Println("\nstopped; tmux sessions keep running")
-	return nil
+	// for tidiness. Bounded: a machine going down is not a place to block
+	// forever.
+	step(srv.ArchiveAll)
 }
 
 // startResources builds the memory governor and ticks it once before
