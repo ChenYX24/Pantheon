@@ -366,7 +366,7 @@ export function Sidebar(props: SidebarProps) {
 
   // The overlay covers the terminal and must be opaque.
   const shell = overlay
-    ? 'absolute inset-y-0 left-0 z-20 w-72 border-r border-hairline shadow-2xl vp-solid'
+    ? 'vp-drawer-in absolute inset-y-0 left-0 z-20 w-72 border-r border-hairline shadow-2xl vp-solid'
     : 'w-64 shrink-0 border-r border-hairline vp-blur'
 
   return (

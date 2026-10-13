@@ -660,6 +660,34 @@ body {
   animation: vp-panel-in 220ms var(--vp-ease) both;
 }
 
+/* The phone's project drawer comes in from the edge it is attached to.
+ *
+ * It used to be there on the next frame, with the scrim popping in beside it,
+ * which on a phone reads as the page having been replaced rather than a panel
+ * having been opened -- and gives the thumb that opened it nothing to follow.
+ * The same 220ms and curve as the panels above, and the scrim takes the
+ * backdrop's 160ms fade.
+ *
+ * Entrance only: the drawer is unmounted to close it, so there is no exit to
+ * animate. Neither carries state; the global reduced-motion block collapses
+ * both to their end frame, which is the drawer open. */
+@keyframes vp-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.vp-drawer-in {
+  animation: vp-drawer-in 220ms var(--vp-ease) both;
+}
+
+.vp-scrim-in {
+  animation: vp-backdrop-in 160ms var(--vp-ease) both;
+}
+
 /* A toast arrives from the edge it lives on rather than from behind.
  *
  * The same 160ms and the same curve as the backdrop, and the same rule about

@@ -1411,7 +1411,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           type="button"
           aria-label={t('app.closeProjects')}
           onClick={() => setDrawerOpen(false)}
-          className="absolute inset-0 z-10 bg-black/30"
+          data-testid="drawer-scrim"
+          className="vp-scrim-in absolute inset-0 z-10 bg-black/30"
         />
       )}
 

@@ -2889,6 +2889,66 @@ browser = await chromium.launch({ headless: true })
         'touch emulation did not take; the reachability check below is measuring a mouse')
     }
 
+    // The drawer arrives rather than appears. Sampled frame by frame from the
+    // click, because the end state is the same with and without the motion and
+    // a screenshot after the fact cannot tell them apart: the first frame must
+    // be off to the left, the last must be at the edge, and the scrim must
+    // start transparent. Then again with reduced motion, where the first frame
+    // is already the last.
+    {
+      const sampleDrawer = () =>
+        touch.evaluate(async () => {
+          const out = []
+          document.querySelector('[data-testid="menu-button"]').click()
+          await new Promise((resolve) => {
+            let n = 0
+            const tick = () => {
+              const el = document.querySelector('[data-testid="sidebar"][data-overlay="true"]')
+              const scrim = document.querySelector('[data-testid="drawer-scrim"]')
+              if (el) {
+                out.push({
+                  left: Math.round(el.getBoundingClientRect().left),
+                  scrim: scrim ? Number(getComputedStyle(scrim).opacity) : 1,
+                })
+              }
+              if (++n < 40) requestAnimationFrame(tick)
+              else resolve()
+            }
+            requestAnimationFrame(tick)
+          })
+          return out
+        })
+      const closeDrawer = async () => {
+        await touch.locator('[data-testid="drawer-scrim"]').click({ position: { x: 370, y: 400 } })
+        await touch.waitForSelector('[data-testid="sidebar"][data-overlay="true"]', { state: 'detached', timeout: 3000 })
+          .catch(() => {})
+        await sleep(300)
+      }
+      const moving = await sampleDrawer()
+      if (moving.length < 5) {
+        note('FAIL', 'drawer', `the drawer produced ${moving.length} frames after the menu button`)
+      } else {
+        const first = moving[0]
+        const last = moving[moving.length - 1]
+        const ordered = moving.every((s, i) => i === 0 || s.left >= moving[i - 1].left)
+        if (first.left > -100) note('FAIL', 'drawer', `the drawer's first frame is at x=${first.left}; it did not slide in`)
+        else if (last.left !== 0) note('FAIL', 'drawer', `the drawer ended at x=${last.left}, not at the edge`)
+        else if (!ordered) note('FAIL', 'drawer', `the drawer moved backwards: ${moving.map((s) => s.left).join(',')}`)
+        else if (first.scrim > 0.5) note('FAIL', 'drawer', `the scrim's first frame is ${first.scrim} opaque; it popped in`)
+        else note('PASS', 'drawer', `the drawer slides from x=${first.left} to the edge and the scrim fades in`)
+      }
+      await closeDrawer()
+      await touch.emulateMedia({ reducedMotion: 'reduce' })
+      const still = await sampleDrawer()
+      if (still.length === 0 || still[0].left !== 0 || still[0].scrim < 0.99) {
+        note('FAIL', 'drawer', `with reduced motion the first frame is ${JSON.stringify(still[0])}; it should already be open`)
+      } else {
+        note('PASS', 'drawer', 'with reduced motion the drawer is open on the first frame')
+      }
+      await closeDrawer()
+      await touch.emulateMedia({ reducedMotion: 'no-preference' })
+    }
+
     await touch.locator('header button[title^="Projects"]').click()
     await sleep(800)
     const touchRow = touch
