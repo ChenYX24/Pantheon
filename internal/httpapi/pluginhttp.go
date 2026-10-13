@@ -243,7 +243,10 @@ func (s *Server) handlePluginHTTP(w http.ResponseWriter, r *http.Request) {
 	var hmacBody []byte
 	switch spec.Auth {
 	case "owner":
-		if cross && bearerToken(r) == "" {
+		// "null" is a sandboxed frame or a redirect from another origin
+		// (crossOriginWrite says why that matters); neither may ride the
+		// cookie, here any more than on the panel's own routes.
+		if (cross || origin == "null") && bearerToken(r) == "" {
 			writeErr(w, http.StatusUnauthorized, "across origins this door takes a Bearer token, not a cookie")
 			return
 		}
@@ -256,7 +259,7 @@ func (s *Server) handlePluginHTTP(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusUnauthorized, "sign in required")
 			return
 		}
-		if !cross && unsafeMethod(r.Method) && crossOriginWrite(r, s.publicOrigins(r)) {
+		if !cross && bearerToken(r) == "" && unsafeMethod(r.Method) && crossOriginWrite(r, s.publicOrigins(r)) {
 			writeErr(w, http.StatusForbidden, "a write from another origin")
 			return
 		}

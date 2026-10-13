@@ -550,3 +550,21 @@ func TestAStreamThroughTheDoorDoesNotHoldShutdownOpen(t *testing.T) {
 		t.Fatalf("Shutdown with a streamed answer open: %v after %v", err, time.Since(start))
 	}
 }
+
+// The door treats Origin: null as the panel's own routes do: a sandboxed
+// frame or a redirect from elsewhere, which may not ride the cookie.
+func TestTheDoorRefusesTheCookieFromANullOrigin(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installDoor(t, ts, srv, "owner")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		r := doorReq(t, ts, method, "/api/plugin-http/door/x", `{}`, map[string]string{"Origin": "null", "Content-Type": "application/json"})
+		res, err := ts.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s with the cookie and Origin: null: %d, want 401", method, res.StatusCode)
+		}
+	}
+}

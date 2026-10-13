@@ -176,9 +176,7 @@ func (s *Server) RequireAuth(next http.Handler) http.Handler {
 			// outside, and it took a person reporting 「无法创建底部终端」 to
 			// find out: nginx terminates TLS, so the browser is on https and
 			// the panel sees http, and every write looked cross-origin.
-			writeErr(w, http.StatusForbidden,
-				"this panel answers to "+strings.Join(allowed, ", ")+", and that request came from "+
-					r.Header.Get("Origin")+". Set VIBEPANEL_DOMAIN, or add it to VIBEPANEL_PUBLIC_ORIGINS.")
+			writeErr(w, http.StatusForbidden, crossOriginRefusal(r, allowed))
 			return
 		}
 
@@ -210,6 +208,20 @@ func (s *Server) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// crossOriginRefusal is the 403's words, in one place for both guards.
+// Origin: null gets its own: it is a sandboxed page or a redirect from another
+// site, and telling that person to set VIBEPANEL_DOMAIN would send them to
+// change a setting that has nothing to do with it.
+func crossOriginRefusal(r *http.Request, allowed []string) string {
+	origin := r.Header.Get("Origin")
+	if strings.TrimSuffix(origin, "/") == "null" {
+		return "this write came from a sandboxed page or was redirected here from another site (Origin: null), " +
+			"and the panel does not accept those with its cookie"
+	}
+	return "this panel answers to " + strings.Join(allowed, ", ") + ", and that request came from " +
+		origin + ". Set VIBEPANEL_DOMAIN, or add it to VIBEPANEL_PUBLIC_ORIGINS."
+}
+
 // refuseBlockedWrite re-runs the two checks RequireAuth makes ahead of its
 // currentUser lookup, for the auth routes registered outside the
 // authenticated group.
@@ -233,9 +245,7 @@ func (s *Server) refuseBlockedWrite(ctx context.Context, w http.ResponseWriter, 
 	if allowed := s.publicOrigins(r); crossOriginWrite(r, allowed) {
 		s.auditFromOutside(ctx, "blocked", "", ip,
 			"a write from "+r.Header.Get("Origin")+"; this panel answers to "+strings.Join(allowed, " "))
-		writeErr(w, http.StatusForbidden,
-			"this panel answers to "+strings.Join(allowed, ", ")+", and that request came from "+
-				r.Header.Get("Origin")+". Set VIBEPANEL_DOMAIN, or add it to VIBEPANEL_PUBLIC_ORIGINS.")
+		writeErr(w, http.StatusForbidden, crossOriginRefusal(r, allowed))
 		return true
 	}
 	return false

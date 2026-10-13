@@ -478,3 +478,43 @@ func TestTheOriginDoorClosesWithSetup(t *testing.T) {
 		t.Errorf("a setup on a configured panel still trusted %v", got)
 	}
 }
+
+// Origin: null is a write from somewhere, not from nowhere. A page on another
+// port of this host posted a text/plain form to itself and answered 307 to
+// /api/projects; the browser followed with the session cookie (same site)
+// and Origin: null, and the panel created the project. Reproduced in
+// Chromium before the fix. Each lock is tested alone: the origin with a JSON
+// body, and the body type from the panel's own origin.
+func TestAWriteWithANullOriginOrAFormBodyIsRefused(t *testing.T) {
+	ts, _ := newTestServer(t)
+	post := func(origin, contentType, body string) (int, string) {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/projects", strings.NewReader(body))
+		req.Header.Set("Content-Type", contentType)
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		res, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, strings.TrimSpace(string(b))
+	}
+	dir := t.TempDir()
+	if status, body := post("null", "application/json", `{"path":"`+dir+`","name":"redirected"}`); status != http.StatusForbidden {
+		t.Errorf("Origin: null with the cookie: %d, want 403 (%s)", status, body)
+	} else if strings.Contains(body, "VIBEPANEL_DOMAIN") {
+		t.Errorf("the refusal of Origin: null sends the reader to VIBEPANEL_DOMAIN, which cannot help: %s", body)
+	}
+	// The exact body the browser sent: field name and value joined at "=".
+	form := `{"path":"` + dir + `","name":"csrf=proof"}`
+	for _, ct := range []string{"text/plain", "application/x-www-form-urlencoded", ""} {
+		if status, body := post(ts.URL, ct, form); status != http.StatusUnsupportedMediaType {
+			t.Errorf("a %q body from the panel's own origin: %d, want 415 (%s)", ct, status, body)
+		}
+	}
+	if status, body := post(ts.URL, "application/json; charset=utf-8", form); status != http.StatusCreated {
+		t.Errorf("JSON with a charset: %d (%s)", status, body)
+	}
+}

@@ -25802,3 +25802,22 @@ that walks a length nothing above checks; the watch bounds those only as far
 as the heap shows between instructions. `TestAServerJSCannotAllocateItsWayPastTheBudget`
 runs fifteen of these against a two-second budget and wants each stopped
 inside one; `TestTheGuardsLeaveOrdinaryCodeAlone` is the other side.
+
+**A page on another port could write as the owner through a redirect.**
+`crossOriginWrite` let `Origin: null` through with "missing", and `decode`
+took any Content-Type. Together: a page on another port of this host posts
+a text/plain form to itself -- field name `{"path":"…","name":"csrf`, value
+`proof"}`, which the browser joins at the `=` into valid JSON -- and answers
+307 to `/api/projects`. The browser follows with the session cookie (another
+port is the same site, so SameSite=Strict sends it) and `Origin: null`,
+which is what a cross-origin redirect leaves. Reproduced in Chromium against
+a throwaway panel: 201, a project created as the owner. The same chain
+reaches plugin install, enable and grants, and so a plugin's `process.command`.
+The audit had it as plausible and medium; it is neither. `null` is now a
+cross-origin write (a sandboxed frame is the only other sender, and nothing
+in one writes through the cookie), the plugin door treats it the same way
+for its cookie, and `decode` wants `application/json`. The refusal for
+`null` has its own words, since "set VIBEPANEL_DOMAIN" cannot help that
+reader. The browser probe now gets 403. `TestAWriteWithANullOriginOrAFormBodyIsRefused`
+tests each lock with the other in place, and `TestTheDoorRefusesTheCookieFromANullOrigin`
+the door.

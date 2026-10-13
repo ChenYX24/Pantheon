@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -2098,6 +2099,15 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 const maxBodyBytes = 1 << 20
 
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
+	// JSON says so. A form a browser will send from any page without asking
+	// -- text/plain, urlencoded, multipart -- is not a body this panel
+	// accepts, whatever it parses as: a text/plain form whose field name and
+	// value join at the "=" into valid JSON is how a page elsewhere wrote a
+	// project here. Not the guard (crossOriginWrite is); the second lock.
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		writeErr(w, http.StatusUnsupportedMediaType, "a body here is JSON, sent as Content-Type: application/json")
+		return false
+	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
