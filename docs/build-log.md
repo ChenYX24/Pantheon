@@ -25871,6 +25871,14 @@ rule counts days, and it is not on the wire. `outputTouchEvery` is fifteen
 seconds now, a quarter of the smallest of those grains.
 `TestOutputIsStampedAtMostEveryFifteenSeconds` sends output two seconds after
 a stamp (not written) and past the interval (written).
+
+**Every hook report rewrote the transcript path.** The path is the same for
+the life of a session and every report carries it; the upsert always set a
+new `updated_at`, so each report was a real write (at least one a second on
+the running panel). The `DO UPDATE` now has a `WHERE` that skips a row whose
+tool and path are unchanged; `updated_at` is read by nothing.
+`TestAnUnchangedTranscriptPathIsNotRewritten` holds the stamp and reports the
+same path again.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

@@ -492,3 +492,28 @@ func TestChatLeftoversAreSweptAndHandlesAreNot(t *testing.T) {
 		t.Error("a sent-message record older than the cutoff survived the sweep")
 	}
 }
+
+// The same path reported again is not a write. Every hook report carries the
+// transcript path, unchanged for the life of the session.
+func TestAnUnchangedTranscriptPathIsNotRewritten(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	if err := db.SetSessionTranscript(ctx, "s1", "claude", "/t/a.jsonl"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE session_transcripts SET updated_at = 1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetSessionTranscript(ctx, "s1", "claude", "/t/a.jsonl"); err != nil {
+		t.Fatal(err)
+	}
+	if tr, _, _ := db.GetSessionTranscript(ctx, "s1"); tr.UpdatedAt != 1 {
+		t.Errorf("the same path reported again rewrote the row (updated_at %d)", tr.UpdatedAt)
+	}
+	if err := db.SetSessionTranscript(ctx, "s1", "claude", "/t/b.jsonl"); err != nil {
+		t.Fatal(err)
+	}
+	if tr, _, _ := db.GetSessionTranscript(ctx, "s1"); tr.Path != "/t/b.jsonl" || tr.UpdatedAt == 1 {
+		t.Errorf("a new path was not recorded: %+v", tr)
+	}
+}

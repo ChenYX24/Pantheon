@@ -156,6 +156,10 @@ type SessionTranscript struct {
 }
 
 // SetSessionTranscript records the path a hook reported.
+//
+// Only when it changed. Every hook report carries the path, and it is the
+// same path for the life of a session; with updated_at always new, every
+// report was a real write -- one a second on the running panel, measured.
 func (d *DB) SetSessionTranscript(ctx context.Context, sessionID, tool, path string) error {
 	if sessionID == "" || path == "" {
 		return fmt.Errorf("store: a transcript needs a session and a path")
@@ -163,7 +167,8 @@ func (d *DB) SetSessionTranscript(ctx context.Context, sessionID, tool, path str
 	_, err := d.sql.ExecContext(ctx,
 		`INSERT INTO session_transcripts (session_id, tool, path, updated_at) VALUES (?, ?, ?, ?)
 		 ON CONFLICT(session_id) DO UPDATE SET tool = excluded.tool, path = excluded.path,
-		     updated_at = excluded.updated_at`,
+		     updated_at = excluded.updated_at
+		 WHERE session_transcripts.tool IS NOT excluded.tool OR session_transcripts.path IS NOT excluded.path`,
 		sessionID, tool, path, now())
 	if err != nil {
 		return fmt.Errorf("store: set session transcript: %w", err)
