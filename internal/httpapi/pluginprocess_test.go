@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -299,4 +300,54 @@ func TestAChangeMadeFromTheShellReachesTheRunningPanel(t *testing.T) {
 	}
 	srv.pluginStampOnce(t.Context())
 	waitFor(t, "the process to be ended", 8000, func() bool { return !processStatus(t, ts).Running })
+}
+
+// childOf reads the pid a test's script wrote into its state directory.
+func childOf(t *testing.T, srv *Server) int {
+	t.Helper()
+	var pid int
+	waitFor(t, "the child's pid", 5000, func() bool {
+		raw, err := os.ReadFile(filepath.Join(srv.Cfg.DataDir, "plugins", "proc", "state", "child"))
+		if err != nil {
+			return false
+		}
+		pid, err = strconv.Atoi(strings.TrimSpace(string(raw)))
+		return err == nil && pid > 0
+	})
+	// A test that fails here would otherwise leave its child running for
+	// ten minutes; the pid is the one the script wrote, nothing else's.
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	return pid
+}
+
+// A process whose leader exits while something it started still holds its
+// output is seen to exit. The supervisor read stdout to EOF before Wait,
+// and EOF needs every holder of the pipe gone: one background child kept
+// the card saying "running" with a dead pid, the restart never came, and
+// the child lived on holding the socket the next start wanted.
+func TestALeaderThatExitsIsSeenToExitThoughItsChildLives(t *testing.T) {
+	ts, srv := newTestServer(t)
+	srv.ppr.restartMin, srv.ppr.restartMax = time.Hour, time.Hour
+	installProcess(t, ts, srv, nil, `sleep 600 & echo $! > "$VIBEPANEL_PLUGIN_STATE/child"; echo started; exit 7`)
+	child := childOf(t, srv)
+	waitFor(t, "the exit to be noticed", int(pluginStopGrace.Milliseconds())+5000, func() bool {
+		return processStatus(t, ts).LastExit == "exited 7"
+	})
+	waitFor(t, "the orphaned child to be ended", 3000, func() bool {
+		return syscallKillProbe(child) != nil
+	})
+}
+
+// Stopping ends the whole group, including a member that ignores SIGTERM.
+// The kill after the grace went to the leader alone, and the leader is the
+// one that had already obeyed.
+func TestStoppingEndsAChildThatIgnoresTerm(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installProcess(t, ts, srv, nil, `(trap '' TERM; exec sleep 600) & echo $! > "$VIBEPANEL_PLUGIN_STATE/child"; echo started; wait`)
+	child := childOf(t, srv)
+	waitFor(t, "running", 5000, func() bool { return processStatus(t, ts).Running })
+	srv.StopPluginProcesses(t.Context())
+	waitFor(t, "the child that ignored TERM to be ended", 3000, func() bool {
+		return syscallKillProbe(child) != nil
+	})
 }

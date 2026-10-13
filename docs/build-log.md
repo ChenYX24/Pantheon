@@ -25767,3 +25767,17 @@ only verified deliveries, which are what run `server.js`. The map is keyed
 by address now, so it is pruned of quiet keys past 4096.
 `TestJunkAtTheInboundDoorDoesNotLockOutTheSender` floods from one address
 through a trusted proxy and then delivers from another: 429 before, 200 now.
+
+**A plugin process's children could outlive it and hang its supervisor.**
+The supervisor read stdout to EOF and only then called `Wait`, and EOF
+needs every holder of the pipe gone: a leader that exited while a child it
+started kept running was never seen to exit -- the card said running with
+a dead pid, no restart came, and `WaitDelay` never applied because `Wait`
+was never reached. Output now goes to a writer (`pluginRing`) so `Wait`
+owns the copy and `WaitDelay` bounds it. And the kill after the grace went
+to the leader alone, which is the one that had already obeyed SIGTERM;
+`endProcessGroup` now ends whatever is left in the group once the leader is
+reaped -- SIGKILL at once on a stop, the usual grace after an exit of its
+own. `TestALeaderThatExitsIsSeenToExitThoughItsChildLives` and
+`TestStoppingEndsAChildThatIgnoresTerm` both failed before; removing the
+group kill fails both again.

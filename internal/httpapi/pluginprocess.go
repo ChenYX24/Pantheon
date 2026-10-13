@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -451,11 +450,11 @@ func (s *Server) runPluginProcOnce(ctx context.Context, c pluginCred, pr *plugin
 		// SIGTERM first; WaitDelay sends the SIGKILL.
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		return err, false
-	}
+	// A writer, not StdoutPipe: Wait then owns the copy, and WaitDelay bounds
+	// it. Reading a pipe to EOF before Wait needed every holder of the pipe
+	// gone, so a leader that exited while a child it started kept running
+	// was never seen to exit -- "running" with a dead pid, no restart.
+	cmd.Stdout = pluginRing{pr}
 	cmd.Stderr = cmd.Stdout
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -474,26 +473,21 @@ func (s *Server) runPluginProcOnce(ctx context.Context, c pluginCred, pr *plugin
 	}
 	s.pluginLog(c.plugin.ID, "info", fmt.Sprintf("process started, pid %d", cmd.Process.Pid))
 
-	// The output ring: dropped oldest-first, so a process printing in a loop
-	// fills 64 KiB and not the disk the projects live on.
-	reader := bufio.NewReaderSize(stdout, 4096)
-	buf := make([]byte, 4096)
-	for {
-		n, rerr := reader.Read(buf)
-		if n > 0 {
-			pr.ringMu.Lock()
-			pr.ring = append(pr.ring, buf[:n]...)
-			if len(pr.ring) > pluginOutputRing {
-				pr.ring = append([]byte(nil), pr.ring[len(pr.ring)-pluginOutputRing:]...)
-			}
-			pr.ringMu.Unlock()
-		}
-		if rerr != nil {
-			break
-		}
-	}
 	werr := cmd.Wait()
+	stopping := pctx.Err() != nil
 	cancel()
+	// The leader is gone; what it started may not be. Anything left in its
+	// group is ended: an orphan would keep the socket and the port the next
+	// start needs. On a stop, the group was sent SIGTERM by Cancel and has
+	// had WaitDelay since, so what is left ignored it -- the SIGKILL
+	// WaitDelay sends goes to the leader alone, which had already obeyed --
+	// and it gets SIGKILL now. A leader that exited on its own leaves its
+	// group the usual grace.
+	grace := pluginStopGrace
+	if stopping {
+		grace = 0
+	}
+	endProcessGroup(cmd.Process.Pid, grace)
 	pr.stateMu.Lock()
 	close(pr.done)
 	pr.stateMu.Unlock()
@@ -509,6 +503,40 @@ func (s *Server) runPluginProcOnce(ctx context.Context, c pluginCred, pr *plugin
 		return werr, true
 	}
 	return nil, true
+}
+
+// pluginRing is a process's output: dropped oldest-first, so a process
+// printing in a loop fills 64 KiB and not the disk the projects live on.
+type pluginRing struct{ pr *pluginProc }
+
+func (w pluginRing) Write(b []byte) (int, error) {
+	pr := w.pr
+	pr.ringMu.Lock()
+	pr.ring = append(pr.ring, b...)
+	if len(pr.ring) > pluginOutputRing {
+		pr.ring = append([]byte(nil), pr.ring[len(pr.ring)-pluginOutputRing:]...)
+	}
+	pr.ringMu.Unlock()
+	return len(b), nil
+}
+
+// endProcessGroup ends whatever is left in a process group whose leader has
+// been reaped: SIGTERM, up to grace for it to go, then SIGKILL. The group id
+// cannot be reused while a member still holds it, so this reaches only what
+// the plugin started.
+func endProcessGroup(pgid int, grace time.Duration) {
+	if pgid <= 0 || syscall.Kill(-pgid, 0) != nil {
+		return
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGTERM)
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		if syscall.Kill(-pgid, 0) != nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = syscall.Kill(-pgid, syscall.SIGKILL)
 }
 
 func firstNonEmpty(a, b string) string {
