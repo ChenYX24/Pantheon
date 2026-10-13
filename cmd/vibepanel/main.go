@@ -104,18 +104,24 @@ func commandNames() []string {
 
 func init() {
 	commands = map[string]func([]string) error{
-		"serve":   cmdServe,
-		"project": cmdProject,
-		"session": cmdSession,
-		"doctor":  cmdDoctor,
-		"hook":    cmdHook,
-		"tune":    cmdTune,
-		"service": cmdService,
-		"account": cmdAccount,
-		"page":    cmdPage,
-		"plugin":  cmdPlugin,
-		"mcp":     cmdMCP,
-		"version": func([]string) error { fmt.Println("vibepanel", version.String()); return nil },
+		"serve":    cmdServe,
+		"project":  cmdProject,
+		"session":  cmdSession,
+		"doctor":   cmdDoctor,
+		"hook":     cmdHook,
+		"tune":     cmdTune,
+		"service":  cmdService,
+		"account":  cmdAccount,
+		"page":     cmdPage,
+		"plugin":   cmdPlugin,
+		"mcp":      cmdMCP,
+		"status":   cmdStatus,
+		"note":     cmdNote,
+		"todo":     cmdTodo,
+		"token":    cmdToken,
+		"audit":    cmdAudit,
+		"settings": cmdSettings,
+		"version":  func([]string) error { fmt.Println("vibepanel", version.String()); return nil },
 	}
 }
 
@@ -563,9 +569,27 @@ func startResources(ctx context.Context, a *app, srv *httpapi.Server, logger *sl
 
 // ─── project ──────────────────────────────────────────────────────────────
 
+const projectUsage = `usage: vibepanel project <ls|add|rename|pin|unpin|order|archive|restore|rm> [args]
+
+  ls                        projects and archived projects
+  add <dir> [--name N]      register a directory
+  rename <project> <name>   a project is an id, a name, a name's start or a directory
+  pin | unpin <project>
+  order <p> <p> … | --auto  manual order, or back to by activity
+  archive | restore | rm <project>
+
+Through the running panel; ls, add, archive, restore and rm work on the
+database directly when it is not running.`
+
 func cmdProject(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: vibepanel project <add|ls|rm|archive|restore> [args]")
+		return errors.New(projectUsage)
+	}
+	// Through the running panel first (cli.go): the same handler the browser
+	// uses, audited, every open tab told. The switch below is the offline
+	// path for the subcommands that had one before the panel could be asked.
+	if handled, err := projectViaAPI(context.Background(), args[0], args[1:]); handled {
+		return err
 	}
 	ctx := context.Background()
 	sub, rest := args[0], args[1:]
@@ -716,9 +740,28 @@ func cmdProject(args []string) error {
 
 // ─── session ──────────────────────────────────────────────────────────────
 
+const sessionUsage = `usage: vibepanel session <ls|new|rename|pin|unpin|state|restart|kill|send|screen|restore> [args]
+
+  ls                                   every session, with its state
+  new --project <p> [--title T] [-- cmd…]
+  rename <session> <title>             a session is an id, a title, or a title's start
+  pin | unpin <session>
+  state <session> <working|waiting|done>
+  restart <session>                    the same command again, in a new session
+  kill <session>
+  send <session> [text] [--enter]      type into it; text from stdin when none is given
+  screen <session>                     print its pane
+  restore                              rebuild the sessions a restart took
+
+Through the running panel; ls, new and kill work on the database and tmux
+directly when it is not running.`
+
 func cmdSession(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: vibepanel session <new|ls|kill> [args]")
+		return errors.New(sessionUsage)
+	}
+	if handled, err := sessionViaAPI(context.Background(), args[0], args[1:]); handled {
+		return err
 	}
 	ctx := context.Background()
 	sub, rest := args[0], args[1:]

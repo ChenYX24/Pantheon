@@ -395,8 +395,10 @@ Each of these exists because the alternative broke something real.
 ## Layout
 
 ```
-cmd/vibepanel/      entrypoint; also the admin CLI (serve, project, session,
-                    hook, service, account, doctor, version)
+cmd/vibepanel/      entrypoint; also the command line (docs/cli.md): a client
+                    of the running panel's API (client.go, cli.go) for
+                    projects, sessions, notes, todos, tokens and the log,
+                    plus serve, hook, service, account, page, plugin, doctor
 internal/tmux/      tmux CLI wrapper + the embedded vibepanel.conf
 internal/session/   state enum (source of truth) and, later, the session manager
 internal/store/     SQLite schema, migrations, typed queries

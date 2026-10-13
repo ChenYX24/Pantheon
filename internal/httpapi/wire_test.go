@@ -512,6 +512,8 @@ func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 		// Dev mode switched; a frame credential presented after it ended.
 		"plugin.dev":     true,
 		"plugin.created": true,
+		// Text typed into a session from the API: the CLI's `session send`.
+		"session.input": true,
 		// The door on the panel's port: a token minted or revoked, the
 		// owner's cross-origin list changed.
 		"plugin.token_created":   true,

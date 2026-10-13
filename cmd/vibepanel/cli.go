@@ -1,0 +1,785 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/jiangmuran/vibepanel/internal/store"
+)
+
+// The commands that operate the running panel (docs/cli.md): everything
+// the settings page and the sidebar can do, from a shell, for a panel in a
+// container where there is no browser at hand. Each is one or two calls on
+// the panel's API through client.go; the output is a table for a person
+// and, with --json, the panel's answer for a script.
+
+const statusUsage = `usage: vibepanel status [--json]
+
+  the projects and sessions as the sidebar shows them: state, title, pid, live`
+
+func cmdStatus(args []string) error {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print the panel's state as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ctx := context.Background()
+	c, err := openClient(ctx, fs.Args())
+	if err != nil {
+		return err
+	}
+	st, err := c.state(ctx)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return printJSON(st)
+	}
+	printState(os.Stdout, st)
+	return nil
+}
+
+func printState(w io.Writer, st panelState) {
+	live := map[string]bool{}
+	for _, id := range st.Live {
+		live[id] = true
+	}
+	frozen := map[string]bool{}
+	for _, id := range st.Frozen {
+		frozen[id] = true
+	}
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	for _, p := range st.Projects {
+		pin := ""
+		if p.Pinned {
+			pin = " *"
+		}
+		fmt.Fprintf(tw, "%s\t%s%s\t%s\n", p.ID, p.Name, pin, p.Path)
+		for _, s := range st.Sessions {
+			if s.ProjectID != p.ID {
+				continue
+			}
+			mark := map[string]string{"working": "●", "waiting": "▲", "done": "✓"}[string(s.State)]
+			if mark == "" {
+				mark = "○"
+			}
+			flags := []string{}
+			if s.Exited {
+				flags = append(flags, "exited "+strconv.Itoa(s.ExitStatus))
+			}
+			if !live[s.ID] {
+				flags = append(flags, "not live")
+			}
+			if frozen[s.ID] {
+				flags = append(flags, "frozen")
+			}
+			if s.Pinned {
+				flags = append(flags, "pinned")
+			}
+			if s.Scratch {
+				flags = append(flags, "shell")
+			}
+			fmt.Fprintf(tw, "  %s\t%s %s\t%s\t%s\n", s.ID, mark, s.State, s.Title, strings.Join(flags, ", "))
+		}
+	}
+	if len(st.Archived) > 0 {
+		fmt.Fprintf(tw, "archived:\t%d project(s)\t`vibepanel project ls` lists them\n", len(st.Archived))
+	}
+	_ = tw.Flush()
+}
+
+// parseInterspersed is flag.Parse with flags allowed after positional
+// arguments: `project add <dir> --name N` reads as a person writes it. The
+// standard parser stops at the first positional; this collects it and
+// parses on. Everything after `--` is positional, as for a command line.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return pos, nil
+		}
+		if consumed := len(args) - len(rest); consumed > 0 && args[consumed-1] == "--" {
+			return append(pos, rest...), nil
+		}
+		pos = append(pos, rest[0])
+		args = rest[1:]
+	}
+}
+
+// ─── project, through the panel ───────────────────────────────────────────
+
+// projectViaAPI runs a project subcommand against the running panel. handled
+// is false when the panel is not running and the subcommand has an offline
+// implementation to fall back to (cmdProject's own switch).
+func projectViaAPI(ctx context.Context, sub string, rest []string) (bool, error) {
+	fs := flag.NewFlagSet("project "+sub, flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print the panel's answer as JSON")
+	var name, path, pid string
+	auto := false
+	switch sub {
+	case "add":
+		fs.StringVar(&name, "name", "", "display name (defaults to the directory's base name)")
+		fs.StringVar(&path, "path", "", "project directory")
+	case "archive", "restore", "rm":
+		fs.StringVar(&pid, "id", "", "project id (or give the project as the argument)")
+	case "order":
+		fs.BoolVar(&auto, "auto", false, "back to sorting by activity")
+	}
+	args, err := parseInterspersed(fs, rest)
+	if err != nil {
+		return true, err
+	}
+	c, err := openClient(ctx, nil)
+	if err != nil {
+		return true, err
+	}
+	fallback := sub == "ls" || sub == "add" || sub == "archive" || sub == "restore" || sub == "rm"
+	down := func(err error) (bool, error) {
+		if errors.Is(err, errPanelDown) && fallback {
+			fmt.Fprintf(os.Stderr, "%s; working on the database directly\n", err)
+			return false, nil
+		}
+		return true, err
+	}
+	switch sub {
+	case "ls":
+		st, err := c.state(ctx)
+		if err != nil {
+			return down(err)
+		}
+		if *asJSON {
+			return true, printJSON(map[string]any{"projects": st.Projects, "archived": st.Archived})
+		}
+		tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		for _, p := range st.Projects {
+			pin := ""
+			if p.Pinned {
+				pin = " *"
+			}
+			n := 0
+			for _, s := range st.Sessions {
+				if s.ProjectID == p.ID && !s.Scratch {
+					n++
+				}
+			}
+			fmt.Fprintf(tw, "%s\t%s%s\t%s\t%d session(s)\n", p.ID, p.Name, pin, p.Path, n)
+		}
+		for _, p := range st.Archived {
+			fmt.Fprintf(tw, "%s\t%s\t%s\tarchived\n", p.ID, p.Name, p.Path)
+		}
+		return true, tw.Flush()
+	case "add":
+		if path == "" && len(args) == 1 {
+			path = args[0]
+		}
+		if path == "" {
+			return true, errors.New("usage: vibepanel project add <dir> [--name N]")
+		}
+		var p store.Project
+		if err := c.do(ctx, http.MethodPost, "/api/projects", map[string]any{"name": name, "path": path}, &p); err != nil {
+			return down(err)
+		}
+		if *asJSON {
+			return true, printJSON(p)
+		}
+		fmt.Printf("created project %s  %s  %s\n", p.ID, p.Name, p.Path)
+		return true, nil
+	case "rename":
+		if len(args) != 2 {
+			return true, errors.New("usage: vibepanel project rename <project> <new name>")
+		}
+		p, err := c.project(ctx, args[0])
+		if err != nil {
+			return true, err
+		}
+		if err := c.do(ctx, http.MethodPatch, "/api/projects/"+p.ID, map[string]any{"name": args[1]}, nil); err != nil {
+			return true, err
+		}
+		fmt.Printf("renamed %s: %s → %s\n", p.ID, p.Name, args[1])
+		return true, nil
+	case "pin", "unpin":
+		if len(args) != 1 {
+			return true, fmt.Errorf("usage: vibepanel project %s <project>", sub)
+		}
+		p, err := c.project(ctx, args[0])
+		if err != nil {
+			return true, err
+		}
+		if err := c.do(ctx, http.MethodPatch, "/api/projects/"+p.ID, map[string]any{"pinned": sub == "pin"}, nil); err != nil {
+			return true, err
+		}
+		fmt.Printf("%sned %s\n", sub, p.Name)
+		return true, nil
+	case "order":
+		if auto {
+			if err := c.do(ctx, http.MethodPost, "/api/projects/reorder", map[string]any{"auto": true}, nil); err != nil {
+				return true, err
+			}
+			fmt.Println("projects sorted by activity again")
+			return true, nil
+		}
+		if len(args) == 0 {
+			return true, errors.New("usage: vibepanel project order <project> <project> … | --auto")
+		}
+		ids := make([]string, 0, len(args))
+		for _, ref := range args {
+			p, err := c.project(ctx, ref)
+			if err != nil {
+				return true, err
+			}
+			ids = append(ids, p.ID)
+		}
+		if err := c.do(ctx, http.MethodPost, "/api/projects/reorder", map[string]any{"ids": ids}, nil); err != nil {
+			return true, err
+		}
+		fmt.Printf("ordered %d project(s); the rest keep their places after them\n", len(ids))
+		return true, nil
+	case "archive", "restore", "rm":
+		ref := pid
+		if ref == "" && len(args) == 1 {
+			ref = args[0]
+		}
+		if ref == "" {
+			return true, fmt.Errorf("usage: vibepanel project %s <project>", sub)
+		}
+		st, err := c.state(ctx)
+		if err != nil {
+			return down(err)
+		}
+		var target store.Project
+		if sub == "restore" {
+			for _, a := range st.Archived {
+				if a.ID == ref || a.Name == ref {
+					target = store.Project{ID: a.ID, Name: a.Name}
+				}
+			}
+			if target.ID == "" {
+				return true, fmt.Errorf("no archived project %q", ref)
+			}
+		} else if target, err = pickProject(st.Projects, ref); err != nil {
+			return true, err
+		}
+		switch sub {
+		case "archive":
+			err = c.do(ctx, http.MethodPost, "/api/projects/"+target.ID+"/archive", map[string]any{}, nil)
+		case "restore":
+			err = c.do(ctx, http.MethodPost, "/api/projects/"+target.ID+"/restore", map[string]any{}, nil)
+		case "rm":
+			err = c.do(ctx, http.MethodDelete, "/api/projects/"+target.ID, nil, nil)
+		}
+		if err != nil {
+			return true, err
+		}
+		fmt.Printf("%s: %s (%s)\n", map[string]string{"archive": "archived", "restore": "restored", "rm": "deleted"}[sub], target.Name, target.ID)
+		return true, nil
+	}
+	return false, nil
+}
+
+// ─── session, through the panel ───────────────────────────────────────────
+
+func sessionViaAPI(ctx context.Context, sub string, rest []string) (bool, error) {
+	fs := flag.NewFlagSet("session "+sub, flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "print the panel's answer as JSON")
+	var project, title, sid string
+	var cols, rows int
+	enter := false
+	switch sub {
+	case "new":
+		fs.StringVar(&project, "project", "", "project (id, name or directory)")
+		fs.StringVar(&title, "title", "", "initial title")
+		fs.IntVar(&cols, "cols", 120, "initial grid width")
+		fs.IntVar(&rows, "rows", 32, "initial grid height")
+	case "kill":
+		fs.StringVar(&sid, "id", "", "session id (or give the session as the argument)")
+	case "send":
+		fs.BoolVar(&enter, "enter", false, "press Enter after the text")
+	}
+	args, err := parseInterspersed(fs, rest)
+	if err != nil {
+		return true, err
+	}
+	c, err := openClient(ctx, nil)
+	if err != nil {
+		return true, err
+	}
+	fallback := sub == "ls" || sub == "new" || sub == "kill"
+	down := func(err error) (bool, error) {
+		if errors.Is(err, errPanelDown) && fallback {
+			fmt.Fprintf(os.Stderr, "%s; working on the database and tmux directly\n", err)
+			return false, nil
+		}
+		return true, err
+	}
+	switch sub {
+	case "ls":
+		st, err := c.state(ctx)
+		if err != nil {
+			return down(err)
+		}
+		if *asJSON {
+			return true, printJSON(map[string]any{"sessions": st.Sessions, "live": st.Live, "frozen": st.Frozen})
+		}
+		printState(os.Stdout, st)
+		return true, nil
+	case "new":
+		if project == "" {
+			return true, errors.New("usage: vibepanel session new --project <project> [--title T] [-- command…]")
+		}
+		p, err := c.project(ctx, project)
+		if err != nil {
+			if errors.Is(err, errPanelDown) {
+				return down(err)
+			}
+			return true, err
+		}
+		body := map[string]any{"projectId": p.ID, "title": title, "command": args, "cols": cols, "rows": rows}
+		var s store.Session
+		if err := c.do(ctx, http.MethodPost, "/api/sessions", body, &s); err != nil {
+			return down(err)
+		}
+		if *asJSON {
+			return true, printJSON(s)
+		}
+		fmt.Printf("created session %s (tmux %s) in %s\n", s.ID, s.TmuxName, p.Path)
+		return true, nil
+	case "rename":
+		if len(args) != 2 {
+			return true, errors.New("usage: vibepanel session rename <session> <new title>")
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, err
+		}
+		if err := c.do(ctx, http.MethodPatch, "/api/sessions/"+s.ID, map[string]any{"title": args[1]}, nil); err != nil {
+			return true, err
+		}
+		fmt.Printf("renamed %s: %s → %s\n", s.ID, s.Title, args[1])
+		return true, nil
+	case "pin", "unpin":
+		if len(args) != 1 {
+			return true, fmt.Errorf("usage: vibepanel session %s <session>", sub)
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, err
+		}
+		if err := c.do(ctx, http.MethodPatch, "/api/sessions/"+s.ID, map[string]any{"pinned": sub == "pin"}, nil); err != nil {
+			return true, err
+		}
+		fmt.Printf("%sned %s\n", sub, s.Title)
+		return true, nil
+	case "state":
+		if len(args) != 2 {
+			return true, errors.New("usage: vibepanel session state <session> <working|waiting|done>")
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, err
+		}
+		if err := c.do(ctx, http.MethodPatch, "/api/sessions/"+s.ID, map[string]any{"state": args[1]}, nil); err != nil {
+			return true, err
+		}
+		fmt.Printf("%s is %s\n", s.Title, args[1])
+		return true, nil
+	case "restart":
+		if len(args) != 1 {
+			return true, errors.New("usage: vibepanel session restart <session>")
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, err
+		}
+		var made store.Session
+		if err := c.do(ctx, http.MethodPost, "/api/sessions/"+s.ID+"/restart", map[string]any{}, &made); err != nil {
+			return true, err
+		}
+		if *asJSON {
+			return true, printJSON(made)
+		}
+		fmt.Printf("restarted %s as %s (tmux %s)\n", s.Title, made.ID, made.TmuxName)
+		return true, nil
+	case "kill":
+		ref := sid
+		if ref == "" && len(args) == 1 {
+			ref = args[0]
+		}
+		if ref == "" {
+			return true, errors.New("usage: vibepanel session kill <session>")
+		}
+		s, err := c.session(ctx, ref)
+		if err != nil {
+			if errors.Is(err, errPanelDown) {
+				return down(err)
+			}
+			return true, err
+		}
+		if err := c.do(ctx, http.MethodDelete, "/api/sessions/"+s.ID, nil, nil); err != nil {
+			return true, err
+		}
+		fmt.Printf("killed session %s (%s)\n", s.ID, s.Title)
+		return true, nil
+	case "send":
+		if len(args) < 1 {
+			return true, errors.New("usage: vibepanel session send <session> [text…] [--enter]   (text from stdin when none is given)")
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, err
+		}
+		text := strings.Join(args[1:], " ")
+		if len(args) == 1 {
+			raw, rerr := io.ReadAll(io.LimitReader(os.Stdin, 64<<10))
+			if rerr != nil {
+				return true, rerr
+			}
+			text = string(raw)
+		}
+		if err := c.do(ctx, http.MethodPost, "/api/sessions/"+s.ID+"/input", map[string]any{"text": text, "submit": enter}, nil); err != nil {
+			return true, err
+		}
+		fmt.Printf("sent %d byte(s) to %s\n", len(text), s.Title)
+		return true, nil
+	case "screen":
+		if len(args) != 1 {
+			return true, errors.New("usage: vibepanel session screen <session>")
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, err
+		}
+		var out struct {
+			Text string `json:"text"`
+		}
+		if err := c.do(ctx, http.MethodGet, "/api/sessions/"+s.ID+"/screen", nil, &out); err != nil {
+			return true, err
+		}
+		if *asJSON {
+			return true, printJSON(out)
+		}
+		fmt.Print(strings.TrimRight(out.Text, "\n") + "\n")
+		return true, nil
+	case "restore":
+		var out any
+		if err := c.do(ctx, http.MethodPost, "/api/sessions/restore", map[string]any{}, &out); err != nil {
+			return true, err
+		}
+		if *asJSON {
+			return true, printJSON(out)
+		}
+		fmt.Println("asked the panel to rebuild the sessions a restart took")
+		return true, nil
+	}
+	return false, nil
+}
+
+// ─── notes and todos ──────────────────────────────────────────────────────
+
+const noteUsage = `usage: vibepanel note <get|set> <project> [text]
+
+  get    print the project's note
+  set    replace it with the text, or with stdin when no text is given`
+
+func cmdNote(args []string) error {
+	if len(args) < 2 {
+		return errors.New(noteUsage)
+	}
+	ctx := context.Background()
+	c, err := openClient(ctx, nil)
+	if err != nil {
+		return err
+	}
+	p, err := c.project(ctx, args[1])
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "get":
+		var note store.Note
+		if err := c.do(ctx, http.MethodGet, "/api/projects/"+p.ID+"/notes", nil, &note); err != nil {
+			return err
+		}
+		fmt.Print(note.Content)
+		if note.Content != "" && !strings.HasSuffix(note.Content, "\n") {
+			fmt.Println()
+		}
+		return nil
+	case "set":
+		content := strings.Join(args[2:], " ")
+		if len(args) == 2 {
+			raw, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+			if err != nil {
+				return err
+			}
+			content = string(raw)
+		}
+		if err := c.do(ctx, http.MethodPut, "/api/projects/"+p.ID+"/notes", map[string]any{"content": content}, nil); err != nil {
+			return err
+		}
+		fmt.Printf("note of %s: %d byte(s)\n", p.Name, len(content))
+		return nil
+	}
+	return errors.New(noteUsage)
+}
+
+const todoUsage = `usage: vibepanel todo <ls|add|done|undo|rm> <project> [text|todo id]
+
+  ls           the project's todos
+  add          add one with the text
+  done, undo   tick or untick one, by id or by its text's start
+  rm           remove one`
+
+func cmdTodo(args []string) error {
+	if len(args) < 2 {
+		return errors.New(todoUsage)
+	}
+	ctx := context.Background()
+	c, err := openClient(ctx, nil)
+	if err != nil {
+		return err
+	}
+	p, err := c.project(ctx, args[1])
+	if err != nil {
+		return err
+	}
+	list := func() ([]store.Todo, error) {
+		var out []store.Todo
+		err := c.do(ctx, http.MethodGet, "/api/projects/"+p.ID+"/todos", nil, &out)
+		return out, err
+	}
+	pick := func(ref string) (store.Todo, error) {
+		todos, err := list()
+		if err != nil {
+			return store.Todo{}, err
+		}
+		var prefix []store.Todo
+		for _, t := range todos {
+			if t.ID == ref {
+				return t, nil
+			}
+			if strings.HasPrefix(strings.ToLower(t.Text), strings.ToLower(ref)) {
+				prefix = append(prefix, t)
+			}
+		}
+		if len(prefix) == 1 {
+			return prefix[0], nil
+		}
+		if len(prefix) == 0 {
+			return store.Todo{}, fmt.Errorf("no todo %q in %s", ref, p.Name)
+		}
+		return store.Todo{}, fmt.Errorf("%q names %d todos; use the id", ref, len(prefix))
+	}
+	switch args[0] {
+	case "ls":
+		todos, err := list()
+		if err != nil {
+			return err
+		}
+		tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		for _, t := range todos {
+			box := "[ ]"
+			if t.Done {
+				box = "[x]"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", t.ID, box, t.Text)
+		}
+		return tw.Flush()
+	case "add":
+		text := strings.TrimSpace(strings.Join(args[2:], " "))
+		if text == "" {
+			return errors.New("usage: vibepanel todo add <project> <text>")
+		}
+		var t store.Todo
+		if err := c.do(ctx, http.MethodPost, "/api/projects/"+p.ID+"/todos", map[string]any{"text": text}, &t); err != nil {
+			return err
+		}
+		fmt.Printf("added %s: %s\n", t.ID, t.Text)
+		return nil
+	case "done", "undo", "rm":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: vibepanel todo %s <project> <todo>", args[0])
+		}
+		t, err := pick(args[2])
+		if err != nil {
+			return err
+		}
+		switch args[0] {
+		case "rm":
+			err = c.do(ctx, http.MethodDelete, "/api/todos/"+t.ID, nil, nil)
+		default:
+			err = c.do(ctx, http.MethodPatch, "/api/todos/"+t.ID, map[string]any{"done": args[0] == "done"}, nil)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s: %s\n", map[string]string{"done": "ticked", "undo": "unticked", "rm": "removed"}[args[0]], t.Text)
+		return nil
+	}
+	return errors.New(todoUsage)
+}
+
+// ─── tokens, the activity log, settings ───────────────────────────────────
+
+const tokenUsage = `usage: vibepanel token <ls|create|revoke> [name|id]
+
+  ls        the API tokens: name, prefix, last use
+  create    mint one with the name; the token is printed once
+  revoke    delete one by id or by name`
+
+func cmdToken(args []string) error {
+	if len(args) < 1 {
+		return errors.New(tokenUsage)
+	}
+	ctx := context.Background()
+	c, err := openClient(ctx, nil)
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "ls":
+		var list []store.APIToken
+		if err := c.do(ctx, http.MethodGet, "/api/settings/tokens", nil, &list); err != nil {
+			return err
+		}
+		tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		for _, t := range list {
+			used := "never used"
+			if t.LastUsedAt > 0 {
+				used = "last used " + time.Unix(t.LastUsedAt, 0).Format("2006-01-02 15:04")
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s…\t%s\n", t.ID, t.Name, t.Prefix, used)
+		}
+		return tw.Flush()
+	case "create":
+		if len(args) != 2 {
+			return errors.New("usage: vibepanel token create <name>")
+		}
+		var made struct {
+			Token  string `json:"token"`
+			ID     string `json:"id"`
+			Prefix string `json:"prefix"`
+		}
+		if err := c.do(ctx, http.MethodPost, "/api/settings/tokens", map[string]any{"name": args[1]}, &made); err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", made.Token)
+		fmt.Fprintf(os.Stderr, "token %s (%s…) created; shown once\n", made.ID, made.Prefix)
+		return nil
+	case "revoke":
+		if len(args) != 2 {
+			return errors.New("usage: vibepanel token revoke <id|name>")
+		}
+		var list []store.APIToken
+		if err := c.do(ctx, http.MethodGet, "/api/settings/tokens", nil, &list); err != nil {
+			return err
+		}
+		var target store.APIToken
+		for _, t := range list {
+			if t.ID == args[1] || t.Name == args[1] {
+				if target.ID != "" {
+					return fmt.Errorf("%q names more than one token; use the id", args[1])
+				}
+				target = t
+			}
+		}
+		if target.ID == "" {
+			return fmt.Errorf("no token %q", args[1])
+		}
+		if err := c.do(ctx, http.MethodDelete, "/api/settings/tokens/"+target.ID, nil, nil); err != nil {
+			return err
+		}
+		fmt.Printf("revoked %s (%s)\n", target.Name, target.ID)
+		if target.Name == "cli" {
+			_ = os.Remove(c.tokenPath())
+			fmt.Println("that was the CLI's own token; the next command mints a new one")
+		}
+		return nil
+	}
+	return errors.New(tokenUsage)
+}
+
+const auditUsage = `usage: vibepanel audit [-n 50] [--json]
+
+  the activity log, newest last`
+
+func cmdAudit(args []string) error {
+	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
+	n := fs.Int("n", 50, "how many entries")
+	asJSON := fs.Bool("json", false, "print as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	ctx := context.Background()
+	c, err := openClient(ctx, fs.Args())
+	if err != nil {
+		return err
+	}
+	var entries []store.AuditEntry
+	if err := c.do(ctx, http.MethodGet, "/api/settings/audit", nil, &entries); err != nil {
+		return err
+	}
+	// The panel answers newest first; a log reads oldest first, so the last
+	// line on the screen is the latest thing that happened.
+	if len(entries) > *n {
+		entries = entries[:*n]
+	}
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+	if *asJSON {
+		return printJSON(entries)
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	for _, e := range entries {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", time.Unix(e.At, 0).Format("01-02 15:04:05"), e.Event, e.Username, e.IP, e.Detail)
+	}
+	return tw.Flush()
+}
+
+const settingsUsage = `usage: vibepanel settings <archive-idle|timezone> <value>
+
+  archive-idle <days>   archive a project idle for that many days; 0 never
+  timezone <zone>       the panel's time zone, e.g. Asia/Shanghai`
+
+func cmdSettings(args []string) error {
+	if len(args) != 2 {
+		return errors.New(settingsUsage)
+	}
+	ctx := context.Background()
+	c, err := openClient(ctx, nil)
+	if err != nil {
+		return err
+	}
+	switch args[0] {
+	case "archive-idle":
+		days, err := strconv.Atoi(args[1])
+		if err != nil || days < 0 {
+			return errors.New("archive-idle takes a number of days")
+		}
+		if err := c.do(ctx, http.MethodPut, "/api/settings/archive", map[string]any{"days": days}, nil); err != nil {
+			return err
+		}
+		fmt.Printf("projects idle for %d day(s) are archived\n", days)
+		return nil
+	case "timezone":
+		if err := c.do(ctx, http.MethodPut, "/api/settings/timezone", map[string]any{"zone": args[1]}, nil); err != nil {
+			return err
+		}
+		fmt.Printf("time zone: %s\n", args[1])
+		return nil
+	}
+	return errors.New(settingsUsage)
+}

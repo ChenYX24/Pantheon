@@ -348,6 +348,18 @@ the frame to a remote page.
 ### `PATCH /api/sessions/{id}`
 ### `DELETE /api/sessions/{id}`
 ### `POST /api/sessions/{id}/restart`
+### `GET /api/sessions/{id}/screen`
+
+`{text}`: the session's pane as text, what `vibepanel session screen`
+prints. 409 while the pane cannot be read.
+
+### `POST /api/sessions/{id}/input`
+
+`{text, submit}`: pastes `text` (at most 64 KiB) into the session and,
+with `submit`, presses Enter. 204. Audited `session.input` with the byte
+count. What `vibepanel session send` uses; the terminal's own channel is
+the WebSocket.
+
 ### `POST /api/sessions/restore`
 
 ```sh

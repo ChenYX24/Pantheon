@@ -27,8 +27,14 @@ import (
 // Here rather than in main because this is the only place that prints usage,
 // and a second copy of the list is how the two stop agreeing.
 const Commands = `  serve      run the panel (the default with no command)
-  project    add, list and remove projects
-  session    create, list and kill sessions
+  status     the projects and sessions as the sidebar shows them
+  project    list, add, rename, pin, order, archive and remove projects
+  session    list, create, rename, pin, restart, kill, type into and read sessions
+  note       read or replace a project's note
+  todo       list, add, tick and remove a project's todos
+  token      list, create and revoke API tokens
+  audit      print the activity log
+  settings   the idle-archive days and the time zone
   hook       install or remove the agent state reporter
   tune       adjust another tool's settings (only Claude Code so far)
   service    status, start, stop, logs, token, upgrade, uninstall

@@ -171,6 +171,14 @@ can be served on the panel's own port behind the panel's door, and declare
 the models and runtimes it needs for the panel to fetch and verify.
 ⚠️ Written by AI ⚠️
 
+## The command line
+
+`vibepanel` with a subcommand operates the running panel from a shell --
+projects, sessions, notes, todos, tokens, the activity log, share pages,
+plugins -- through the panel's own API, so a rename from `docker exec` is
+the same rename as from the sidebar. [docs/cli.md](docs/cli.md) lists the
+commands; `vibepanel --help` does too.
+
 ## Flags and troubleshooting
 
 Every flag has a `VIBEPANEL_<UPPER_SNAKE>` environment equivalent, and the flag

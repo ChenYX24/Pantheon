@@ -25451,3 +25451,49 @@ resolution, and the test installed and disabled within one second and read
 with plugins in place does not reconcile them as news. With the comparison
 removed the test goes red.
 
+## 2026-10-13 — The command line operates the running panel
+
+「完善重构面板 cli，可以完整操作整个面板，包括改名之类的特性，方便容器内管理」.
+The first CLI could add and list projects and create and kill sessions,
+by writing the database and driving tmux from a second process; it could
+not rename anything, and what it wrote the running panel did not learn
+about until it looked (the plugin-disable entry above is the same shape).
+
+`cmd/vibepanel/client.go` is the CLI as a client of the panel's own API.
+The address is the panel's loopback URL from its configuration; the
+credential is an API token named `cli` that the CLI mints into the token
+table on first use -- it runs as the panel's user with the database in
+reach, so a boundary there would be theatre -- and keeps in
+`<data>/cli.token` at 0600, on the settings page's list with every other
+token, revocable there, re-minted on the next run and audited both ways.
+A command then reaches the same handler the browser does, which is what
+makes `docker exec vibepanel project rename` the same rename as the
+sidebar's: audited, every open tab told, tmux asked by the process that
+owns it.
+
+`cli.go` is the commands: `status`, `project` (ls, add, rename, pin,
+unpin, order, archive, restore, rm), `session` (ls, new, rename, pin,
+unpin, state, restart, kill, send, screen, restore), `note`, `todo`,
+`token`, `audit`, `settings`. Two owner routes were added for the two
+things the API had only for plugins: `GET /api/sessions/{id}/screen` and
+`POST /api/sessions/{id}/input`, the second audited. Things are named by
+id, name, an unambiguous prefix or a directory, and a name that fits two
+is an error that lists both. Flags may follow positionals, because
+`project add ~/x --name X` is how a person types it and Go's flag package
+stops at the first positional; `parseInterspersed` carries on, with `--`
+still meaning "the rest is the command".
+
+The offline paths stay: without a reachable panel, the subcommands the
+first CLI had work on the database and tmux directly and say so; the rest
+say the panel is not running. The first version minted the token before
+asking whether the panel was up, and the existing test for the offline
+`session new` on a machine with no account was told to finish setup first
+-- so the token is minted only when a running panel answers 401.
+
+Tested against a real `httpapi.Server` on a throwaway tmux socket: add,
+rename, pin, order, archive, restore; a session created, renamed, typed
+into and read back (`echo cli-was-here` appears on its screen), marked
+waiting, pinned, shown by `status`, killed; a note and todos; a token
+minted and the CLI's own revoked and re-minted; the log oldest first; and
+the offline fallbacks with the panel's port closed.
+
