@@ -25670,3 +25670,16 @@ writes, so nothing read-only is made to queue.
 `TestAReadThenWriteTransactionWaitsForAWriter` installs a version 1000 times
 beside a tight writer: red in ten runs of ten without the parameter, green
 with it.
+
+**`previewSandbox` was a pinned function nothing called.** Its comment said
+it was the one place the sandbox value was built; `previewCSP` spelled the
+directive out by hand, and the iframe attribute is built on the page by
+`sandboxFor` (`render.ts`). The audit read this as the header being
+unguarded, and that part was wrong: `TestTheRenderedPreviewNeverGetsThePanelsOrigin` checks
+`previewCSP` itself, and adding `allow-same-origin` to the hand-written string
+turned it red. What was true is that the helper the comment pointed at served
+nothing. `previewCSP` now builds its directive from `previewSandbox`, and the
+comment names the page's mirror instead of claiming there is none. A
+refactor: the header is byte-for-byte what it was, which the handler tests
+compare against, and a token added to `previewSandbox` now reaches the
+served header and fails there as well.
