@@ -25893,3 +25893,27 @@ still goes through ServeContent so HEAD, Range and `If-None-Match` work. Cache
 headers and the SPA fallback are unchanged. `TestBundleIsServedGzippedWhenAccepted`
 and `TestAnImageIsNeverCompressed`; the first goes red with the gzip branch
 removed.
+
+**A wall drew a crashed build as a green check.** A share page made from `wall` showed a `sh -c "exit 2"` session as done: a
+check, counted in the done total, "working → done" in the recent changes, and
+a small grey "exited". The panel itself draws that session as a cross.
+
+The snapshot was not at fault. The state enum has three values and no
+"crashed" (red line 3), so a process that exits non-zero keeps the state it
+died in, and what says it died is `exited` plus `exitStatus` on the row and
+`counts.crashed`, all of which were already on the wire. The templates drew from
+`state` alone. `wall` and `glance` now derive a fifth thing to draw, crashed
+(`exited` and a status that is neither 0 nor the vanished marker -1), with a
+cross and a red of its own, a count of its own taken out of the state it died
+in, a group on `glance`, a place ahead of working on `wall`, and the feed's move
+into the crashed session's current state reads "→ crashed". A clean exit and a
+vanished session stay as they were: nobody watched either one fail.
+
+No contract changed, so nothing in `docs/share-pages.md` or the SDK typings
+moved. `counts.done` still includes crashed sessions, as it always did; the
+templates subtract. A page that wants the old number has it.
+
+Pinned by `TestASessionThatExitedNonZeroReachesTheSnapshotAsCrashed` (the two
+fields a wall depends on arrive, and only for a non-zero status) and, for the
+templates, `pages-check`, which now fails if `wall` or `glance` against the
+`busy` fixture, which has crashed rows, shows no cross and no word "crashed".

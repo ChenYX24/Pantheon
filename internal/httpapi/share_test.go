@@ -1320,3 +1320,47 @@ func TestShareUsageReadsThePollersListWhileItIsYoung(t *testing.T) {
 		t.Errorf("a 4s-old list answered, want nil so the caller forks its own")
 	}
 }
+
+// A session that exited non-zero reaches a wall as itself.
+//
+// The state enum has no "crashed" (red line 3), so the only thing that tells a
+// wall that a build died rather than finished is `exited` with a status on the
+// row, and `counts.crashed`. A wall drawn from `state` alone showed a green
+// check for a `sh -c "exit 2"`, counted it as done and logged "working -> done";
+// the templates now read these two fields, and this pins that they arrive: a
+// clean exit and a vanished tmux session are exited but not crashed.
+func TestASessionThatExitedNonZeroReachesTheSnapshotAsCrashed(t *testing.T) {
+	ts, srv := newTestServer(t)
+	ctx := context.Background()
+	project := postJSON[store.Project](t, ts, "/api/projects",
+		`{"path":"`+t.TempDir()+`","name":"test"}`)
+	mk := func(title string) store.Session {
+		return postJSON[store.Session](t, ts, "/api/sessions",
+			`{"projectId":"`+project.ID+`","title":"`+title+`","command":[]}`)
+	}
+	crashed, clean, gone := mk("build"), mk("clean"), mk("gone")
+	for id, status := range map[string]int{crashed.ID: 2, clean.ID: 0, gone.ID: store.ExitStatusVanished} {
+		if err := srv.DB.SetSessionExit(ctx, id, true, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	link := newShare(t, ts, `{"name":"wall","detail":"names"}`)
+	_, body := shareGET(t, ts, link.Token)
+	got := decodeSnapshot(t, body)
+
+	if got.Counts.Exited != 3 || got.Counts.Crashed != 1 {
+		t.Errorf("counts.exited = %d, counts.crashed = %d, want 3 and 1",
+			got.Counts.Exited, got.Counts.Crashed)
+	}
+	byName := map[string]shareSession{}
+	for _, row := range got.Sessions {
+		byName[row.Name] = row
+	}
+	if r := byName["build"]; !r.Exited || r.ExitStatus != 2 {
+		t.Errorf("the crashed row = exited %v status %d, want true and 2", r.Exited, r.ExitStatus)
+	}
+	if r := byName["clean"]; !r.Exited || r.ExitStatus != 0 {
+		t.Errorf("the clean row = exited %v status %d, want true and 0", r.Exited, r.ExitStatus)
+	}
+}
