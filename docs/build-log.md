@@ -25982,6 +25982,16 @@ its mount dead. It now deletes its own token by hash
 plugin beside the running process's and stops it: the other row was deleted
 before and survives now. The ordering itself is a window too narrow to test
 reliably and is held by the code.
+
+**A stop during a plugin process's start did not stop it.** `stopPluginProc`
+reaches what is recorded -- the previous run's cancel and its closed `done`
+-- so a stop that landed in the checkout, the token mint or the PATH lookup
+returned at once, and the start went on to run the process: alive until it
+exited on its own, behind a record that said stopped, and a candidate for a
+second copy on the next reconcile. The start now asks before `Start` and
+again once the run is recorded. `TestAStopDuringStartStopsTheProcess` holds
+the start in the PATH lookup, stops, and lets it go: the process ran on
+before; now it is never started.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

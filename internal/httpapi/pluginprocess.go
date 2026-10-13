@@ -456,6 +456,19 @@ func (s *Server) runPluginProcOnce(ctx context.Context, c pluginCred, pr *plugin
 	// was never seen to exit -- "running" with a dead pid, no restart.
 	cmd.Stdout = pluginRing{pr}
 	cmd.Stderr = cmd.Stdout
+	// A stop can land anywhere in the checkout, the token and the lookup
+	// above, and it reaches only what is already recorded: the previous
+	// run's cancel and done. So it is asked here, before starting, and again
+	// once this run is recorded -- a process started after a stop ran until
+	// it exited on its own, behind a record that said stopped.
+	pr.stateMu.Lock()
+	stopped := pr.stopped
+	pr.stateMu.Unlock()
+	if stopped {
+		cancel()
+		_ = s.DB.DeletePluginToken(context.WithoutCancel(ctx), auth.HashToken(token))
+		return errors.New("stopped before it started"), false
+	}
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return err, false
@@ -464,7 +477,11 @@ func (s *Server) runPluginProcOnce(ctx context.Context, c pluginCred, pr *plugin
 	pr.cmd, pr.cancel, pr.pid, pr.since = cmd, cancel, cmd.Process.Pid, time.Now()
 	pr.socket, pr.proxySecret = sock, proxySecret
 	pr.done = make(chan struct{})
+	stopped = pr.stopped
 	pr.stateMu.Unlock()
+	if stopped {
+		cancel()
+	}
 	if s.Resources != nil {
 		s.Resources.PlacePlugin(c.plugin.ID, cmd.Process.Pid)
 	}

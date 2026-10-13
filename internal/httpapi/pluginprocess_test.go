@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -378,4 +380,46 @@ func TestAnEndingProcessDeletesOnlyItsOwnToken(t *testing.T) {
 	if n != 0 {
 		t.Errorf("the ending process left its own token behind (%d)", n)
 	}
+}
+
+// A stop that lands while the process is being started stops it. stop set
+// the flag and cancelled the previous run's context, and the start went on
+// to Start the process anyway: running, with nothing that would ever end it
+// short of its own exit, behind a record that said stopped.
+func TestAStopDuringStartStopsTheProcess(t *testing.T) {
+	ts, srv := newTestServer(t)
+	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	srv.ppr.lookPath = func(name string) (string, error) {
+		once.Do(func() { close(reached) })
+		<-release
+		return exec.LookPath(name)
+	}
+	installProcess(t, ts, srv, nil, `echo $$ > "$VIBEPANEL_PLUGIN_STATE/child"; exec sleep 600`)
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the start never reached lookPath")
+	}
+	srv.ppr.mu.Lock()
+	pr := srv.ppr.procs["proc"]
+	srv.ppr.mu.Unlock()
+	if pr == nil {
+		t.Fatal("no process record")
+	}
+	srv.stopPluginProc(pr, "stopped by the test")
+	close(release)
+	// Either it is never started, or it is ended at once; what it may not do
+	// is run. The script writes its pid first thing, so a second is plenty to
+	// see one that got going.
+	time.Sleep(time.Second)
+	raw, err := os.ReadFile(filepath.Join(srv.Cfg.DataDir, "plugins", "proc", "state", "child"))
+	if err != nil {
+		return // never started
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(raw)))
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	waitFor(t, "the process started after the stop to be ended", 3000, func() bool {
+		return syscallKillProbe(pid) != nil
+	})
 }
