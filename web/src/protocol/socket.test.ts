@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PanelSocket } from './socket'
 import { encodeData, FRAME_REPLAY } from './wire'
@@ -399,5 +399,87 @@ describe('writes say whether they were sent', () => {
   it('reports false for a session it holds no stream for', () => {
     const { sock } = subscribed(WebSocket.OPEN)
     expect(sock.pasteText('nobody', 'echo hi')).toBe(false)
+  })
+})
+
+/**
+ * Closed, then opened again.
+ *
+ * StrictMode runs an effect, its cleanup and the effect again in development,
+ * and App keeps one socket in a useMemo: connect, close, connect. `closed` was
+ * never reset, so the second connect returned at once and under `npm run dev`
+ * the panel never connected at all.
+ */
+describe('a socket opened again after close', () => {
+  class FakeWS {
+    static CONNECTING = 0
+    static OPEN = 1
+    static CLOSING = 2
+    static CLOSED = 3
+    static made: FakeWS[] = []
+    readyState = 0
+    binaryType = ''
+    onopen: (() => void) | null = null
+    onclose: (() => void) | null = null
+    onmessage: ((ev: { data: unknown }) => void) | null = null
+    onerror: (() => void) | null = null
+    constructor(public url: string) {
+      FakeWS.made.push(this)
+    }
+    send() {}
+    close() {
+      this.readyState = 3
+    }
+  }
+
+  function fresh() {
+    FakeWS.made = []
+    vi.stubGlobal('WebSocket', FakeWS)
+    vi.stubGlobal('location', { protocol: 'http:', host: 'panel.test' })
+    vi.stubGlobal('sessionStorage', { getItem: () => 'c1', setItem: () => {} })
+    const listeners: string[] = []
+    vi.stubGlobal('window', {
+      addEventListener: (t: string) => listeners.push(`+${t}`),
+      removeEventListener: (t: string) => listeners.push(`-${t}`),
+      setInterval: () => 0,
+      clearInterval: () => {},
+    })
+    return { sock: new PanelSocket(), listeners }
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('connects again', () => {
+    const { sock } = fresh()
+    sock.connect()
+    sock.close()
+    sock.connect()
+    expect(FakeWS.made).toHaveLength(2)
+    expect(sock.status).toBe('connecting')
+  })
+
+  it('listens for the network again', () => {
+    const { sock, listeners } = fresh()
+    sock.connect()
+    sock.close()
+    sock.connect()
+    expect(listeners.filter((l) => l === '+online')).toHaveLength(2)
+  })
+
+  it('does not let the socket it closed take over the new one', () => {
+    const { sock } = fresh()
+    sock.connect()
+    const first = FakeWS.made[0]
+    sock.close()
+    sock.connect()
+    const second = FakeWS.made[1]
+    second.readyState = 1
+    second.onopen?.()
+    expect(sock.status).toBe('open')
+    // The first one's close arrives late.
+    first.onclose?.()
+    expect(sock.status).toBe('open')
   })
 })

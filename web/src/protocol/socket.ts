@@ -146,6 +146,9 @@ export class PanelSocket {
   private backoff = 500
   private pingTimer: number | null = null
   private closed = false
+  // The pending reconnect, so close() can cancel it. Without that a socket
+  // closed while a retry was scheduled reopened itself a moment later.
+  private retry: ReturnType<typeof setTimeout> | undefined
   /** When the last frame of any kind arrived. See DEAD_AFTER_MS. */
   private lastSeenAt = 0
   private statusListeners = new Set<(s: SocketStatus) => void>()
@@ -197,7 +200,19 @@ export class PanelSocket {
   }
 
   connect() {
-    if (this.ws || this.closed) return
+    if (this.ws) return
+    if (this.closed) {
+      // Opened again after close(). React's StrictMode does exactly that in
+      // development -- effect, cleanup, effect -- on the one socket App keeps
+      // in a useMemo, and `closed` was never reset: under `npm run dev` the
+      // panel never connected at all. Production runs the effect once, which
+      // is why nothing else saw it.
+      this.closed = false
+      window.addEventListener('offline', this.onOffline)
+      window.addEventListener('online', this.onOnline)
+    }
+    clearTimeout(this.retry)
+    this.retry = undefined
     this.setStatus('connecting')
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -206,6 +221,7 @@ export class PanelSocket {
     this.ws = ws
 
     ws.onopen = () => {
+      if (this.ws !== ws) return
       this.backoff = 500
       this.lastSeenAt = Date.now()
       this.setStatus('open')
@@ -220,6 +236,7 @@ export class PanelSocket {
     }
 
     ws.onmessage = (ev) => {
+      if (this.ws !== ws) return
       // Any frame, of any kind, is proof the connection is alive.
       this.lastSeenAt = Date.now()
       if (ev.data instanceof ArrayBuffer) {
@@ -236,13 +253,16 @@ export class PanelSocket {
     }
 
     ws.onclose = () => {
+      // A socket close() let go of can still report its close afterwards, and
+      // must not take the status or the streams of the one opened since.
+      if (this.ws !== ws) return
       this.ws = null
       this.stopPing()
       for (const stream of this.streams.values()) stream.ref = null
       this.byRef.clear()
       this.setStatus('closed')
       if (!this.closed) {
-        setTimeout(() => this.connect(), this.backoff)
+        this.retry = setTimeout(() => this.connect(), this.backoff)
         this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS)
       }
     }
@@ -634,6 +654,8 @@ export class PanelSocket {
 
   close() {
     this.closed = true
+    clearTimeout(this.retry)
+    this.retry = undefined
     window.removeEventListener('offline', this.onOffline)
     window.removeEventListener('online', this.onOnline)
     this.stopPing()

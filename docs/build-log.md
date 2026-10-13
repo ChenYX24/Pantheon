@@ -25943,3 +25943,15 @@ that destroys nothing -- naming a passkey -- keeps Enter-confirms-from-
 anywhere. render-check presses Enter on the focused Cancel when removing a
 project and reads that the project survived, then focuses the destructive
 button and confirms with Enter.
+
+**The dev server connects.** `PanelSocket.close()` set `closed` and nothing
+reset it. App keeps one socket in a `useMemo` and connects it in an effect,
+and StrictMode in development runs effect, cleanup, effect -- so the second
+`connect()` returned at once and under `npm run dev` the panel never
+connected. Found by the other half of this audit (`audit-2026-10/05`, F1).
+`connect()` after `close()` now opens again and listens for the network
+again; `close()` cancels a scheduled retry, which would otherwise have
+reopened a socket somebody closed; and each socket's handlers check that it
+is still the current one, so a closed socket's late `onclose` cannot mark
+its replacement closed. Three cases in `socket.test.ts`, each red with its
+guard removed.
