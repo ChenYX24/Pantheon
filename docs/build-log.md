@@ -25711,3 +25711,29 @@ one -- the first draft of this did exactly that, and
 `TestChatLeftoversAreSweptAndHandlesAreNot` now says so.
 `TestTheEventDrainSweepsChatLeftovers` starts the drain as Poll does and
 goes red with the call removed.
+
+**A tmux listing the panel could not read ended every session** (the audit
+had this as plausible; both halves reproduced). `pollOnce` takes an empty
+list from `List` as every session having died and marks each one vanished
+and done -- `session.gone`, a chat push and a webhook apiece -- and two
+things produced an empty list with no error while the sessions were fine:
+
+- tmux refusing the format, which it does by printing its complaint in place
+  of every line (`parseInfo` already said so). `List` skipped each
+  unparseable line and returned what was left, which was nothing. It now
+  returns the first parse error when tmux said something and none of it was
+  a session. One bad line among good ones is still skipped, and now said
+  once in the log with tmux's text (`TestAnUnreadableLineIsSkippedAndSaidOnce`),
+  since that session is missing from the sidebar until it reads again.
+  `TestAnUnreadableListingDoesNotEndEverySession` swaps in a `tmux` that
+  answers `list-sessions` that way, and checks that the failed tick returns
+  its error and leaves the row exactly as it was.
+- a socket that refuses us. `run` folded every "error connecting" into
+  `ErrNoServer`, and tmux says `error connecting to <socket> (Permission
+  denied)` for a server that is running and that this process may not open.
+  Only "No such file or directory" and "Connection refused" -- nothing
+  there, or a dead server's socket -- mean no server now; everything else is
+  an error with tmux's words in it, which also gives the "File name too
+  long" case its reason back. `Has` had the same fold and told restore a
+  live session was gone. `TestAServerThatRefusesUsIsNotAnEmptyOne` chmods
+  the socket to 0.

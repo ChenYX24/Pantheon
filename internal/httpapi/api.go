@@ -2284,6 +2284,9 @@ const trimInterval = 5 * time.Minute
 // database housekeeping on a timer, which is what this loop already is, and a
 // second lifecycle to start, stop and get wrong buys nothing.
 func (s *Server) Poll(ctx context.Context) {
+	if s.Tmux != nil && s.Log != nil {
+		s.Tmux.SetLogger(s.Log)
+	}
 	t := time.NewTicker(pollInterval)
 	defer t.Stop()
 	every := s.TrimEvery

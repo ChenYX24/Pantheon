@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/store"
 )
 
@@ -558,4 +559,50 @@ func truncate(s string) string {
 		return s[:200] + "…"
 	}
 	return s
+}
+
+// A listing that tmux answered but that the panel could not read is not a
+// listing in which every session has died. tmux refuses a whole format it
+// does not understand and prints its complaint in place of every line (see
+// parseInfo); List skipped each unparseable line and returned an empty list
+// with no error, and the poller marked every session vanished and done --
+// a session.gone event, a chat push and a webhook for each, on every poll
+// for as long as the panel and tmux disagreed. The sessions were fine.
+func TestAnUnreadableListingDoesNotEndEverySession(t *testing.T) {
+	ts, srv := newTestServer(t)
+	ctx := context.Background()
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"unreadable"}`)
+	sess := postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	if err := srv.pollOnce(ctx); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	before := getSession(t, srv, sess.ID)
+	if before.Exited {
+		t.Fatalf("exited before the listing went bad: %+v", before)
+	}
+
+	real := srv.Tmux.Bin
+	fake := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = list-sessions ]; then echo 'unknown format: #{q/x:session_name}'; exit 0; fi\ndone\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv.Tmux.Bin = fake
+	defer func() { srv.Tmux.Bin = real }()
+
+	// The tick that could not read tmux reports that and changes nothing:
+	// it returns before marking anything vanished, so there is no exit, no
+	// state change and so no event, push or webhook either.
+	if err := srv.pollOnce(ctx); err == nil {
+		t.Error("a listing with no readable line was a successful poll")
+	}
+	got := getSession(t, srv, sess.ID)
+	if got.Exited || got.State == session.StateDone {
+		t.Fatalf("one unreadable listing ended a running session: exited=%v status=%v state=%s",
+			got.Exited, got.ExitStatus, got.State)
+	}
+	if got.State != before.State || got.ExitStatus != before.ExitStatus {
+		t.Errorf("the failed tick changed the row: state %s -> %s, exit status %v -> %v",
+			before.State, got.State, before.ExitStatus, got.ExitStatus)
+	}
 }
