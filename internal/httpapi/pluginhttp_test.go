@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bufio"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -522,5 +523,30 @@ func TestALoopbackOriginMayNameAnyPort(t *testing.T) {
 		if got := call(origin); got != want {
 			t.Errorf("%s: %d, want %d", origin, got, want)
 		}
+	}
+}
+
+// A process's streamed answer does not hold a shutdown open either: it would
+// otherwise stay for the stream's whole idle timeout (fifteen minutes by
+// default), and Shutdown waits for it.
+func TestAStreamThroughTheDoorDoesNotHoldShutdownOpen(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installDoor(t, ts, srv, "owner")
+	r, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/plugin-http/door/sse", nil)
+	r.Header.Set("Accept", "text/event-stream")
+	res, err := ts.Client().Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if line, err := bufio.NewReader(res.Body).ReadString('\n'); err != nil || !strings.HasPrefix(line, "data: tick 0") {
+		t.Fatalf("first event: %q %v", line, err)
+	}
+	ts.Config.RegisterOnShutdown(srv.EndStreams)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := ts.Config.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown with a streamed answer open: %v after %v", err, time.Since(start))
 	}
 }

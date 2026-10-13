@@ -783,6 +783,9 @@ func (s *Server) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-s.streamsEnded():
+			// The panel is stopping; a frame reconnects to the next one.
+			return
 		case <-heartbeat.C:
 			_, _ = fmt.Fprint(w, ": keep\n\n")
 			flusher.Flush()

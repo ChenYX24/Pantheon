@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -569,5 +570,36 @@ func TestASettingsChangeIsPushedOnTheStream(t *testing.T) {
 	next("event: settings")
 	if data := next("data:"); !strings.Contains(data, `"quiet":true`) {
 		t.Fatalf("after the change: %s", data)
+	}
+}
+
+// A frame's open event stream does not hold a shutdown open. Shutdown waits
+// for every request that is not hijacked and does not cancel them, so an open
+// frame made it run its whole budget, and the steps after it in cmdServe --
+// stopping plugin processes, the last capture of every pane -- ran on a
+// context that had already expired. EndStreams is what serve registers.
+func TestAnOpenEventStreamDoesNotHoldShutdownOpen(t *testing.T) {
+	ts, srv := newTestServer(t)
+	g := installPane(t, ts, []string{"read:panel"})
+	client := anonymousClient(t)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+g.API+"events", nil)
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	reader := bufio.NewReader(res.Body)
+	if line, err := reader.ReadString('\n'); err != nil || !strings.HasPrefix(line, "event: view") {
+		t.Fatalf("first line: %q %v", line, err)
+	}
+	ts.Config.RegisterOnShutdown(srv.EndStreams)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := ts.Config.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown with an event stream open: %v after %v", err, time.Since(start))
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("Shutdown took %v with an event stream open", took)
 	}
 }

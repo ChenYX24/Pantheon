@@ -353,6 +353,15 @@ func (s *Server) handlePluginHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	idle := time.AfterFunc(deadline, cancel)
 	defer idle.Stop()
+	// A streamed answer can stay open for its whole idle timeout; a stopping
+	// panel ends it rather than waiting (streams.go).
+	go func() {
+		select {
+		case <-s.streamsEnded():
+			cancel()
+		case <-pctx.Done():
+		}
+	}()
 
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {

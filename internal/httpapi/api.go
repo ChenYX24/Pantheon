@@ -119,6 +119,8 @@ type Server struct {
 	// ntc is the per-session rate on say and notify: notices.go.
 	ntc        noticeState
 	serviceCtx context.Context
+	// streams is what EndStreams closes: streams.go.
+	streams streamStop
 
 	// Restart asks the process to stop and be brought back by whatever
 	// supervises it. Nil in tests and in the admin CLI, which is also what the

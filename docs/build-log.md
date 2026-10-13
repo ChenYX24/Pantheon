@@ -25737,3 +25737,18 @@ things produced an empty list with no error while the sessions were fine:
   long" case its reason back. `Has` had the same fold and told restore a
   live session was gone. `TestAServerThatRefusesUsIsNotAnEmptyOne` chmods
   the socket to 0.
+
+**An open plugin stream held a shutdown for its whole budget.**
+`http.Server.Shutdown` waits for every request that is not hijacked and does
+not cancel them; a frame's event stream and a process's streamed answer
+return only when their request context ends. One open frame made `Shutdown`
+run all ten seconds, and the steps after it in `cmdServe` shared that one
+context: `StopPluginProcesses` returned without waiting out the grace,
+leaving process groups behind, and `ArchiveAll`'s last capture of every pane
+-- the reason an orderly restart is lossless -- failed on a dead context.
+`Server.EndStreams` (`streams.go`) closes one channel both loops watch.
+`TestAnOpenEventStreamDoesNotHoldShutdownOpen` and
+`TestAStreamThroughTheDoorDoesNotHoldShutdownOpen` register it with the test
+server's `Shutdown`, as serve must, and go red with either watch removed.
+`cmd/vibepanel` registering it, and giving the three steps budgets of their
+own, is a separate change.
