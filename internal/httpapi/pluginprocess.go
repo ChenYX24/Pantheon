@@ -93,6 +93,9 @@ type pluginProcessState struct {
 	// reach the cap in milliseconds rather than minutes. Zero is the default.
 	restartMin, restartMax time.Duration
 	failureCap             int
+	// healthyRun is how long a run must last for its exit to start the
+	// backoff over; zero is pluginFailureWindow.
+	healthyRun time.Duration
 }
 
 func (st *pluginProcessState) backoffs() (time.Duration, time.Duration, int) {
@@ -311,6 +314,7 @@ func (s *Server) supervisePlugin(ctx context.Context, c pluginCred, pr *pluginPr
 		}
 		exitErr, started := s.runPluginProcOnce(ctx, c, pr, spec)
 		pr.stateMu.Lock()
+		ranFor := time.Since(pr.since)
 		pr.exitedAt = time.Now()
 		pr.pid = 0
 		if exitErr != nil {
@@ -329,6 +333,18 @@ func (s *Server) supervisePlugin(ctx context.Context, c pluginCred, pr *pluginPr
 			// Ended by the owner's restart: straight back, no backoff.
 			backoff = restartMin
 			continue
+		}
+		// A run that lasted longer than the failure window starts the backoff
+		// over. It only ever doubled, reset by nothing but a manual restart:
+		// a plugin that crashed a few times while being installed and then
+		// ran for weeks waited the full minute after its next isolated crash.
+		// The same window the cap forgets failures after.
+		healthy := s.ppr.healthyRun
+		if healthy <= 0 {
+			healthy = pluginFailureWindow
+		}
+		if started && ranFor >= healthy {
+			backoff = restartMin
 		}
 		clean := started && exitErr == nil
 		restart := spec.Restart

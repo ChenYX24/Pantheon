@@ -423,3 +423,19 @@ func TestAStopDuringStartStopsTheProcess(t *testing.T) {
 		return syscallKillProbe(pid) != nil
 	})
 }
+
+// After a run that lasted, the next crash restarts after the shortest wait,
+// not wherever an old string of crashes had pushed the backoff. It doubled
+// on every failure and only a manual restart reset it.
+func TestALongRunStartsTheBackoffOver(t *testing.T) {
+	ts, srv := newTestServer(t)
+	srv.ppr.restartMin, srv.ppr.restartMax, srv.ppr.failureCap = 20*time.Millisecond, 10*time.Second, 100
+	srv.ppr.healthyRun = 100 * time.Millisecond
+	installProcess(t, ts, srv, nil, "sleep 0.2; exit 1")
+	waitFor(t, "three restarts", 5000, func() bool { return processStatus(t, ts).Restarts >= 3 })
+	_, body := doJSON(t, ts, http.MethodGet, "/api/settings/plugins/proc/server/log", "")
+	if strings.Contains(string(body), "restarting in 40ms") || strings.Contains(string(body), "restarting in 80ms") ||
+		!strings.Contains(string(body), "restarting in 20ms") {
+		t.Errorf("every run lasted past healthyRun, so every restart should wait the minimum: %s", body)
+	}
+}

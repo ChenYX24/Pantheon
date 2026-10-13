@@ -25992,6 +25992,14 @@ second copy on the next reconcile. The start now asks before `Start` and
 again once the run is recorded. `TestAStopDuringStartStopsTheProcess` holds
 the start in the PATH lookup, stops, and lets it go: the process ran on
 before; now it is never started.
+
+**A plugin's restart backoff never started over.** It doubled on every
+failure up to a minute and was reset only by a manual restart, so a plugin
+that crashed a few times while being installed and then ran for weeks waited
+the full minute after its next isolated crash. A run that lasted longer than
+the failure window -- the same ten minutes after which the cap forgets a
+failure -- now resets it. `TestALongRunStartsTheBackoffOver` makes every run
+"long" and reads the restart lines: 20, 40, 80 ms before; 20 ms each now.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5
