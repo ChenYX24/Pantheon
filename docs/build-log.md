@@ -25894,6 +25894,16 @@ panel still says it is stale. `TestASteadyPollTakesNoWriteLock` polls while
 another connection holds the lock (4.7 s and an error before, immediate
 now); `TestOneFailedWriteDoesNotEndTheTick` makes the first session's write
 fail and expects the second attached anyway.
+
+**One address could lock everyone out of passkey sign-in.** `login/begin`
+is public and the ceremony store is capped at 4096 so a flood costs a flat
+amount -- which also made it a lockout: 4096 anonymous begins from one
+address, a second of curl, and nobody could sign in with a passkey for the
+three minutes they took to expire. Anonymous ceremonies now count per
+address, sixteen in flight each (429 past that); registration belongs to a
+signed-in account and is not counted; the global cap stays. Filling the
+store now takes 256 addresses. `TestOneAddressCannotTakeEveryPasskeyCeremony`
+floods from one address through a trusted proxy and signs in from another.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

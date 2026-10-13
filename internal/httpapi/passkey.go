@@ -55,6 +55,9 @@ func challengeStatus(err error) int {
 	if errors.Is(err, errTooManyChallenges) {
 		return http.StatusServiceUnavailable
 	}
+	if errors.Is(err, errTooManyFromAddress) {
+		return http.StatusTooManyRequests
+	}
 	return http.StatusInternalServerError
 }
 
@@ -75,13 +78,36 @@ type challengeEntry struct {
 	// userID is set for registration, where the ceremony belongs to an already
 	// signed-in account.
 	userID string
+	// addr is the address an anonymous ceremony came from; see
+	// maxChallengesPerAddress.
+	addr string
 }
 
 func newChallengeStore() *challengeStore {
 	return &challengeStore{items: map[string]*challengeEntry{}}
 }
 
+// maxChallengesPerAddress caps the anonymous ceremonies one address may
+// have in flight.
+//
+// The global cap keeps the cost of a flood flat, and it also made the flood a
+// lockout: 4096 requests to login/begin from one address, which is a second
+// of curl, and nobody could sign in with a passkey for the three minutes
+// they took to expire. A person signs in from one address with one or two
+// tabs; sixteen is room for a family behind one router and nothing like 4096.
+const maxChallengesPerAddress = 16
+
+// errTooManyFromAddress is the per-address refusal.
+var errTooManyFromAddress = errors.New(
+	"too many sign-ins in progress from this address; use your password, or try again in a moment")
+
 func (c *challengeStore) put(session webauthn.SessionData, userID string) (string, error) {
+	return c.putFrom(session, userID, "")
+}
+
+// putFrom is put for an anonymous ceremony, counted against addr. An empty
+// addr is not counted: registration belongs to a signed-in account.
+func (c *challengeStore) putFrom(session webauthn.SessionData, userID, addr string) (string, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -92,6 +118,17 @@ func (c *challengeStore) put(session webauthn.SessionData, userID string) (strin
 	defer c.mu.Unlock()
 	c.sweep()
 	// After the sweep, so that a burst that has aged out costs nothing.
+	if addr != "" {
+		n := 0
+		for _, e := range c.items {
+			if e.addr == addr {
+				n++
+			}
+		}
+		if n >= maxChallengesPerAddress {
+			return "", errTooManyFromAddress
+		}
+	}
 	if len(c.items) >= maxChallenges {
 		return "", errTooManyChallenges
 	}
@@ -99,6 +136,7 @@ func (c *challengeStore) put(session webauthn.SessionData, userID string) (strin
 		session: session,
 		expires: time.Now().Add(challengeTTL),
 		userID:  userID,
+		addr:    addr,
 	}
 	return key, nil
 }
@@ -357,7 +395,7 @@ func (s *Server) handlePasskeyLoginBegin(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	key, err := s.Challenges.put(*session, "")
+	key, err := s.Challenges.putFrom(*session, "", s.clientIP(r))
 	if err != nil {
 		writeErr(w, challengeStatus(err), err.Error())
 		return

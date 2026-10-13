@@ -1066,3 +1066,43 @@ func TestLogoutAndPasswordRefuseACrossPortOrigin(t *testing.T) {
 		t.Errorf("same-origin logout = %d, want 204", res.StatusCode)
 	}
 }
+
+// One address cannot fill the ceremony store and lock everyone else out of
+// passkey sign-in. The global cap made a flood cheap and also made it a
+// lockout: 4096 anonymous begins, a second of curl, and nobody signed in with
+// a passkey for three minutes.
+func TestOneAddressCannotTakeEveryPasskeyCeremony(t *testing.T) {
+	ts, srv := newTestServer(t)
+	nets, err := auth.ParseCIDRs([]string{"127.0.0.1/32", "::1/128"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Auth.TrustedProxies = nets
+	srv.Cfg.Domain = "panel.example"
+	srv.Cfg.TLSMode = "off"
+	client := anonymousClient(t)
+	begin := func(from string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/auth/passkey/login/begin", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", from)
+		req.Header.Set("X-Forwarded-Proto", "https")
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	refused := 0
+	for i := 0; i < maxChallengesPerAddress+10; i++ {
+		if begin("198.51.100.9") == http.StatusTooManyRequests {
+			refused++
+		}
+	}
+	if refused != 10 {
+		t.Errorf("%d of %d begins from one address refused, want the 10 past %d", refused, maxChallengesPerAddress+10, maxChallengesPerAddress)
+	}
+	if status := begin("192.0.2.44"); status != http.StatusOK {
+		t.Errorf("another address after the flood: %d", status)
+	}
+}
