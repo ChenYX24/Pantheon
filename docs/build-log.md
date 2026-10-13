@@ -26279,3 +26279,17 @@ keeps its own handler on the window, heard the same press afterwards, and by
 then the confirmation had already left the page, so its "is a question up?"
 guard found nothing. An Escape a dialog has answered now stops there.
 archive-check is the test: it goes red with the `stopPropagation` removed.
+
+**The panel's keys leave a text field alone.** Review caught the
+Ctrl+Shift+arrow listener taking keys that belong to the field the person is
+typing in: Ctrl+Shift+Left and Right select by word in every input and
+textarea, Up and Down by paragraph in some, and the window listener
+preventDefault-ed them and jumped to the sidebar from the notes, a settings
+field, the chat rules or the phone's compose box. `editsText` hands them back
+to any input, textarea or contenteditable -- except xterm's helper textarea,
+which is where a terminal's keyboard focus sits and is the place these keys
+exist for. The listener is also added once now, reading the current handler
+through a ref instead of being re-added on every render. `shortcuts.test.ts`
+covers a textarea, text and search inputs and contenteditable (the field's)
+against the xterm textarea, a button and a checkbox (the panel's); each half
+goes red with its guard removed.

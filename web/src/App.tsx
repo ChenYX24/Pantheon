@@ -1214,8 +1214,14 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   // The panel's keys (shortcuts.ts), on the window so they work from inside a
   // terminal too: xterm lets them past. In the order the sidebar draws, which
   // is the order the person sees, read off the rows rather than recomputed.
+  //
+  // The handler is refreshed on every render through a ref, and the listener
+  // is added once: it reads `selected`, `narrow` and `selectSession`, all of
+  // which change, and re-adding a window listener on every render to keep up
+  // with them was harmless and pointless.
+  const onShortcut = useRef<(e: KeyboardEvent) => void>(() => {})
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    onShortcut.current = (e: KeyboardEvent) => {
       const act = panelShortcut(e)
       if (!act) return
       e.preventDefault()
@@ -1235,9 +1241,12 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
       const next = neighbour(order, selected, act)
       if (next) selectSession(next)
     }
+  })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => onShortcut.current(e)
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  })
+  }, [])
 
   // A page the sharing page handed over on the address (routes.ts). Opened
   // once the first snapshot is here rather than on mount, because opening

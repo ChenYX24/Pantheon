@@ -50,3 +50,30 @@ describe('the next session', () => {
     expect(neighbour([], 'a', 'next')).toBeNull()
   })
 })
+
+describe('the panel keys in a text field', () => {
+  const el = (tagName: string, extra: Record<string, unknown> = {}, classes: string[] = []) => ({
+    tagName,
+    classList: { contains: (c: string) => classes.includes(c) },
+    ...extra,
+  })
+  const leave = (target: unknown) =>
+    panelShortcut({ ...key('ArrowLeft', { ctrlKey: true, shiftKey: true }), target })
+
+  it("are the field's own: select by word or paragraph", () => {
+    expect(leave(el('TEXTAREA'))).toBeNull()
+    expect(leave(el('INPUT', { type: 'text' }))).toBeNull()
+    expect(leave(el('INPUT', { type: 'search' }))).toBeNull()
+    expect(leave(el('DIV', { isContentEditable: true }))).toBeNull()
+  })
+
+  it("are the panel's in a terminal, whose focus sits in a textarea", () => {
+    expect(leave(el('TEXTAREA', {}, ['xterm-helper-textarea']))).toBe('leave')
+  })
+
+  it("are the panel's on a button or a checkbox", () => {
+    expect(leave(el('BUTTON'))).toBe('leave')
+    expect(leave(el('INPUT', { type: 'checkbox' }))).toBe('leave')
+    expect(leave(null)).toBe('leave')
+  })
+})

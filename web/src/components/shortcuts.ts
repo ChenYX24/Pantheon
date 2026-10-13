@@ -15,6 +15,36 @@
  */
 export type PanelShortcut = 'prev' | 'next' | 'leave'
 
+/** Enough of a DOM element to say whether it edits text. */
+export interface KeyTarget {
+  tagName?: string
+  type?: string
+  isContentEditable?: boolean
+  classList?: { contains(name: string): boolean }
+}
+
+const NOT_TEXT = new Set(['button', 'checkbox', 'radio', 'range', 'submit', 'reset', 'file', 'color', 'image'])
+
+/**
+ * Whether a key pressed here belongs to a text field.
+ *
+ * Ctrl+Shift+Left and Right select by word in every input and textarea, and
+ * Ctrl+Shift+Up and Down by paragraph in some; a window listener that took
+ * them moved the person to the sidebar in the middle of selecting a word in
+ * the notes, a settings field or the phone's compose box. Except xterm's own
+ * helper textarea: it is where a terminal's keyboard focus sits, and the
+ * panel's keys exist above all for there.
+ */
+function editsText(t: KeyTarget | null | undefined): boolean {
+  if (!t) return false
+  if (t.classList?.contains('xterm-helper-textarea')) return false
+  if (t.isContentEditable) return true
+  const tag = (t.tagName ?? '').toUpperCase()
+  if (tag === 'TEXTAREA') return true
+  if (tag === 'INPUT') return !NOT_TEXT.has((t.type ?? 'text').toLowerCase())
+  return false
+}
+
 export function panelShortcut(e: {
   key: string
   ctrlKey: boolean
@@ -22,8 +52,10 @@ export function panelShortcut(e: {
   altKey: boolean
   metaKey: boolean
   type?: string
+  target?: unknown
 }): PanelShortcut | null {
   if (e.type !== undefined && e.type !== 'keydown') return null
+  if (editsText(e.target as KeyTarget | null | undefined)) return null
   if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return null
   switch (e.key) {
     case 'ArrowUp':
