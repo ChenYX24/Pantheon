@@ -42,8 +42,18 @@ type jsCall struct {
 // runJS runs one hook of an already compiled program and returns its result
 // as plain JSON values, or errNoHook when the program does not define it.
 func runJS(ctx context.Context, prog *goja.Program, c jsCall) (any, error) {
+	release, err := jsAcquire(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	vm := goja.New()
 	vm.SetMaxCallStackSize(256)
+	if _, err := vm.RunProgram(jsPrelude); err != nil {
+		return nil, fmt.Errorf("server.js prelude: %w", err)
+	}
+	unwatch := jsHeapWatch(vm, c.what)
+	defer unwatch()
 	timer := time.AfterFunc(c.budget, func() {
 		vm.Interrupt(fmt.Sprintf("%s ran past its %v budget", c.what, c.budget))
 	})

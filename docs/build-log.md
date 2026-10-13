@@ -25781,3 +25781,24 @@ reaped -- SIGKILL at once on a stop, the usual grace after an exit of its
 own. `TestALeaderThatExitsIsSeenToExitThoughItsChildLives` and
 `TestStoppingEndsAChildThatIgnoresTerm` both failed before; removing the
 group kill fails both again.
+
+**A `server.js` could take the panel's memory with it.** The budget is an
+interrupt, and goja checks interrupts between instructions, not inside a
+native call. Measured here: `new Array(2**28).fill(0)` was 8.3 GiB and
+thirty-six seconds with the budget long gone; `[...Array(2**26)]` 2 GiB and
+twenty-two; `'x'.padStart(2**28)` 256 MiB in one call. goja has no
+allocation limit to set, so three layers (`jsguard.go`), none enough alone:
+a prelude wraps the natives that walk or allocate by a number the script
+chose -- `repeat`, `padStart`/`padEnd`, the array methods that iterate a
+length including the iterators spread and for-of use, `Array.from`,
+`Function.prototype.apply` -- and refuses past four million; a panel-wide
+cap of eight runtimes at once, so whatever one call can hold is multiplied
+by a small number; and a heap watch that interrupts a call once the heap has
+grown 256 MiB since it began, which is what stops `s += s` (interruptible,
+but fast enough to reach hundreds of megabytes inside a budget).
+`Array(n)` itself is left alone: it allocates nothing, and wrapping the
+constructor in a Proxy broke `instanceof` in goja. What is left is a native
+that walks a length nothing above checks; the watch bounds those only as far
+as the heap shows between instructions. `TestAServerJSCannotAllocateItsWayPastTheBudget`
+runs fifteen of these against a two-second budget and wants each stopped
+inside one; `TestTheGuardsLeaveOrdinaryCodeAlone` is the other side.
