@@ -175,7 +175,7 @@ export function Settings({
             // wider. Not a select, and never a fold: the point of the rail is
             // that all the names are readable at once, which is what makes a
             // wrong guess cost one press instead of a hunt.
-            className="flex shrink-0 items-center gap-1 overflow-x-auto sm:w-40 sm:flex-col sm:items-stretch sm:overflow-visible"
+            className="vp-scroll-x flex shrink-0 items-center gap-1 sm:w-40 sm:flex-col sm:items-stretch sm:overflow-visible"
           >
             <div
               role="tablist"

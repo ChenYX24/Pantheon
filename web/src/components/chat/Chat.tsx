@@ -150,8 +150,8 @@ export function Chat() {
 
   return (
     <div data-testid="chat" className="@container">
-      <div className="-mx-4 mb-5 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-        <div role="tablist" aria-label={t('grp.chat')} className="vp-segmented w-max flex-nowrap">
+      <div className="mb-5">
+        <div role="tablist" aria-label={t('grp.chat')} className="vp-segmented w-fit max-w-full">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}

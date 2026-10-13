@@ -25,6 +25,7 @@ import { assertFreshBuild } from './lib/fresh.mjs'
 import { sweepStaleSockets } from './lib/stale.mjs'
 import { findUnreachable } from './lib/overflow.mjs'
 import { findSmallTargets } from './lib/tap.mjs'
+import { findClippedTabs } from './lib/tabs.mjs'
 import { findUnnamedControls } from './lib/names.mjs'
 import { findFadedControls } from './lib/faded.mjs'
 
@@ -436,6 +437,44 @@ try {
         await ctx.close()
       }
     }
+  }
+
+  // ── tabs: never narrower than their label, never silently clipped ──────
+  // English at the wide end, where "Alerts" ran into the next tab's icon, and
+  // Chinese at 320px, where the strip showed three of five with nothing to say
+  // there were more. The other two corners are the same code with the other
+  // failure, so they are cheap and run too.
+  for (const [lang, w] of [['en', 1440], ['zh', 320], ['en', 320], ['zh', 1440]]) {
+    const where = `tabs/${lang}/${w}`
+    const ctx = await browser.newContext({ viewport: { width: w, height: 900 } })
+    const tab = await ctx.newPage()
+    await tab.goto(`${BASE}/`, { waitUntil: 'commit' })
+    await tab.evaluate((l) => localStorage.setItem('vibepanel.lang', l), lang)
+    await ctx.request.post(`${BASE}/api/auth/login`, { data: { username: USERNAME, password: PASSWORD }, headers: { Origin: BASE } })
+    await tab.goto(`${BASE}/chat`, { waitUntil: 'networkidle' })
+    if (!(await until(() => tab.getByTestId('chat-tab-alerts').count().then((n) => n > 0), 6000))) {
+      note('FAIL', where, 'the chat tabs did not render')
+      await ctx.close()
+      continue
+    }
+    await sleep(400)
+    const chat = await findClippedTabs(tab)
+    if (chat.examined < Object.keys(TABS).length) note('FAIL', where, `measured ${chat.examined} chat tabs`)
+    else if (chat.out.length) note('FAIL', where, `chat tabs: ${chat.out.slice(0, 4).join(' | ')}`)
+    else pass(where, 'chat tabs fit their labels and are reachable')
+
+    await tab.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+    await tab.locator('button[title="设置"], button[title="Settings"]').first().click()
+    if (await until(() => tab.getByTestId('settings-rail').count().then((n) => n > 0), 4000)) {
+      await sleep(500)
+      const rail = await findClippedTabs(tab)
+      if (rail.examined < 5) note('FAIL', where, `measured ${rail.examined} settings tabs`)
+      else if (rail.out.length) note('FAIL', where, `settings tabs: ${rail.out.slice(0, 4).join(' | ')}`)
+      else pass(where, 'settings tabs fit their labels and are reachable')
+    } else {
+      note('FAIL', where, 'the settings rail did not render')
+    }
+    await ctx.close()
   }
 
   if (errors.length) note('FAIL', 'console', errors.slice(0, 5).join(' | '))

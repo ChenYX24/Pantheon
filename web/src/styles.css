@@ -1027,13 +1027,60 @@ body {
  * aria-selected, and its name is on `title` and `aria-label`; under
  * prefers-reduced-motion the marker simply arrives. */
 .vp-segmented {
+  --vp-scroll-bg: var(--vp-surface-2);
   position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
   border-radius: var(--vp-radius);
-  background: var(--vp-surface-2);
   padding: 0.125rem;
+}
+
+/* A row that scrolls sideways and says so.
+ *
+ * Tabs used to share the track with `flex: 1 1 0; min-width: 0`, so a strip with
+ * more in it than its row simply made each tab narrower than its own label: at
+ * 1440px "Alerts" ran into the next tab's icon, and at 320px the strip clipped
+ * with nothing to say there was more. A tab is now never narrower than what is
+ * in it, and the strip scrolls instead.
+ *
+ * The edge shadows are the affordance. Scrollbars are hidden or overlay on the
+ * devices that need this, so without them a clipped tab is just a missing one.
+ * The `local` layers are the row's own colour and travel with the content, so
+ * they cover a `scroll` shadow exactly when that edge has nothing past it. */
+.vp-segmented {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.vp-segmented::-webkit-scrollbar {
+  display: none;
+}
+
+/* In the components layer so a utility on the element can turn the scrolling
+   back off where the row becomes a column (`@3xl:overflow-visible`): an
+   unlayered rule would beat it and clip the column. */
+@layer components {
+  .vp-scroll-x {
+    --vp-scroll-bg: var(--vp-surface);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .vp-scroll-x::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.vp-scroll-x,
+.vp-segmented {
+  background:
+    linear-gradient(to right, var(--vp-scroll-bg) 30%, transparent) left center / 1.5rem 100% no-repeat local,
+    linear-gradient(to left, var(--vp-scroll-bg) 30%, transparent) right center / 1.5rem 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, var(--vp-hairline-strong), transparent) left center / 0.5rem 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--vp-hairline-strong), transparent) right center / 0.5rem 100% no-repeat scroll,
+    var(--vp-scroll-bg);
 }
 
 /* A tab is as wide as what is in it.
@@ -1052,9 +1099,9 @@ body {
 .vp-segmented > .vp-tab {
   position: relative;
   z-index: 1;
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 1 0 auto;
   justify-content: center;
+  white-space: nowrap;
 }
 
 /* Under a finger the strip spans its row and the pills are shorter, which is
