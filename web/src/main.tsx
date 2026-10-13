@@ -42,7 +42,9 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 // the sign-in screen.
 const route = routeFor(location.pathname)
 
-createRoot(root).render(
+// index.html found this browser too old and has said so in #root; starting
+// the app here would draw over that with a layout the browser cannot lay out.
+if (document.documentElement.dataset.vpUnsupported !== '1') createRoot(root).render(
   <StrictMode>
     {route.kind === 'sharing' ? (
       <ErrorBoundary label="The sharing page">

@@ -26373,3 +26373,20 @@ field (every field is 16px under a coarse pointer, and render-check measures
 it) and a double-tap on a key read as zoom (`touch-action: manipulation` on
 the root, which keeps pinch). `useViewportFit` already ignores a pinch-zoomed
 visual viewport, so zooming does not shrink the app. `zoom.test.ts`.
+
+**A browser that cannot run the panel is told so.** The boot dot spun
+forever: in a browser older than Safari 16.4, Chrome 111 or Firefox 128 the
+stylesheet's container queries and `color-mix` are dropped and the layout
+falls apart rather than degrading, and without ES modules nothing runs; a
+bundle that failed to load or parse looked exactly the same. A classic
+script in `index.html`, which every browser runs, checks container queries,
+`color-mix` and module support and, if any is missing, says in place of the
+dot that the browser is too old and which versions work, in the browser's
+language; `main.tsx` then does not start the app over it. With support
+present, a script error before the app has drawn anything replaces the dot
+with "the panel did not start" and a reload button; once the app is on
+screen it does nothing. A `<noscript>` line for the rest. render-check opens
+the panel once with container queries denied and once with the bundle
+replaced by something that does not parse, and reads both messages; with
+the script removed both cases go silent and the app draws over an engine
+that cannot lay it out.

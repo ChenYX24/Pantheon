@@ -60,6 +60,20 @@
       @media (prefers-reduced-motion: reduce) {
         .vp-boot-dot { animation: none; }
       }
+      /* What replaces the dot when the panel cannot start. Plain properties
+         only: this is what an old browser draws. */
+      .vp-boot-note {
+        flex-direction: column;
+        padding: 0 24px;
+        text-align: center;
+        font: 16px/1.5 system-ui, -apple-system, sans-serif;
+        color: #1d1d1f;
+      }
+      .vp-boot-note p { max-width: 28em; margin: 0 0 12px; }
+      .vp-boot-note button { font: inherit; padding: 6px 16px; }
+      @media (prefers-color-scheme: dark) {
+        .vp-boot-note { color: #f5f5f7; }
+      }
     </style>
     <script>
       // Applied before first paint. Reading the stored theme in React instead
@@ -75,7 +89,7 @@
         if (t === 'light' || t === 'dark' || (!safe && /^ext-[a-z0-9-]+$/.test(t))) document.documentElement.dataset.theme = t
       } catch (e) { /* private mode: fall through to the system preference */ }
     </script>
-    <script type="module" crossorigin src="/assets/index-D-H0Cddx.js"></script>
+    <script type="module" crossorigin src="/assets/index-D1RUGIek.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-DUOXJnKb.css">
   </head>
   <body>
@@ -103,5 +117,75 @@
         <div class="vp-boot-dot"></div>
       </div>
     </div>
+    <noscript>
+      <div class="vp-boot vp-boot-note">
+        <p>vibepanel needs JavaScript. · vibepanel 需要 JavaScript。</p>
+      </div>
+    </noscript>
+    <!-- A browser that cannot run the panel used to keep the dot spinning
+         forever: nothing said why, and nothing happened. Two cases.
+         Too old: below Safari 16.4, Chrome 111 or Firefox 128 the stylesheet's
+         container queries and color-mix are dropped and the layout falls
+         apart rather than degrading, and below ES modules nothing runs at all.
+         Checked here, in a classic script every browser runs; the bundle is
+         told not to start (main.tsx reads data-vp-unsupported).
+         Failed: a script error before the app has drawn anything -- a bundle
+         the engine cannot parse, or one that did not load -- leaves the dot
+         where it is. Once the app is on screen this does nothing; the app's
+         own error boundaries own that. -->
+    <script>
+      (function () {
+        var zh = /^zh/i.test(navigator.language || '')
+        function booting() {
+          var root = document.getElementById('root')
+          return root && root.querySelector('.vp-boot') ? root : null
+        }
+        function say(text, reload) {
+          var root = booting()
+          if (!root) return
+          var box = document.createElement('div')
+          box.className = 'vp-boot vp-boot-note'
+          box.setAttribute('role', 'alert')
+          box.setAttribute('data-testid', reload ? 'boot-failed' : 'boot-unsupported')
+          var p = document.createElement('p')
+          p.textContent = text
+          box.appendChild(p)
+          if (reload) {
+            var b = document.createElement('button')
+            b.type = 'button'
+            b.textContent = zh ? '重新加载' : 'Reload'
+            b.onclick = function () { location.reload() }
+            box.appendChild(b)
+          }
+          root.innerHTML = ''
+          root.appendChild(box)
+        }
+        var css = window.CSS && CSS.supports
+        var ok = !!css &&
+          CSS.supports('container-type: inline-size') &&
+          CSS.supports('color', 'color-mix(in srgb, red, blue)') &&
+          'noModule' in document.createElement('script')
+        if (!ok) {
+          document.documentElement.setAttribute('data-vp-unsupported', '1')
+          var show = function () {
+            say(zh
+              ? '这个浏览器版本太旧，打不开面板。需要 Safari 16.4、Chrome 111、Firefox 128 或更新的版本。'
+              : 'This browser is too old for the panel. It needs Safari 16.4, Chrome 111, Firefox 128 or later.', false)
+          }
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', show)
+          else show()
+          return
+        }
+        window.addEventListener('error', function (e) {
+          // A script that threw or did not parse, or the bundle's own tag
+          // failing to load. Not a stylesheet or an image: those also land
+          // here in the capture phase, and none of them stops the panel.
+          var t = e.target
+          var script = t && t.tagName === 'SCRIPT'
+          if (!(e instanceof ErrorEvent) && !script) return
+          say(zh ? '面板没能启动。' : 'The panel did not start.', true)
+        }, true)
+      })()
+    </script>
   </body>
 </html>

@@ -3830,6 +3830,38 @@ browser = await chromium.launch({ headless: true })
   }
 
   // ── what a first-time visitor actually sees ──────────────────────────────
+  // ── a browser that cannot run the panel is told so ──────────────────────
+  // The boot dot used to spin forever: too old an engine, or a bundle it
+  // could not parse, and nothing said why. index.html checks in a classic
+  // script and says it in place of the dot.
+  {
+    const oldCtx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1024, height: 768 } })
+    await oldCtx.addInitScript(() => {
+      const real = CSS.supports.bind(CSS)
+      CSS.supports = (...a) => (String(a[0]).includes('container-type') ? false : real(...a))
+    })
+    const old = await oldCtx.newPage()
+    await old.goto(BASE, { waitUntil: 'load' })
+    await sleep(2500)
+    const said = await old.locator('[data-testid="boot-unsupported"]').isVisible().catch(() => false)
+    const drew = await old.locator('[data-testid="auth-username"], [data-testid="sidebar"]').count()
+    if (!said) note('FAIL', 'boot', 'a browser without container queries is not told it is too old')
+    if (drew > 0) note('FAIL', 'boot', 'the app started over the too-old message in a browser that cannot lay it out')
+    await oldCtx.close()
+
+    const brokenCtx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1024, height: 768 } })
+    await brokenCtx.route(/\/assets\/index-[^/]*\.js$/, (r) =>
+      r.fulfill({ status: 200, contentType: 'text/javascript', body: 'this is not javascript (' }))
+    const broken = await brokenCtx.newPage()
+    await broken.goto(BASE, { waitUntil: 'load' })
+    await sleep(2500)
+    if (!(await broken.locator('[data-testid="boot-failed"] button').isVisible().catch(() => false))) {
+      note('FAIL', 'boot', 'a bundle that does not parse leaves the loading dot spinning with nothing said')
+    }
+    await brokenCtx.close()
+    if (said && drew === 0) note('PASS', 'boot', 'too old and failed to start are both said, in place of the dot')
+  }
+
   // Everything above runs in a context that has been clicking panels open for
   // several minutes. A new browser has no localStorage, and that is the state
   // every real user starts in — the one state the harness had never measured.
