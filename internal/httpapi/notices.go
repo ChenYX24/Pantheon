@@ -33,8 +33,9 @@ const (
 )
 
 type noticeState struct {
-	mu   sync.Mutex
-	when map[string][]time.Time
+	mu    sync.Mutex
+	when  map[string][]time.Time
+	bytes map[string][]byteStamp
 }
 
 // sessionNoticeEvent is what the page receives (ws "notice").
@@ -46,6 +47,7 @@ type sessionNoticeEvent struct {
 	Level     string   `json:"level"`
 	Text      string   `json:"text"`
 	Choices   []string `json:"choices"`
+	URL       string   `json:"url"`
 }
 
 func (s *Server) registerSessionNoticeRoutes(r chi.Router) {
@@ -115,6 +117,14 @@ func (s *Server) sessionNotify(ctx context.Context, row store.Session, n chat.No
 }
 
 func (s *Server) broadcastNotice(ctx context.Context, row store.Session, level, text string, choices []string) {
+	s.broadcastNoticeWith(ctx, row, level, text, choices, "")
+}
+
+func (s *Server) broadcastNoticeURL(ctx context.Context, row store.Session, level, text, url string) {
+	s.broadcastNoticeWith(ctx, row, level, text, nil, url)
+}
+
+func (s *Server) broadcastNoticeWith(ctx context.Context, row store.Session, level, text string, choices []string, url string) {
 	if s.Hub == nil {
 		return
 	}
@@ -125,7 +135,7 @@ func (s *Server) broadcastNotice(ctx context.Context, row store.Session, level, 
 	if choices == nil {
 		choices = []string{}
 	}
-	payload, err := json.Marshal(sessionNoticeEvent{T: ws.MsgNotice, SessionID: row.ID, Title: row.Title, Project: project, Level: level, Text: text, Choices: choices})
+	payload, err := json.Marshal(sessionNoticeEvent{T: ws.MsgNotice, SessionID: row.ID, Title: row.Title, Project: project, Level: level, Text: text, Choices: choices, URL: url})
 	if err != nil {
 		return
 	}

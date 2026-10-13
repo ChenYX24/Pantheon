@@ -69,6 +69,9 @@ var openRoutes = map[string]string{
 	// derived token its environment holds, saying what it is up to. The
 	// middleware requires that token for exactly the session named.
 	"/api/me/v1":                    "a session's own door; the middleware requires the session's derived token",
+	"/api/me/v1/say":                "the same door: a line for the phone",
+	"/api/me/v1/notify":             "the same door: a call for attention",
+	"/api/me/v1/send":               "the same door: a file",
 	"/api/plugin-http/{pluginID}":   "a plugin process's door; the handler requires the owner, a plugin token or the HMAC secret",
 	"/api/plugin-http/{pluginID}/*": "the same, under the mount",
 	// A directory preview, and the reason is measured rather than chosen.

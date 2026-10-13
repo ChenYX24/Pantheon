@@ -382,6 +382,25 @@ Rate: 60 says and 6 notices a minute per session; 429 with `Retry-After`
 after. Audited `session.said` and `session.notified` with byte counts, not
 words.
 
+### `POST /api/me/v1/send`
+### `POST /api/sessions/{id}/attach`
+### `GET /api/sessions/{id}/attachments`
+### `GET /api/sessions/{id}/attachments/{name}`
+
+A file a session sends, or the owner attaches to it: multipart with `file`
+and an optional `caption` (200 characters), 16 MiB a file, a hundred an
+hour per session, the newest twenty kept under
+`<data>/sessions/{id}/attachments/`. Answers `{name, bytes, size, url,
+at, contacts}`: the name as kept (letters, digits, dots, dashes; a second
+of the same name is numbered, never a replacement), where the signed-in
+owner downloads it, and how many paired contacts got it -- an image as a
+photo, anything else as a card with the link. Every open page gets a
+`notice` with `level: "file"` and the `url`. The download route is under
+the session cookie: images, audio, video and text inline with `nosniff`,
+everything else -- HTML and SVG included -- as a download under
+`Content-Security-Policy: sandbox`. Audited `session.sent` with the name
+and the byte count.
+
 ### `GET /api/sessions/{id}/screen`
 
 `{text}`: the session's pane as text, what `vibepanel session screen`

@@ -38,3 +38,25 @@ func TestANoticeReachesThePhoneWhateverTheState(t *testing.T) {
 		t.Errorf("level: %q", c.Level)
 	}
 }
+
+// An image reaches the phone as a photo; another file as a card with the
+// link the owner opens signed in.
+func TestAnAttachmentReachesThePhone(t *testing.T) {
+	r := newRig(t, Capabilities{Proactive: true, Images: true})
+	r.peer("me", store.PeerPaired, store.ModeNormal)
+	row := r.session("s1", "agent", "claude", session.StateWorking)
+	before := r.ad.images
+	if n := r.b.SendAttachment(r.ctx, row, "chart.png", []byte("png bytes"), "image/png", "coverage", "https://panel.test/api/sessions/s1/attachments/chart.png"); n != 1 {
+		t.Fatalf("image sent to %d", n)
+	}
+	if r.ad.images != before+1 {
+		t.Errorf("the image was not sent as a photo: %d → %d", before, r.ad.images)
+	}
+	if n := r.b.SendAttachment(r.ctx, row, "report.pdf", []byte("%PDF"), "application/pdf", "", "https://panel.test/api/sessions/s1/attachments/report.pdf"); n != 1 {
+		t.Fatalf("file sent to %d", n)
+	}
+	last := r.ad.sent[len(r.ad.sent)-1]
+	if last.Card == nil || !strings.Contains(last.Card.Body, "report.pdf") || !strings.Contains(last.Card.Body, "attachments/report.pdf") {
+		t.Errorf("the file card: %+v", last.Card)
+	}
+}

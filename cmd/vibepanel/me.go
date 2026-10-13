@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,12 +32,13 @@ const meUsage = `usage: vibepanel me [--json]
        vibepanel me info clear [summary|progress|labels]
        vibepanel me say <text>
        vibepanel me notify <text> [--level info|warn|ask] [--choices a,b]
-       vibepanel me guide
+       vibepanel me send <file> [--caption "..."]
+       vibepanel me guide [--write [dir]]
 
 Run inside a session the panel started. The agent says what it is up to:
 state (mark waiting before asking a person), a title, a one-line summary,
 progress 0-100, up to five labels (comma-separated). "guide" prints when
-to use which.`
+to use which; "guide --write" puts it in a project's AGENTS.md, once.`
 
 type meClient struct {
 	base, session, token string
@@ -54,6 +56,10 @@ func openMe() (*meClient, error) {
 	}
 	return &meClient{base: base, session: sid, token: token,
 		http: &http.Client{Timeout: 20 * time.Second, Transport: mcpTransport(u.Hostname())}}, nil
+}
+
+func (c *meClient) headers() map[string]string {
+	return map[string]string{"Authorization": "Bearer " + c.token, "X-Vibepanel-Session": c.session}
 }
 
 func (c *meClient) do(ctx context.Context, method, path string, body any, out any) error {
@@ -110,8 +116,7 @@ func cmdMe(args []string) error {
 		return nil
 	}
 	if len(args) > 0 && args[0] == "guide" {
-		fmt.Print(meGuide)
-		return nil
+		return meGuideCmd(args[1:])
 	}
 	ctx := context.Background()
 	c, err := openMe()
@@ -132,6 +137,22 @@ func cmdMe(args []string) error {
 	switch args[0] {
 	case "say", "notify":
 		return meSpeak(ctx, c, args[0], args[1:])
+	case "send":
+		fs := flag.NewFlagSet("me send", flag.ContinueOnError)
+		caption := fs.String("caption", "", "a line with the file")
+		pos, err := parseInterspersed(fs, args[1:])
+		if err != nil {
+			return err
+		}
+		if len(pos) != 1 {
+			return errors.New("usage: vibepanel me send <file> [--caption \"...\"]")
+		}
+		var out attachResult
+		if err := uploadFile(ctx, c.http, c.base+"/api/me/v1/send", c.headers(), pos[0], *caption, &out); err != nil {
+			return err
+		}
+		fmt.Printf("sent %s (%s): every open page, %d contact(s); the owner downloads it at %s\n", out.Name, out.Size, out.Contacts, out.URL)
+		return nil
 	}
 	patch := map[string]any{}
 	switch args[0] {
@@ -258,6 +279,9 @@ needs nothing: the environment already holds your session's credential.
   choices as buttons, and the pressed one is typed into this session. Mark
   ` + "`waiting`" + ` first, then read the answer from stdin as you would any
   reply. Six a minute at most; past that, say it in the summary.
+- ` + "`vibepanel me send ./chart.png --caption \"...\"`" + ` for a result that is
+  a picture or a file: an image reaches the phone as a photo, anything
+  else as a link the owner opens signed in. 16 MB a file.
 - Do not loop on these. A state change is an event on somebody's phone;
   say a thing once.
 `
@@ -306,6 +330,69 @@ func meSpeak(ctx context.Context, c *meClient, what string, args []string) error
 	fmt.Printf("notified: every open page, and %d contact(s) on the phone\n", out.Contacts)
 	if len(list) > 0 {
 		fmt.Println("the answer arrives here as typed input; read it from where you read everything")
+	}
+	return nil
+}
+
+// guideMarker is the heading the written guide starts with, and what a
+// second --write looks for before writing again.
+const guideMarker = "# Talking to vibepanel from inside a session"
+
+// meGuideCmd prints the guide, or writes it into a project's AGENTS.md
+// (the current directory's by default) under its own heading, once:
+// a file that already carries the heading is left alone, and a missing
+// CLAUDE.md gets the one line that points at AGENTS.md.
+func meGuideCmd(args []string) error {
+	fs := flag.NewFlagSet("me guide", flag.ContinueOnError)
+	write := fs.Bool("write", false, "append the guide to AGENTS.md in the directory (default: the current one)")
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
+	if !*write {
+		fmt.Print(meGuide)
+		return nil
+	}
+	dir := "."
+	if len(pos) == 1 {
+		dir = pos[0]
+	} else if len(pos) > 1 {
+		return errors.New("usage: vibepanel me guide --write [dir]")
+	}
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	agents := filepath.Join(dir, "AGENTS.md")
+	existing, rerr := os.ReadFile(agents) //nolint:gosec // the person named the directory
+	if rerr == nil && strings.Contains(string(existing), guideMarker) {
+		fmt.Printf("%s already has the guide\n", agents)
+		return nil
+	}
+	f, err := os.OpenFile(agents, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644) //nolint:gosec // a project file
+	if err != nil {
+		return err
+	}
+	sep := ""
+	if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n\n") {
+		sep = "\n"
+		if !strings.HasSuffix(string(existing), "\n") {
+			sep = "\n\n"
+		}
+	}
+	if _, err := f.WriteString(sep + meGuide); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	fmt.Printf("wrote the guide into %s\n", agents)
+	claude := filepath.Join(dir, "CLAUDE.md")
+	if _, err := os.Stat(claude); errors.Is(err, os.ErrNotExist) {
+		if err := os.WriteFile(claude, []byte("@AGENTS.md\n"), 0o644); err == nil { //nolint:gosec // a project file
+			fmt.Printf("wrote %s pointing at it\n", claude)
+		}
 	}
 	return nil
 }

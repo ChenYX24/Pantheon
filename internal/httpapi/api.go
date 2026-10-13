@@ -498,6 +498,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/sessions/{id}/restart", s.handleRestartSession)
 			s.registerSessionIORoutes(r)
 			s.registerSessionNoticeRoutes(r)
+			s.registerAttachmentRoutes(r)
 			// Plural and id-less on purpose. Restoring after a reboot is a
 			// batch by nature — the whole machine went down, so the whole list
 			// is gone — and a per-id route would have the browser fire two

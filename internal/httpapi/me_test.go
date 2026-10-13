@@ -1,9 +1,14 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -148,7 +153,7 @@ func TestASessionTokenReachesOnlyTheseRoutes(t *testing.T) {
 		return nil
 	})
 	sort.Strings(got)
-	want := []string{"GET /api/me/v1", "PATCH /api/me/v1", "POST /api/me/v1/notify", "POST /api/me/v1/say"}
+	want := []string{"GET /api/me/v1", "PATCH /api/me/v1", "POST /api/me/v1/notify", "POST /api/me/v1/say", "POST /api/me/v1/send"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("a session's door is %v, want %v: a route added here is one every agent in every session can reach", got, want)
 	}
@@ -201,5 +206,76 @@ func TestASessionSaysAndNotifies(t *testing.T) {
 	// seventh is the 429 above and leaves no row.
 	if said != 2 || notified != noticeRateNotify {
 		t.Errorf("audit: said %d notified %d", said, notified)
+	}
+}
+
+// A file from inside: kept under the session's directory, served inline
+// when it is an image and as a download otherwise, HTML included.
+func TestASessionSendsAFile(t *testing.T) {
+	ts, srv := newTestServer(t)
+	sess, token := meSession(t, ts, srv)
+	png := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0}, 64)...)
+	upload := func(name string, data []byte, caption string) (int, []byte) {
+		t.Helper()
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		_ = mw.WriteField("caption", caption)
+		part, _ := mw.CreateFormFile("file", name)
+		_, _ = part.Write(data)
+		_ = mw.Close()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/me/v1/send", &body)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Vibepanel-Session", sess.ID)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		res, err := anonymousClient(t).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		raw, _ := io.ReadAll(res.Body)
+		return res.StatusCode, raw
+	}
+	status, body := upload("../../chart one.png", png, "coverage")
+	if status != http.StatusCreated || !strings.Contains(string(body), `"name":"chart_one.png"`) || !strings.Contains(string(body), "/api/sessions/"+sess.ID+"/attachments/chart_one.png") {
+		t.Fatalf("send: %d %s", status, body)
+	}
+	if _, err := os.Stat(filepath.Join(srv.attachmentsDir(sess.ID), "chart_one.png")); err != nil {
+		t.Fatal(err)
+	}
+	// The same name again is a second file, not a replacement.
+	if status, body := upload("chart one.png", png, ""); status != http.StatusCreated || !strings.Contains(string(body), `"chart_one-2.png"`) {
+		t.Errorf("second: %d %s", status, body)
+	}
+	if status, _ := upload("page.html", []byte("<script>alert(1)</script>"), ""); status != http.StatusCreated {
+		t.Fatal("html upload")
+	}
+	// Served to the owner: the image inline, the page as a download.
+	res, _ := ts.Client().Get(ts.URL + "/api/sessions/" + sess.ID + "/attachments/chart_one.png")
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || !strings.HasPrefix(res.Header.Get("Content-Type"), "image/png") || res.Header.Get("Content-Disposition") != "" {
+		t.Errorf("image: %d %v", res.StatusCode, res.Header)
+	}
+	res, _ = ts.Client().Get(ts.URL + "/api/sessions/" + sess.ID + "/attachments/page.html")
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || !strings.HasPrefix(res.Header.Get("Content-Disposition"), "attachment") || !contains(res.Header.Values("Content-Security-Policy"), "sandbox") {
+		t.Errorf("html: %d %v", res.StatusCode, res.Header)
+	}
+	// Not for a stranger, not for the session's own token.
+	if r, _ := anonGET(t, ts, "/api/sessions/"+sess.ID+"/attachments/chart_one.png"); r.StatusCode != http.StatusUnauthorized {
+		t.Errorf("anonymous: %d", r.StatusCode)
+	}
+	if status, _ := meCall(t, ts, http.MethodGet, "/api/sessions/"+sess.ID+"/attachments/chart_one.png", sess.ID, token, ""); status != http.StatusUnauthorized {
+		t.Errorf("the session token reading its own attachment through the owner's route: %d", status)
+	}
+	_, body = doJSON(t, ts, http.MethodGet, "/api/sessions/"+sess.ID+"/attachments", "")
+	if !strings.Contains(string(body), `"chart_one.png"`) || !strings.Contains(string(body), `"page.html"`) {
+		t.Errorf("list: %s", body)
+	}
+	// Too big is refused and leaves nothing.
+	if status, _ := upload("big.bin", bytes.Repeat([]byte{1}, attachmentMaxBytes+1), ""); status != http.StatusRequestEntityTooLarge {
+		t.Errorf("over the cap: %d", status)
+	}
+	if _, err := os.Stat(filepath.Join(srv.attachmentsDir(sess.ID), "big.bin")); err == nil {
+		t.Error("the oversized file was kept")
 	}
 }

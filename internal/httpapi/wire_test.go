@@ -116,6 +116,7 @@ func TestTypeScriptRowsMatchWhatIsSent(t *testing.T) {
 		{"PluginAccessToken", store.PluginAccessToken{}},
 		{"PluginDownloadRow", pluginDownloadRow{}},
 		{"SessionNotice", sessionNoticeEvent{}},
+		{"SessionAttachment", attachmentRow{}},
 		{"PluginModule", pluginModule{}},
 		{"PluginTemplate", plugins.Template{}},
 		{"NewPluginResult", newPluginResult{}},
@@ -520,6 +521,7 @@ func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 		"me.rejected":      true,
 		"session.said":     true,
 		"session.notified": true,
+		"session.sent":     true,
 		// The door on the panel's port: a token minted or revoked, the
 		// owner's cross-origin list changed.
 		"plugin.token_created":   true,

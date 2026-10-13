@@ -1205,6 +1205,7 @@ const DICT = {
   'notice.info': { zh: '{name} 提醒', en: '{name}' },
   'notice.warn': { zh: '{name} 警告', en: '{name} warns' },
   'notice.ask': { zh: '{name} 在问你，去会话里回答', en: '{name} asks; answer in the session' },
+  'notice.file': { zh: '{name} 发来文件，在会话的附件里', en: '{name} sent a file; it is in the session\'s attachments' },
   'notify.waitingBody': { zh: '{name} 停下来等你处理了', en: '{name} has stopped and needs you' },
   'notify.archivedWaitingBody': {
     zh: '已归档的项目 {name} 里有会话在等你',

@@ -2406,10 +2406,22 @@ export interface SessionNotice {
   sessionId: string
   title: string
   project: string
-  /** 'say' | 'info' | 'warn' | 'ask' */
+  /** 'say' | 'info' | 'warn' | 'ask' | 'file' */
   level: string
   text: string
   choices: string[]
+  /** For a file: where the signed-in owner downloads it; '' otherwise. */
+  url: string
+}
+
+/** A file a session sent (GET /api/sessions/{id}/attachments). */
+export interface SessionAttachment {
+  name: string
+  bytes: number
+  size: string
+  url: string
+  at: number
+  contacts: number
 }
 
 /** One declared download (docs/plugins.md §5): what the card shows, with the job's progress while one runs. */

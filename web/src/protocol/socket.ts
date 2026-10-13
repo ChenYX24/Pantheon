@@ -356,6 +356,7 @@ export class PanelSocket {
           level: typeof m.level === 'string' ? m.level : 'info',
           text: m.text,
           choices: Array.isArray(m.choices) ? m.choices.filter((c): c is string => typeof c === 'string') : [],
+          url: typeof m.url === 'string' ? m.url : '',
         }
         for (const fn of this.noticeListeners) fn(n)
         break

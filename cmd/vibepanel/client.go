@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -313,4 +314,66 @@ func pickSession(list []store.Session, ref string) (store.Session, error) {
 		names = append(names, s.Title+" ("+s.ID+")")
 	}
 	return store.Session{}, fmt.Errorf("%q names more than one session: %s", ref, strings.Join(names, ", "))
+}
+
+// attachResult is what a send answers.
+type attachResult struct {
+	Name     string `json:"name"`
+	Bytes    int64  `json:"bytes"`
+	Size     string `json:"size"`
+	URL      string `json:"url"`
+	Contacts int    `json:"contacts"`
+}
+
+// uploadFile posts one file as multipart with a caption, for `me send` and
+// `session attach`, streaming it rather than reading it into memory.
+func uploadFile(ctx context.Context, client *http.Client, target string, headers map[string]string, path, caption string, out any) error {
+	f, err := os.Open(path) //nolint:gosec // the person named it
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	go func() {
+		defer pw.Close()
+		if caption != "" {
+			_ = mw.WriteField("caption", caption)
+		}
+		part, err := mw.CreateFormFile("file", filepath.Base(path))
+		if err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		if _, err := io.Copy(part, f); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.CloseWithError(mw.Close())
+	}()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, pr)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("the panel did not answer: %s", trimDial(err))
+	}
+	defer res.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &e)
+		return &apiError{Status: res.StatusCode, Message: e.Error}
+	}
+	if out != nil {
+		return json.Unmarshal(raw, out)
+	}
+	return nil
 }

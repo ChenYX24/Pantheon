@@ -25568,3 +25568,22 @@ server knew `notice` and the page did not, which is the drift it exists
 for. The bridge test presses a choice on a session that is still `working`
 and reads the words in the fake terminal.
 
+## 2026-10-13 — A session's own voice, step 3: send
+
+A file through the same door (`internal/httpapi/attachments.go`): a chart
+the agent drew, a report it wrote. Kept under
+`<data>/sessions/<id>/attachments/`, sixteen megabytes a file, a hundred
+an hour per session, the newest twenty; the name reduced to letters,
+digits, dots and dashes, a second of the same name numbered rather than
+replacing the first because the link already sent still points at it.
+Served to the signed-in owner by the same rule as a plugin process's
+answers: images, audio, video and text inline with `nosniff`, everything
+else -- HTML and SVG included -- as a download under `Content-Security-
+Policy: sandbox`. The phone gets an image as a photo with the caption
+(`Bridge.SendAttachment`, `internal/chat/attach.go`), anything else as a
+card naming the file with the link, which is not a door: the route is
+under the session cookie, and the test presents the session's own token
+there and is refused. The page gets a `notice` with `level: "file"` and
+the url. `vibepanel me send` and `vibepanel session attach` stream the
+file as multipart; `session attachments` lists them.
+

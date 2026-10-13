@@ -360,9 +360,56 @@ func TestMeSpeaksForTheSessionItRunsIn(t *testing.T) {
 	if out := mustRun(t, "me", "guide"); !strings.Contains(out, "me state waiting") {
 		t.Errorf("guide: %s", out)
 	}
+	// say, notify and send from inside; the file lands under the session.
+	t.Setenv("VIBEPANEL_SESSION_ID", sessions[0].ID)
+	mustRun(t, "me", "say", "the migration ran")
+	if out := mustRun(t, "me", "notify", "drop the old table?", "--choices", "drop,keep"); !strings.Contains(out, "0 contact") {
+		t.Errorf("notify: %s", out)
+	}
+	png := filepath.Join(t.TempDir(), "chart.png")
+	if err := os.WriteFile(png, []byte("\x89PNG\r\n\x1a\n0000"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := mustRun(t, "me", "send", png, "--caption", "coverage"); !strings.Contains(out, "sent chart.png") {
+		t.Errorf("send: %s", out)
+	}
+	if _, err := os.Stat(filepath.Join(p.dir, "sessions", sessions[0].ID, "attachments", "chart.png")); err != nil {
+		t.Errorf("the file is not under the session: %v", err)
+	}
+	t.Setenv("VIBEPANEL_SESSION_ID", "")
+	if out := mustRun(t, "session", "attachments", "schema"); !strings.Contains(out, "chart.png") {
+		t.Errorf("attachments: %s", out)
+	}
+	if out := mustRun(t, "session", "attach", "schema", png, "--caption", "again"); !strings.Contains(out, "chart-2.png") {
+		t.Errorf("attach: %s", out)
+	}
 	// Outside a session there is nothing to speak for.
 	t.Setenv("VIBEPANEL_TOKEN", "")
 	if _, err := runCLI(t, "me"); err == nil || !strings.Contains(err.Error(), "inside a session") {
 		t.Errorf("me outside a session: %v", err)
+	}
+}
+
+// The guide goes into a project's AGENTS.md once, with a CLAUDE.md that
+// points at it when there is none; a second write changes nothing.
+func TestTheGuideIsWrittenOnce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("# Mine\n\nrules\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, "me", "guide", "--write", dir)
+	first, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if !strings.HasPrefix(string(first), "# Mine\n") || !strings.Contains(string(first), guideMarker) || !strings.Contains(string(first), "me notify") {
+		t.Fatalf("AGENTS.md: %s", first)
+	}
+	if claude, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md")); err != nil || string(claude) != "@AGENTS.md\n" {
+		t.Errorf("CLAUDE.md: %q %v", claude, err)
+	}
+	if out := mustRun(t, "me", "guide", "--write", dir); !strings.Contains(out, "already has") {
+		t.Errorf("second write: %s", out)
+	}
+	second, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if string(second) != string(first) {
+		t.Error("the second write changed the file")
 	}
 }

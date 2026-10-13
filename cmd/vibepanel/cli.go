@@ -308,10 +308,12 @@ func projectViaAPI(ctx context.Context, sub string, rest []string) (handled bool
 func sessionViaAPI(ctx context.Context, sub string, rest []string) (handled bool, offline []string, err error) {
 	fs := flag.NewFlagSet("session "+sub, flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print the panel's answer as JSON")
-	var project, title, sid, profile, level, choices string
+	var project, title, sid, profile, level, choices, caption string
 	var cols, rows int
 	enter := false
 	switch sub {
+	case "attach":
+		fs.StringVar(&caption, "caption", "", "a line with the file")
 	case "notify":
 		fs.StringVar(&level, "level", "info", "info, warn or ask")
 		fs.StringVar(&choices, "choices", "", "comma-separated buttons for the phone")
@@ -541,6 +543,40 @@ func sessionViaAPI(ctx context.Context, sub string, rest []string) (handled bool
 		}
 		fmt.Printf("notified for %s: every open page, %d contact(s)\n", s.Title, out.Contacts)
 		return true, nil, nil
+	case "attach":
+		if len(args) != 2 {
+			return true, nil, errors.New("usage: vibepanel session attach <session> <file> [--caption \"...\"]")
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, nil, err
+		}
+		var out attachResult
+		if err := uploadFile(ctx, c.http, c.base+"/api/sessions/"+s.ID+"/attach", map[string]string{"Authorization": "Bearer " + c.token}, args[1], caption, &out); err != nil {
+			return true, nil, err
+		}
+		fmt.Printf("attached %s (%s) to %s: %d contact(s); %s\n", out.Name, out.Size, s.Title, out.Contacts, out.URL)
+		return true, nil, nil
+	case "attachments":
+		if len(args) != 1 {
+			return true, nil, errors.New("usage: vibepanel session attachments <session>")
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, nil, err
+		}
+		var list []attachResult
+		if err := c.do(ctx, http.MethodGet, "/api/sessions/"+s.ID+"/attachments", nil, &list); err != nil {
+			return true, nil, err
+		}
+		if *asJSON {
+			return true, nil, printJSON(list)
+		}
+		tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		for _, a := range list {
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", a.Name, a.Size, a.URL)
+		}
+		return true, nil, tw.Flush()
 	case "info":
 		// What the session says about itself, set by the owner: the same
 		// fields `vibepanel me` sets from inside.

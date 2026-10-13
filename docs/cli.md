@@ -64,6 +64,8 @@ scripts.
 | `session info <s> summary <text> \| progress <0-100> \| labels a,b \| clear` | what the session says about itself, set from outside |
 | `session say <s> <text>` | a line in the session's messages: the chat card shows it, the routes push it by their rules, every open page gets a quiet toast |
 | `session notify <s> <text> [--level info\|warn\|ask] [--choices a,b]` | ring every open page and every paired phone whatever the state, with the choices as buttons; a pressed choice is typed into the session |
+| `session attach <s> <file> [--caption "…"]` | a file into the session's attachments and to the phone: an image as a photo, anything else as a card with the download link |
+| `session attachments <s>` | its attachments and where to download them |
 | `session restore` | rebuild the sessions a reboot took |
 | `note get\|set <p> [text]` | the project's note; `set` with no text reads stdin |
 | `todo ls\|add\|done\|undo\|rm <p> [text\|id]` | the project's todos; `done`, `undo` and `rm` take an id or the start of the text |
@@ -93,13 +95,14 @@ up to and cannot touch another session, a project or the owner's settings
 | `me info clear [summary\|progress\|labels]` | |
 | `me say <text>` | a milestone: a line on the phone by the chat rules, a quiet toast on the panel |
 | `me notify <text> [--level info\|warn\|ask] [--choices a,b]` | a person has to decide now: every page and phone, buttons for the choices, the pressed one typed back into the session. Six a minute |
-| `me guide` | the best practice, one page |
+| `me send <file> [--caption "…"]` | a result that is a picture or a file: 16 MB, the newest twenty kept, a photo on the phone or a link the owner opens signed in |
+| `me guide [--write [dir]]` | the best practice, one page; `--write` appends it to the project's `AGENTS.md` once, with a `CLAUDE.md` pointing at it when there is none |
 
 The practice, in short: mark `waiting` with a why **before** asking a
 person anything; one summary per milestone, written for somebody reading
 a phone at 2am; say a thing once. `vibepanel me guide` prints the rest,
-and `vibepanel hook install --guide` writes it into a project's
-`AGENTS.md` for the agent to find.
+and `vibepanel me guide --write` puts it into the project's `AGENTS.md`
+for the agent to find.
 
 ## In a container
 

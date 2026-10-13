@@ -752,7 +752,7 @@ func cmdProject(args []string) error {
 
 // ─── session ──────────────────────────────────────────────────────────────
 
-const sessionUsage = `usage: vibepanel session <ls|new|rename|pin|unpin|state|restart|kill|send|screen|info|say|notify|restore> [args]
+const sessionUsage = `usage: vibepanel session <ls|new|rename|pin|unpin|state|restart|kill|send|screen|info|say|notify|attach|attachments|restore> [args]
 
   ls                                   every session, with its state
   new --project <p> [--title T] [-- cmd…]
@@ -766,6 +766,8 @@ const sessionUsage = `usage: vibepanel session <ls|new|rename|pin|unpin|state|re
   info <session> summary|progress|labels|clear …   what the session says about itself
   say <session> <text>                 a line in its messages, pushed by the chat rules
   notify <session> <text> [--level L] [--choices a,b]   ring every page and phone
+  attach <session> <file> [--caption "..."]   a file into its attachments, and to the phone
+  attachments <session>                its attachments, with where to download them
   restore                              rebuild the sessions a restart took
 
 Through the running panel; ls, new and kill work on the database and tmux

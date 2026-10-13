@@ -496,7 +496,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     () =>
       socket.onNotice((n) => {
         const name = n.title || n.sessionId
-        const key = n.level === 'say' ? 'notice.say' : n.level === 'warn' ? 'notice.warn' : n.level === 'ask' ? 'notice.ask' : 'notice.info'
+        const key =
+          n.level === 'say' ? 'notice.say' : n.level === 'warn' ? 'notice.warn' : n.level === 'ask' ? 'notice.ask' : n.level === 'file' ? 'notice.file' : 'notice.info'
         showToast({ kind: n.level === 'warn' ? 'error' : 'info', key, params: { name: safeText(name) }, detail: n.text })
         notifyOnNotice(n, document.hasFocus())
       }),

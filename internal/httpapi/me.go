@@ -42,6 +42,7 @@ func (s *Server) registerMeRoutes(r chi.Router) {
 	r.With(s.requireSessionToken).Patch("/me/v1", s.handleMePatch)
 	r.With(s.requireSessionToken).Post("/me/v1/say", s.handleSessionSay)
 	r.With(s.requireSessionToken).Post("/me/v1/notify", s.handleSessionNotify)
+	r.With(s.requireSessionToken).Post("/me/v1/send", s.handleSessionAttach)
 }
 
 type meKey struct{}
