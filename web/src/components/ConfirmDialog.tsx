@@ -59,10 +59,21 @@ function AskPanel({ request }: { request: AskRequest }) {
         return
       }
       if (e.key !== 'Enter') return
-      // preventDefault is what lets Enter mean "confirm" while the focus sits
-      // on cancel. Enter on a focused button generates a click as its default
-      // action; cancelling the default cancels that click, so the two rules --
-      // focus starts safe, Enter confirms -- stop contradicting each other.
+      // A destructive question: Enter presses whichever button has the focus,
+      // as it does everywhere else, and the focus starts on Cancel.
+      //
+      // It used to confirm from anywhere, Cancel included -- preventDefault
+      // swallowed the focused button's own click so that "focus starts safe"
+      // and "Enter confirms" would not contradict each other. Together they
+      // made Enter on a highlighted Cancel kill the session, in all three
+      // engines; the audit tabbed to Cancel, pressed Enter, and lost one.
+      // Focus starting safe only means something if Enter follows it.
+      //
+      // The one exception is the field: typing into it and pressing Enter is
+      // answering, as in a form.
+      if (request.destructive && e.target !== fieldRef.current) return
+      // Not destructive (naming a passkey, say): Enter answers from anywhere,
+      // which is what window.prompt did.
       e.preventDefault()
       answerAsk(value)
     }
@@ -72,7 +83,7 @@ function AskPanel({ request }: { request: AskRequest }) {
     // alternative is a ref holding the value, which is a second copy of one
     // piece of state kept in step by hand -- and the failure it produces is
     // Enter confirming the name as it was one character ago.
-  }, [value])
+  }, [value, request.destructive])
 
   const Icon = request.destructive ? AlertTriangle : HelpCircle
   const tint = request.destructive ? 'var(--vp-state-crashed)' : 'var(--vp-accent)'

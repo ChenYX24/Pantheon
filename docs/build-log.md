@@ -25931,3 +25931,15 @@ terminal keeps a floor of 5.5rem. `viewport.test.ts` pins the rule with the
 audit's heights, including iOS's tall-layout-short-viewport case Chromium
 cannot reproduce; render-check measures the terminal and the rows at four
 sizes and that the page does not grow past the screen.
+
+**Enter on Cancel cancels.** A destructive confirmation started with the
+focus on Cancel and answered Enter with "yes" from anywhere: the handler
+called `preventDefault` to swallow the focused button's own click, so the two
+rules would not contradict each other. Together they meant that tabbing to
+the highlighted Cancel and pressing Enter killed the session, in Chromium,
+Firefox and WebKit. A destructive question now leaves Enter to the focused
+button, as every platform does; Enter in its field still answers. A question
+that destroys nothing -- naming a passkey -- keeps Enter-confirms-from-
+anywhere. render-check presses Enter on the focused Cancel when removing a
+project and reads that the project survived, then focuses the destructive
+button and confirms with Enter.

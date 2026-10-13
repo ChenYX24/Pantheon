@@ -2977,7 +2977,24 @@ browser = await chromium.launch({ headless: true })
             note('FAIL', 'projects', 'the confirmation opens with the focus on the destructive button')
           }
           await page.screenshot({ path: join(SHOTS, 'confirm.png') })
-          await page.locator('[data-testid="confirm-yes"]').click()
+          // Enter presses what has the focus. It used to confirm from
+          // anywhere, so Enter on the highlighted Cancel removed the project
+          // -- in all three engines.
+          await page.keyboard.press('Enter')
+          await sleep(600)
+          if (await page.locator('[data-testid="confirm-dialog"]').isVisible().catch(() => false)) {
+            note('FAIL', 'projects', 'Enter on the focused Cancel left the confirmation open')
+          }
+          if (!(await listProjects()).some((x) => x.id === doomedProject.id)) {
+            note('FAIL', 'projects', 'Enter on the focused Cancel removed the project')
+            throw new Error('cancel confirmed')
+          }
+          await remove.click()
+          await page.waitForSelector('[data-testid="confirm-dialog"]', { timeout: 5000 })
+          // And on the destructive button, it confirms: the keyboard can still
+          // say yes, it just has to aim.
+          await page.locator('[data-testid="confirm-yes"]').focus()
+          await page.keyboard.press('Enter')
           await sleep(1500)
 
           const after = await listProjects()
