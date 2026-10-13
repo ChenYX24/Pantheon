@@ -2457,8 +2457,17 @@ func (s *Server) markVanished(ctx context.Context, row store.Session) error {
 	return s.setSessionState(ctx, row, session.StateDone, session.SourceHeuristic)
 }
 
+// pollTmuxBudget bounds each tmux call the poller makes. They ran on the
+// service context, which has no deadline, so a tmux server that stopped
+// answering -- stuck in a hook, stopped, swapped out under memory pressure --
+// held the tick, and the tickers sharing its goroutine, for good, and nothing
+// said so: only an error marks the panel stale. A variable for the test.
+var pollTmuxBudget = 5 * time.Second
+
 func (s *Server) pollOnce(ctx context.Context) error {
-	infos, err := s.Tmux.List(ctx)
+	lctx, lcancel := context.WithTimeout(ctx, pollTmuxBudget)
+	infos, err := s.Tmux.List(lctx)
+	lcancel()
 	if err != nil {
 		return err
 	}
@@ -2545,16 +2554,20 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		// window flag and the client reaching the server, where the flag was
 		// cleared without the byte ever being forwarded; this tick is what
 		// finds it. Consumed here, so a bell is read once.
-		s.consumeLatchedBell(ctx, row.ID, info)
+		tctx, tcancel := context.WithTimeout(ctx, pollTmuxBudget)
+		s.consumeLatchedBell(tctx, row.ID, info)
 
 		live, attached := s.Manager.Get(row.ID)
 		if !attached {
-			if l, aerr := s.Manager.Attach(ctx, row.ID, row.TmuxName, row.Cols, row.Rows); aerr != nil {
+			// The context bounds the attach's setup (has-session, the history
+			// capture); the attached client itself is not tied to it.
+			if l, aerr := s.Manager.Attach(tctx, row.ID, row.TmuxName, row.Cols, row.Rows); aerr != nil {
 				s.Log.Debug("attach for monitoring", "session", row.ID, "err", aerr)
 			} else {
 				live = l
 			}
 		}
+		tcancel()
 		// Only when something changed, and the same for the title below.
 		//
 		// These wrote on every tick, deliberately: SQLite elides an UPDATE that

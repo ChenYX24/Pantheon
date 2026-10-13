@@ -26000,6 +26000,18 @@ the full minute after its next isolated crash. A run that lasted longer than
 the failure window -- the same ten minutes after which the cap forgets a
 failure -- now resets it. `TestALongRunStartsTheBackoffOver` makes every run
 "long" and reads the restart lines: 20, 40, 80 ms before; 20 ms each now.
+
+**A tmux that stopped answering held the poller for good.** Every tmux call
+in a tick ran on the service context, which has no deadline. One
+`list-sessions` that never returned -- a server stuck in a hook, stopped,
+swapped out -- held the tick and the archive, idle and trim tickers on the
+same goroutine, and nothing said so, since only an error marks the panel
+stale. The list, and each session's latched-bell read and attach setup, now
+have five seconds each (`pollTmuxBudget`); the attached client itself is
+`exec.Command` and not tied to it. `TestAStuckTmuxDoesNotHoldThePollForever`
+puts a tmux in front whose `list-sessions` sleeps: the tick returns an error
+now, and with the list's deadline taken away it was still waiting five
+seconds later.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

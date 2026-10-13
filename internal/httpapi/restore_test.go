@@ -749,3 +749,32 @@ func TestACancelledCreateLeavesNoTmuxSessionBehind(t *testing.T) {
 		t.Errorf("tmux has %d sessions and the panel has no row for the new one", len(after))
 	}
 }
+
+// A tmux that stops answering does not stop the poller for good. Every tmux
+// call in a tick ran on the service context, which has no deadline: one
+// list-sessions that never returned held the poll -- and the archive, idle
+// and trim tickers on the same goroutine -- with nothing marked stale,
+// because only an error does that.
+func TestAStuckTmuxDoesNotHoldThePollForever(t *testing.T) {
+	_, srv := newTestServer(t)
+	defer func(d time.Duration) { pollTmuxBudget = d }(pollTmuxBudget)
+	pollTmuxBudget = 300 * time.Millisecond
+	real := srv.Tmux.Bin
+	fake := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = list-sessions ]; then exec sleep 600; fi\ndone\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv.Tmux.Bin = fake
+	defer func() { srv.Tmux.Bin = real }()
+	done := make(chan error, 1)
+	go func() { done <- srv.pollOnce(context.Background()) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a tick whose tmux never answered reported success")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tick was still waiting on tmux five seconds later")
+	}
+}
