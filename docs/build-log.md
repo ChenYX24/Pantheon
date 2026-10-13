@@ -25924,6 +25924,20 @@ them; a second run writes nothing. The settings page's line that said
 `TestSecretsInProfilesAndWebhooksAreSealedAtRest`,
 `TestPlaintextFromBeforeIsReadAndThenSealed` and
 `TestStartingThePollerSealsWhatWasStoredInTheClear`.
+
+**Two openers of a database that needed migrating ran each step twice.**
+`migrate` read `user_version` once, outside any transaction, and the CLI
+opens the database as well as the panel now: the second opener re-ran every
+step the first had just committed, and the first `ALTER TABLE ADD COLUMN` it
+repeated failed with "duplicate column". Each step now reads the version in
+its own transaction, which takes the write lock at BEGIN, so one opener
+migrates and the other waits and then reads where it got to.
+`TestOpenersRacingOnAnUpgradeBothMigrate` opens a WAL file at version 0
+six times at once: "duplicate column name" before, clean now. Six openers on
+a file that does not exist yet also race on switching it to WAL, which
+SQLite refuses with SQLITE_BUSY without consulting busy_timeout; that is a
+first start rather than an upgrade, was not changed, and the test seeds the
+file to keep the two apart.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

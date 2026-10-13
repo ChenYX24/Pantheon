@@ -1410,13 +1410,33 @@ func (d *DB) migrate(ctx context.Context) error {
 			current, schemaVersion)
 	}
 
-	for v := current; v < schemaVersion; v++ {
+	for {
 		// Each step in its own transaction, and user_version moves inside it:
 		// a migration that fails half way must leave the database on the
 		// version it actually is, not the one it was heading for.
+		//
+		// And the version is read inside it too. It was read once, above,
+		// outside any transaction, and the panel and the CLI both open this
+		// file: the second opener ran every step the first had just run, and
+		// the first ALTER TABLE ADD COLUMN it repeated failed with "duplicate
+		// column". BEGIN takes the write lock (_txlock=immediate), so one
+		// opener migrates while the other waits, then reads where it got to.
 		tx, err := d.sql.BeginTx(ctx, nil)
 		if err != nil {
-			return fmt.Errorf("store: begin migration %d: %w", v+1, err)
+			return fmt.Errorf("store: begin migration: %w", err)
+		}
+		var v int
+		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
+			tx.Rollback() //nolint:errcheck
+			return fmt.Errorf("store: read user_version: %w", err)
+		}
+		if v >= schemaVersion {
+			tx.Rollback() //nolint:errcheck // nothing was written
+			if v > schemaVersion {
+				return fmt.Errorf("store: database is version %d but this build only knows %d; "+
+					"upgrade vibepanel or restore an older copy of the database", v, schemaVersion)
+			}
+			break
 		}
 		if err := migrations[v](tx); err != nil {
 			tx.Rollback() //nolint:errcheck // the error below is the useful one

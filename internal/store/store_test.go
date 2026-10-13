@@ -1329,3 +1329,48 @@ func TestExistingBottomTerminalsSurviveTheMove(t *testing.T) {
 			"with ON DELETE CASCADE, which is a trap for the next person who finds it")
 	}
 }
+
+// Two processes opening a database that needs migrating both come up. The
+// panel and the CLI both open it now, and migrate read user_version once,
+// outside any transaction: the second opener ran each step the first had
+// already run, and the first ALTER TABLE ADD COLUMN it repeated failed with
+// "duplicate column". Each step now reads the version inside its own
+// transaction.
+//
+// The file is made first, in WAL and at version 0, as an upgrade finds it.
+// Six openers on a file that does not exist yet also race on switching it to
+// WAL, which SQLite answers with SQLITE_BUSY without consulting busy_timeout;
+// that is a first start, not an upgrade, and not what this is about.
+func TestOpenersRacingOnAnUpgradeBothMigrate(t *testing.T) {
+	for round := 0; round < 5; round++ {
+		path := filepath.Join(t.TempDir(), "race.db")
+		seed, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := seed.Ping(); err != nil {
+			t.Fatal(err)
+		}
+		seed.Close()
+		errs := make(chan error, 6)
+		var wg sync.WaitGroup
+		for i := 0; i < 6; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				db, err := Open(context.Background(), path)
+				if err == nil {
+					db.Close()
+				}
+				errs <- err
+			}()
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: an opener failed: %v", round, err)
+			}
+		}
+	}
+}
