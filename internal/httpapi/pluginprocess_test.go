@@ -351,3 +351,31 @@ func TestStoppingEndsAChildThatIgnoresTerm(t *testing.T) {
 		return syscallKillProbe(child) != nil
 	})
 }
+
+// An ending process cleans up only what was its own. It deleted every token
+// of its plugin, after it had already told the restart it was done: a
+// restart that had minted the next process's token in between had it
+// deleted, and every API call from the new process answered 401 until its
+// own next restart. The row inserted here stands for that next token.
+func TestAnEndingProcessDeletesOnlyItsOwnToken(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installProcess(t, ts, srv, nil, "echo started; sleep 600")
+	waitFor(t, "running", 5000, func() bool { return processStatus(t, ts).Running })
+	if _, err := srv.DB.SQL().Exec(`INSERT INTO plugin_tokens (token_hash, plugin_id, created_at) VALUES (x'00ff', 'proc', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	srv.StopPluginProcesses(t.Context())
+	var n int
+	if err := srv.DB.SQL().QueryRow(`SELECT COUNT(*) FROM plugin_tokens WHERE token_hash = x'00ff'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Error("the ending process deleted a token that was not its own")
+	}
+	if err := srv.DB.SQL().QueryRow(`SELECT COUNT(*) FROM plugin_tokens WHERE plugin_id = 'proc' AND token_hash != x'00ff'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("the ending process left its own token behind (%d)", n)
+	}
+}

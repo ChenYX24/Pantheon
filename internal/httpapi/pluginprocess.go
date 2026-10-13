@@ -465,9 +465,6 @@ func (s *Server) runPluginProcOnce(ctx context.Context, c pluginCred, pr *plugin
 	pr.socket, pr.proxySecret = sock, proxySecret
 	pr.done = make(chan struct{})
 	pr.stateMu.Unlock()
-	if sock != "" {
-		defer os.Remove(sock) //nolint:errcheck // the next start removes it too
-	}
 	if s.Resources != nil {
 		s.Resources.PlacePlugin(c.plugin.ID, cmd.Process.Pid)
 	}
@@ -488,13 +485,21 @@ func (s *Server) runPluginProcOnce(ctx context.Context, c pluginCred, pr *plugin
 		grace = 0
 	}
 	endProcessGroup(cmd.Process.Pid, grace)
-	pr.stateMu.Lock()
-	close(pr.done)
-	pr.stateMu.Unlock()
-	_ = s.DB.DeletePluginTokens(context.WithoutCancel(ctx), c.plugin.ID)
+	// Clean up what was this process's, and only then say it is done. done
+	// was closed first, and a restart waits on it: the next process could
+	// mint its token and bind its socket before this one deleted every token
+	// of the plugin and removed the socket path -- the new process's 401s
+	// and its dead mount.
+	_ = s.DB.DeletePluginToken(context.WithoutCancel(ctx), auth.HashToken(token))
 	if s.Resources != nil {
 		s.Resources.EndPlugin(c.plugin.ID)
 	}
+	if sock != "" {
+		_ = os.Remove(sock)
+	}
+	pr.stateMu.Lock()
+	close(pr.done)
+	pr.stateMu.Unlock()
 	if werr != nil {
 		var ee *exec.ExitError
 		if errors.As(werr, &ee) {

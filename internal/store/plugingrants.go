@@ -115,6 +115,16 @@ func (d *DB) PluginTokenByHash(ctx context.Context, tokenHash []byte) (string, e
 	return id, nil
 }
 
+// DeletePluginToken removes one process token, by its hash. A process
+// ending removes its own and no other: by the time it cleans up, a restart
+// may already have minted the next process's.
+func (d *DB) DeletePluginToken(ctx context.Context, tokenHash []byte) error {
+	if _, err := d.sql.ExecContext(ctx, `DELETE FROM plugin_tokens WHERE token_hash = ?`, tokenHash); err != nil {
+		return fmt.Errorf("store: delete plugin token: %w", err)
+	}
+	return nil
+}
+
 // DeletePluginTokens forgets a plugin's token: its process has stopped.
 func (d *DB) DeletePluginTokens(ctx context.Context, pluginID string) error {
 	if _, err := d.sql.ExecContext(ctx, `DELETE FROM plugin_tokens WHERE plugin_id = ?`, pluginID); err != nil {

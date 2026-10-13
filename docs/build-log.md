@@ -25970,6 +25970,18 @@ window is one select -- so each side is pinned on the state that decides it:
 (`TestAnUnsubscribedStreamEndsWithoutAnExit`), and the page ignores an end
 of stream whose ref is not the open stream's ("a stale end of stream" in
 `socket.test.ts`; a message without a ref is believed, as before).
+
+**An ending plugin process could take the next one's token and socket with
+it.** It closed `done` first -- which is what a restart waits on -- and then
+deleted every token of its plugin and, deferred to its return, removed the
+socket path. A restart quick enough could mint the next process's token and
+bind its socket in between: every API call from the new process 401, and
+its mount dead. It now deletes its own token by hash
+(`DeletePluginToken`), removes its socket, and only then closes `done`.
+`TestAnEndingProcessDeletesOnlyItsOwnToken` puts a second token row for the
+plugin beside the running process's and stops it: the other row was deleted
+before and survives now. The ordering itself is a window too narrow to test
+reliably and is held by the code.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5
