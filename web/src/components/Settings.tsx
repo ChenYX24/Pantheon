@@ -134,7 +134,11 @@ export function Settings({
         // A reading measure. Every group is label/value lines and a handful
         // of controls, which read badly past about seventy characters. The
         // one surface that wanted more — sharing — is a page now.
-        className="vp-panel-in flex max-h-full w-full max-w-3xl flex-col rounded-vp-lg border border-hairline bg-surface shadow-xl"
+        //
+        // A container, and the rail below answers to this box rather than to
+        // the window: the dialog is never wider than 48rem, so a viewport
+        // variant fires by however much the window outgrows it.
+        className="vp-panel-in @container flex max-h-full w-full max-w-3xl flex-col rounded-vp-lg border border-hairline bg-surface shadow-xl"
       >
         {/* The language switch is in the header rather than in a group, and it
             is the one control here that is about the reading rather than about
@@ -167,7 +171,7 @@ export function Settings({
           </p>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 p-4 sm:flex-row sm:gap-5 sm:p-5">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 p-4 @xl:flex-row @xl:gap-5 @xl:p-5">
           <div
             ref={railRef}
             data-testid="settings-rail"
@@ -175,12 +179,12 @@ export function Settings({
             // wider. Not a select, and never a fold: the point of the rail is
             // that all the names are readable at once, which is what makes a
             // wrong guess cost one press instead of a hunt.
-            className="vp-scroll-x flex shrink-0 items-center gap-1 sm:w-40 sm:flex-col sm:items-stretch sm:overflow-visible"
+            className="vp-scroll-x flex shrink-0 items-center gap-1 @xl:w-40 @xl:flex-col @xl:items-stretch @xl:overflow-visible"
           >
             <div
               role="tablist"
               aria-label={t('settings.groups')}
-              className="flex shrink-0 gap-1 sm:flex-col"
+              className="flex shrink-0 gap-1 @xl:flex-col"
             >
               {SETTINGS_GROUPS.map((id) => {
                 const Icon = GROUP_ICON[id]
@@ -209,7 +213,7 @@ export function Settings({
                     // No padding of its own: `.vp-tab` is unlayered and Tailwind's
                     // utilities are in a cascade layer, so a `px-` here would be
                     // inert and read as though it were doing something.
-                    className="vp-tab shrink-0 justify-start sm:w-full"
+                    className="vp-tab shrink-0 justify-start @xl:w-full"
                   >
                     <Icon size={13} className="vp-tab-icon shrink-0" />
                     <span className="text-vp-base">{t(GROUP_TITLE[id])}</span>
@@ -221,11 +225,11 @@ export function Settings({
                 to be. A link in the rail's own clothes, after a rule, with the
                 arrow that says it leaves: somebody who last saw the list of
                 pages under this word still finds it under this word. */}
-            <div className="flex shrink-0 gap-1 sm:mt-1 sm:flex-col sm:border-t sm:border-hairline sm:pt-1">
+            <div className="flex shrink-0 gap-1 @xl:mt-1 @xl:flex-col @xl:border-t @xl:border-hairline @xl:pt-1">
               <a
                 href={SHARING_PATH}
                 data-testid="settings-sharing-link"
-                className="vp-tab shrink-0 justify-start sm:w-full"
+                className="vp-tab shrink-0 justify-start @xl:w-full"
               >
                 <Share2 size={13} className="vp-tab-icon shrink-0" />
                 <span className="text-vp-base">{t('grp.sharing')}</span>
@@ -234,7 +238,7 @@ export function Settings({
               <a
                 href={CHAT_PATH}
                 data-testid="settings-chat-link"
-                className="vp-tab shrink-0 justify-start sm:w-full"
+                className="vp-tab shrink-0 justify-start @xl:w-full"
               >
                 <MessageSquare size={13} className="vp-tab-icon shrink-0" />
                 <span className="text-vp-base">{t('grp.chat')}</span>
@@ -243,7 +247,7 @@ export function Settings({
               <a
                 href={PLUGINS_PATH}
                 data-testid="settings-plugins-link"
-                className="vp-tab shrink-0 justify-start sm:w-full"
+                className="vp-tab shrink-0 justify-start @xl:w-full"
               >
                 <Puzzle size={13} className="vp-tab-icon shrink-0" />
                 <span className="text-vp-base">{t('grp.plugins')}</span>
