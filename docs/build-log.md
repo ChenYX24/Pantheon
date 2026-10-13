@@ -25629,3 +25629,20 @@ code of mine.
   0700, and the door refuses to start otherwise; the pages root's `/tmp`
   last resort goes through the same check.
 
+## 2026-10-13 — Fixes from the October audit
+
+The audit in `audit-2026-10/` (eight dimensions, each in its own worktree)
+left a list; these are the ones taken here, one commit each, each with a test
+that goes red when the fix is taken back out.
+
+**Switching a plugin off could take the panel down.** `pluginEventRaised`
+copies the worker set under the lock and sends after letting it go, so it can
+hold a worker that `ensurePluginWorkers` has just retired -- and retiring one
+closed its channel. The send was a panic on the poller's goroutine, with no
+recover on the path: flip a plugin off on the Plugins page while a session
+changes state, and the panel is gone. Reproduced without `-race` in a
+hundred toggles (`TestTogglingAPluginWhileEventsFlowDoesNotPanic`).
+A worker is now retired through a `done` channel and its event channel is
+never closed; a send to a retired one lands in a buffer nobody reads and is
+collected with it. `TestARetiredWorkerCanStillBeSentTo` holds the sender's
+stale copy across a disable and sends to it.

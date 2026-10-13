@@ -353,3 +353,73 @@ func TestAFullEventQueueDropsAndCounts(t *testing.T) {
 	}
 	_ = plugins.Capabilities
 }
+
+// A plugin turned off while an event is being raised. pluginEventRaised
+// copies the worker set and sends after letting go of the lock, so the
+// sender can hold a worker that has just been retired. Retiring one used to
+// close its channel, and that send was a panic on the poller's goroutine:
+// the whole panel, for flipping a switch on the Plugins page while a session
+// changed state. The stale worker here is the sender's copy, held across the
+// disable.
+func TestARetiredWorkerCanStillBeSentTo(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installService(t, ts, srv, nil, serviceJS)
+	srv.psv.mu.Lock()
+	stale := srv.psv.workers["svc"]
+	srv.psv.mu.Unlock()
+	if stale == nil {
+		t.Fatal("no worker for a subscribed plugin")
+	}
+	if status, body := doJSON(t, ts, http.MethodPost, "/api/settings/plugins/svc/disable", `{}`); status != http.StatusOK {
+		t.Fatalf("disable: %d %s", status, body)
+	}
+	srv.psv.mu.Lock()
+	_, still := srv.psv.workers["svc"]
+	srv.psv.mu.Unlock()
+	if still {
+		t.Fatal("a disabled plugin kept its event worker")
+	}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("sending to a retired worker panicked: %v", r)
+			}
+		}()
+		for i := 0; i < pluginEventQueue+1; i++ {
+			select {
+			case stale.ch <- pluginEvent{Name: "session.created"}:
+			default:
+			}
+		}
+	}()
+}
+
+// The same thing at the speed it happens: events raised continuously while
+// the plugin is switched off and on. Before the fix this panicked within a
+// few hundred toggles under -race.
+func TestTogglingAPluginWhileEventsFlowDoesNotPanic(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installService(t, ts, srv, nil, serviceJS)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				srv.pluginEventRaised(pluginEvent{Name: "session.created", SessionID: "s", ProjectID: "p"})
+			}
+		}
+	}()
+	for i := 0; i < 100; i++ {
+		for _, verb := range []string{"disable", "enable"} {
+			if status, body := doJSON(t, ts, http.MethodPost, "/api/settings/plugins/svc/"+verb, `{}`); status != http.StatusOK {
+				t.Fatalf("%s: %d %s", verb, status, body)
+			}
+		}
+	}
+	close(stop)
+	<-done
+}

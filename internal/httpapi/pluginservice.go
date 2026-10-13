@@ -78,7 +78,12 @@ type pluginEvent struct {
 }
 
 type pluginWorker struct {
-	ch      chan pluginEvent
+	ch chan pluginEvent
+	// done retires the worker. ch is never closed: pluginEventRaised sends
+	// to a copy of the worker set taken under the lock and released before
+	// the send, so a closed ch was a send-on-closed panic on the poller's
+	// goroutine whenever a plugin was switched off while a session changed.
+	done    chan struct{}
 	dropped int
 }
 
@@ -264,14 +269,14 @@ func (s *Server) ensurePluginWorkers(ctx context.Context) {
 	}
 	for id, w := range st.workers {
 		if !want[id] {
-			close(w.ch)
+			close(w.done)
 			delete(st.workers, id)
 		}
 	}
 	var started []string
 	for id := range want {
 		if _, ok := st.workers[id]; !ok {
-			w := &pluginWorker{ch: make(chan pluginEvent, pluginEventQueue)}
+			w := &pluginWorker{ch: make(chan pluginEvent, pluginEventQueue), done: make(chan struct{})}
 			st.workers[id] = w
 			started = append(started, id)
 			go s.pluginEventWorker(ctx, id, w)
@@ -288,10 +293,9 @@ func (s *Server) pluginEventWorker(ctx context.Context, id string, w *pluginWork
 		select {
 		case <-ctx.Done():
 			return
-		case ev, ok := <-w.ch:
-			if !ok {
-				return
-			}
+		case <-w.done:
+			return
+		case ev := <-w.ch:
 			p, err := s.DB.PluginByID(ctx, id)
 			if err != nil {
 				return
