@@ -25958,6 +25958,18 @@ list. The failed-row path below it already killed the session; the failed-
 create path now does the same (a no-op when tmux made nothing).
 `TestACancelledCreateLeavesNoTmuxSessionBehind` puts a tmux in front that
 makes the session and then waits, and a client that gives up first.
+
+**An exit for a cancelled subscription could end the one that replaced
+it.** Unsubscribing cancels a stream's context and then closes its channel;
+the pump's `select` picks between the two at random, and on the channel it
+sent `exit` with the old ref. The page matched `exit` and `dropped` by
+session id alone, so a remount that had already resubscribed the same
+session drew it as exited while it ran. Not reproduced end to end -- the
+window is one select -- so each side is pinned on the state that decides it:
+`endOfStream` sends nothing once the stream's context is done
+(`TestAnUnsubscribedStreamEndsWithoutAnExit`), and the page ignores an end
+of stream whose ref is not the open stream's ("a stale end of stream" in
+`socket.test.ts`; a message without a ref is believed, as before).
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

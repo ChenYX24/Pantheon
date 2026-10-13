@@ -578,3 +578,24 @@ func TestAViewerThatStopsAnsweringPingsIsClosed(t *testing.T) {
 		return
 	}
 }
+
+// A stream this viewer unsubscribed from ends without a message. Unsubscribe
+// cancels the stream's context and then closes its channel, and the pump's
+// select took either at random; on the channel it sent an exit for the
+// stream the viewer had just let go, which could land on the subscription
+// that replaced it.
+func TestAnUnsubscribedStreamEndsWithoutAnExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	if msg, ok := endOfStream(ctx, false, "s1", 1); !ok || msg.Type != MsgExit {
+		t.Errorf("a stream that ended on its own: %+v %v, want an exit", msg, ok)
+	}
+	if msg, ok := endOfStream(ctx, true, "s1", 1); !ok || msg.Type != MsgDropped {
+		t.Errorf("a dropped stream: %+v %v, want dropped", msg, ok)
+	}
+	cancel()
+	for _, dropped := range []bool{false, true} {
+		if msg, ok := endOfStream(ctx, dropped, "s1", 1); ok {
+			t.Errorf("an unsubscribed stream (dropped=%v) still sent %+v", dropped, msg)
+		}
+	}
+}

@@ -764,12 +764,8 @@ func (c *Conn) pumpStream(ctx context.Context, s *stream) {
 				// possibly have heard about the drop, so no resubscribe can
 				// race ahead of it.
 				c.deregister(s)
-				if s.sub.Dropped() {
-					// Say why it went quiet, so the viewer resubscribes and
-					// replays rather than sitting on a dead terminal.
-					c.sendJSON(ServerMessage{Type: MsgDropped, SessionID: s.sessionID, Ref: s.ref})
-				} else {
-					c.sendJSON(ServerMessage{Type: MsgExit, SessionID: s.sessionID, Ref: s.ref})
+				if msg, ok := endOfStream(ctx, s.sub.Dropped(), s.sessionID, s.ref); ok {
+					c.sendJSON(msg)
 				}
 				return
 			}
@@ -791,6 +787,27 @@ func (c *Conn) pumpStream(ctx context.Context, s *stream) {
 			}
 		}
 	}
+}
+
+// endOfStream is what to tell the viewer when a stream's events end, and
+// whether to tell it anything.
+//
+// Nothing when the stream's own context is done: that is this viewer
+// unsubscribing, which cancels the context and then closes the channel, and
+// the select above picks between the two at random. Picking the closed
+// channel sent an exit for a stream the viewer had just let go -- and if it
+// had already subscribed the same session again, the exit landed on the new
+// one and drew a live session as exited. A dropped subscriber says why it
+// went quiet, so the viewer resubscribes and replays rather than sitting on
+// a dead terminal.
+func endOfStream(ctx context.Context, dropped bool, sessionID string, ref uint32) (ServerMessage, bool) {
+	if ctx.Err() != nil {
+		return ServerMessage{}, false
+	}
+	if dropped {
+		return ServerMessage{Type: MsgDropped, SessionID: sessionID, Ref: ref}, true
+	}
+	return ServerMessage{Type: MsgExit, SessionID: sessionID, Ref: ref}, true
 }
 
 // deregister forgets a stream whose subscriber has ended.

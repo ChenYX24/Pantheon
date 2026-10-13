@@ -282,6 +282,16 @@ export class PanelSocket {
     stream.handlers.onData(frame.payload, frame.replay)
   }
 
+  /**
+   * Whether an end-of-stream message is about a stream this one has already
+   * replaced. Matched by session id alone, an `exit` the server sent for the
+   * subscription a remount had just cancelled ended the new one: a live
+   * session drawn as exited. A message with no ref is believed, as before.
+   */
+  private stale(stream: Stream, ref: number | undefined): boolean {
+    return ref !== undefined && stream.ref !== ref
+  }
+
   private handleControl(msg: ServerMessage) {
     switch (msg.t) {
       case 'subscribed': {
@@ -336,15 +346,16 @@ export class PanelSocket {
         // replays from the ring, so the terminal catches up instead of
         // silently going dead.
         const stream = msg.sessionId ? this.streams.get(msg.sessionId) : undefined
-        if (!stream) return
+        if (!stream || this.stale(stream, msg.ref)) return
         stream.ref = null
         this.sendSubscribe(stream)
         break
       }
       case 'exit': {
         const stream = msg.sessionId ? this.streams.get(msg.sessionId) : undefined
-        if (stream) stream.ended = true
-        stream?.handlers.onExit?.()
+        if (!stream || this.stale(stream, msg.ref)) break
+        stream.ended = true
+        stream.handlers.onExit?.()
         break
       }
       case 'panel': {

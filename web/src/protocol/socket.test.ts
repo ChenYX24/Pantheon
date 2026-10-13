@@ -483,3 +483,50 @@ describe('a socket opened again after close', () => {
     expect(sock.status).toBe('open')
   })
 })
+
+/**
+ * An `exit` for a subscription this viewer already replaced does not end the
+ * new one. The server can send the old stream's exit after an unsubscribe,
+ * and a remount resubscribes the same session at once; matched by session id
+ * alone, that exit marked a live session ended.
+ */
+describe('a stale end of stream', () => {
+  function openSocket() {
+    const sock = newSocket()
+    ;(sock as unknown as { dark: () => boolean }).dark = () => false
+    const sent: ClientMessage[] = []
+    ;(sock as unknown as { ws: unknown }).ws = {
+      readyState: WebSocket.OPEN,
+      send: (s: string) => sent.push(JSON.parse(s) as ClientMessage),
+    }
+    return { sock, sent }
+  }
+
+  it('is ignored when its ref is not the stream that is open now', () => {
+    const { sock } = openSocket()
+    let exits = 0
+    const handlers = { onData: () => {}, onSize: () => {}, onExit: () => exits++ }
+    sock.subscribe('s1', 80, 24, handlers)
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 1, replayStream: 'a', replayOffset: 0 })
+    sock.unsubscribe('s1')
+    sock.subscribe('s1', 80, 24, handlers)
+
+    deliver(sock, { t: 'exit', sessionId: 's1', ref: 1 }) // before the new one is confirmed
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 2, replayStream: 'a', replayOffset: 0 })
+    deliver(sock, { t: 'exit', sessionId: 's1', ref: 1 }) // and after
+    expect(exits).toBe(0)
+
+    deliver(sock, { t: 'exit', sessionId: 's1', ref: 2 })
+    expect(exits).toBe(1)
+  })
+
+  it('does not resubscribe on a drop of a stream already replaced', () => {
+    const { sock, sent } = openSocket()
+    const handlers = { onData: () => {}, onSize: () => {} }
+    sock.subscribe('s1', 80, 24, handlers)
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 2, replayStream: 'a', replayOffset: 0 })
+    sent.length = 0
+    deliver(sock, { t: 'dropped', sessionId: 's1', ref: 1 })
+    expect(sent).toEqual([])
+  })
+})
