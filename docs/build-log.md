@@ -26348,3 +26348,19 @@ list before the throttle, with the same audit row as every other refusal,
 and it comes off `beyondTheAllowlist`. `TestSetupIsRefusedToAnAddressOffTheAllowlist`
 posts the right token from loopback to a panel that allows only
 203.0.113.0/24: 201 and an account before, 403 and a `blocked` row now.
+
+## 2026-10-13 — The UI and device audit, batch 3
+
+**Two console messages on every share page.** Chromium logged
+"Unrecognized feature: 'bluetooth'" on every share page, plugin frame and
+admin page: the Permissions-Policy named a feature it does not know. Firefox
+logged a Content-Security-Policy error on every load of a wall: a page with no
+icon makes the browser ask for `/favicon.ico` at the panel's root, and the
+page's own `img-src` refuses it. `bluetooth` is gone from the header (Web
+Bluetooth asks the person first, from an opaque origin), and
+`TestThePermissionsPolicyNamesOnlyKnownFeatures` holds the header to names
+Chromium recognises. Every built-in template declares an empty `data:` icon,
+which `img-src` already allows, and `TestEveryTemplatePageDeclaresItsIcon`
+covers every template page. A page somebody writes from scratch still gets
+the Firefox message until it names an icon; it is harmless, and the panel
+does not edit an owner's HTML.
