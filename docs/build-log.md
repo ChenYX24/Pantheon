@@ -25904,6 +25904,26 @@ address, sixteen in flight each (429 past that); registration belongs to a
 signed-in account and is not counted; the global cap stays. Filling the
 store now takes 256 addresses. `TestOneAddressCannotTakeEveryPasskeyCeremony`
 floods from one address through a trusted proxy and signs in from another.
+
+**A launch profile's API key, and the webhook URLs, were the credentials a
+copied database still handed over.** Chat tokens, page and plugin secrets,
+the hook token and share links' addresses are sealed under `secrets.key`;
+a profile's secret variables sat in its `env` column as plain JSON, and the
+webhook list (Slack and Discord URLs carry their token in the path) in a
+settings row. `profiles.go` had argued against sealing -- a key beside the
+database is obfuscation -- but that was written on 2026-08-27, and
+`secrets.key` arrived on 2026-09-14 with the opposite conclusion for every
+other credential. Now the store opens the key from the data directory beside
+the database (`sealed.go`), so the panel and the CLI read profiles the same
+way: a secret variable is sealed bound to its profile and name (copied onto
+another row it opens as nothing), a base URL stays readable because the
+settings page shows it back, and the webhook list is sealed whole. Rows from
+before read as they are, and `ResealPlaintext`, run where `Poll` starts, seals
+them; a second run writes nothing. The settings page's line that said
+"stored in plain text" says what is true now, in both languages.
+`TestSecretsInProfilesAndWebhooksAreSealedAtRest`,
+`TestPlaintextFromBeforeIsReadAndThenSealed` and
+`TestStartingThePollerSealsWhatWasStoredInTheClear`.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

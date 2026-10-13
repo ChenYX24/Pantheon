@@ -39,7 +39,7 @@ func (s *Server) registerWebhookRoutes(r chi.Router) {
 }
 
 func (s *Server) webhooks(r *http.Request) []notify.Webhook {
-	raw, err := s.DB.GetSetting(r.Context(), webhooksKey, "")
+	raw, err := s.DB.GetSealedSetting(r.Context(), webhooksKey, "")
 	if err != nil || raw == "" {
 		return nil
 	}
@@ -84,7 +84,7 @@ func (s *Server) handlePutWebhooks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := s.DB.SetSetting(r.Context(), webhooksKey, string(body)); err != nil {
+	if err := s.DB.SetSealedSetting(r.Context(), webhooksKey, string(body)); err != nil {
 		s.writeStoreErr(w, err)
 		return
 	}
@@ -149,7 +149,7 @@ func sampleEvent(url string) notify.Event {
 // the operator's problem to notice on the settings page; making it the reason a
 // poll tick fails would turn somebody else's outage into this panel's.
 func (s *Server) fireWebhooks(ctx context.Context, row store.Session, state string) {
-	raw, err := s.DB.GetSetting(ctx, webhooksKey, "")
+	raw, err := s.DB.GetSealedSetting(ctx, webhooksKey, "")
 	if err != nil || raw == "" {
 		return
 	}

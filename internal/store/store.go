@@ -1308,6 +1308,8 @@ type DB struct {
 	// not wait out; one panel process is the only writer, so a mutex is the
 	// whole fix.
 	handleMu sync.Mutex
+	// seal is the secrets key, opened on first use: sealed.go.
+	seal sealer
 }
 
 // Open connects to the database at path, applying the schema if needed.
@@ -1350,6 +1352,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	}
 
 	db := &DB{sql: sqlDB}
+	db.seal.path = keyPathFor(path)
 	if err := db.migrate(ctx); err != nil {
 		sqlDB.Close()
 		return nil, err

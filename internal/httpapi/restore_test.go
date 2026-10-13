@@ -680,3 +680,28 @@ func TestOneFailedWriteDoesNotEndTheTick(t *testing.T) {
 		t.Error("the session after the failed write was not attached that tick")
 	}
 }
+
+// A running panel seals what an older one stored in the clear: the pass is
+// called where every panel starts, not only by a test.
+func TestStartingThePollerSealsWhatWasStoredInTheClear(t *testing.T) {
+	_, srv := newTestServer(t)
+	if err := srv.DB.SetSetting(context.Background(), webhooksKey, `[{"url":"https://h.example/plain-secret"}]`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); srv.Poll(ctx) }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		raw, _ := srv.DB.GetSetting(context.Background(), webhooksKey, "")
+		if !strings.Contains(raw, "plain-secret") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the webhook list was still in the clear after the poller started")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+}

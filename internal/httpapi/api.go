@@ -2318,6 +2318,16 @@ func (s *Server) Poll(ctx context.Context) {
 	if s.Tmux != nil && s.Log != nil {
 		s.Tmux.SetLogger(s.Log)
 	}
+	// What was stored in the clear before it was sealed: launch profiles'
+	// secret variables and the webhook list. Once, here, because Poll is the
+	// one thing every running panel starts; see store/sealed.go.
+	if s.DB != nil {
+		if n, err := s.DB.ResealPlaintext(ctx, webhooksKey); err != nil {
+			s.Log.Warn("sealing stored secrets", "err", err)
+		} else if n > 0 {
+			s.Log.Info("sealed stored secrets", "rows", n)
+		}
+	}
 	t := time.NewTicker(pollInterval)
 	defer t.Stop()
 	every := s.TrimEvery

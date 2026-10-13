@@ -909,8 +909,8 @@ const DICT = {
     en: 'Renaming a variable means entering its value again.',
   },
   'profile.plaintext': {
-    zh: '密钥明文存在面板的数据库里，只是不会再发回浏览器。',
-    en: 'Keys are stored in the panel\'s database in plain text; they are just never sent back to a browser.',
+    zh: '密钥加密存在面板的数据目录里，不会再发回浏览器。',
+    en: 'Keys are stored encrypted in the panel\'s data directory and never sent back to a browser.',
   },
   'profile.envSet': { zh: '{n} 个变量', en: '{n} variables' },
   'profile.envSetOne': { zh: '1 个变量', en: '1 variable' },
