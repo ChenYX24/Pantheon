@@ -30,6 +30,7 @@ const Commands = `  serve      run the panel (the default with no command)
   status     the projects and sessions as the sidebar shows them
   project    list, add, rename, pin, order, archive and remove projects
   session    list, create, rename, pin, restart, kill, type into and read sessions
+  me         from inside a session: mark the state, set a summary, progress and labels
   note       read or replace a project's note
   todo       list, add, tick and remove a project's todos
   token      list, create and revoke API tokens

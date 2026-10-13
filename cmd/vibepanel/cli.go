@@ -506,6 +506,38 @@ func sessionViaAPI(ctx context.Context, sub string, rest []string) (handled bool
 		}
 		fmt.Print(strings.TrimRight(out.Text, "\n") + "\n")
 		return true, nil, nil
+	case "info":
+		// What the session says about itself, set by the owner: the same
+		// fields `vibepanel me` sets from inside.
+		if len(args) < 2 {
+			return true, nil, errors.New("usage: vibepanel session info <session> summary <text> | progress <0-100> | labels a,b | clear")
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, nil, err
+		}
+		patch := map[string]any{}
+		switch args[1] {
+		case "summary":
+			patch["summary"] = strings.Join(args[2:], " ")
+		case "progress":
+			n, perr := strconv.Atoi(strings.TrimSuffix(strings.Join(args[2:], ""), "%"))
+			if perr != nil || n < 0 || n > 100 {
+				return true, nil, errors.New("progress is a number from 0 to 100")
+			}
+			patch["progress"] = n
+		case "labels":
+			patch["labels"] = strings.FieldsFunc(strings.Join(args[2:], ","), func(r rune) bool { return r == ',' || r == ' ' })
+		case "clear":
+			patch["summary"], patch["progress"], patch["labels"] = "", -1, []string{}
+		default:
+			return true, nil, errors.New("session info takes summary, progress, labels or clear")
+		}
+		if err := c.do(ctx, http.MethodPatch, "/api/sessions/"+s.ID, patch, nil); err != nil {
+			return true, nil, err
+		}
+		fmt.Printf("info of %s: %s\n", s.Title, args[1])
+		return true, nil, nil
 	case "restore":
 		var out any
 		if err := c.do(ctx, http.MethodPost, "/api/sessions/restore", map[string]any{}, &out); err != nil {

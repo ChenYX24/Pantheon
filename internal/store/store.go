@@ -1271,6 +1271,21 @@ var migrations = []func(tx *sql.Tx) error{
 		}
 		return nil
 	},
+	// What a session says about itself (`vibepanel me`): a summary line, a
+	// progress figure and labels, beside the title and the state it could
+	// already set through its hook token.
+	func(tx *sql.Tx) error {
+		for _, stmt := range []string{
+			`ALTER TABLE sessions ADD COLUMN summary TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE sessions ADD COLUMN progress INTEGER NOT NULL DEFAULT -1`,
+			`ALTER TABLE sessions ADD COLUMN labels TEXT NOT NULL DEFAULT ''`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("%s: %w", stmt, err)
+			}
+		}
+		return nil
+	},
 }
 
 // scanner is *sql.Row and *sql.Rows both, so one scan function serves a

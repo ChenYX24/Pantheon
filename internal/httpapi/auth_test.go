@@ -65,6 +65,10 @@ var openRoutes = map[string]string{
 	// session or API token, a plugin access token, or the plugin's HMAC
 	// secret -- and there is no anonymous mode. 404 for a plugin that
 	// declares no door.
+	// A session's own door (me.go): the agent inside a session, with the
+	// derived token its environment holds, saying what it is up to. The
+	// middleware requires that token for exactly the session named.
+	"/api/me/v1":                    "a session's own door; the middleware requires the session's derived token",
 	"/api/plugin-http/{pluginID}":   "a plugin process's door; the handler requires the owner, a plugin token or the HMAC secret",
 	"/api/plugin-http/{pluginID}/*": "the same, under the mount",
 	// A directory preview, and the reason is measured rather than chosen.

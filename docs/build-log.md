@@ -25508,3 +25508,32 @@ panel that owns the data directory, or none -- and a running panel with no
 account is treated as none for the commands that have an offline path. Two
 tests pin both.
 
+## 2026-10-13 — A session's own voice, step 1: the door and the self-description
+
+「通过 CLI 发送弹窗/通知/文件，mark 自己的状态，获取并修改自己的信息，配套最佳实践」.
+The elegant part was already there: every session's environment holds a
+credential that names it and nothing else (`VIBEPANEL_TOKEN`,
+MAC(root, session id), the state reporter's since report tokens exist).
+`/api/me/v1` (`internal/httpapi/me.go`) is that credential given a second
+thing to do, in the shape of red lines 8 and 10: it reaches two routes,
+`currentUser` does not consult it, and there is no target parameter -- the
+session is the one the token was derived for, so an agent cannot speak
+for, rename or read another session, and cannot reach a project, a note
+or a setting (`TestASessionTokenIsItsSessionsAlone` tries each; the root
+hook token is refused too, because it names no session). The owner does
+the same things to any session through `PATCH /api/sessions/{id}`; one
+`applySessionInfo` behind both.
+
+What a session may say: its title and state as before, now with a `why`
+that becomes a notice in its messages (what the chat card shows as the
+last thing it said), and three new columns on the row -- a 120-character
+summary, a 0-100 progress, up to five 24-character labels -- drawn under
+the row in the sidebar with the figure printed beside the bar (red line
+4). `vibepanel me` is the agent's command, `vibepanel session info` the
+owner's; `vibepanel me guide` prints the practice. The sub-router spelled
+the route `/api/me/v1/` to the walk and `/api/me/v1` to the doc pin, so it
+is registered flat and spelled one way.
+
+Next: `say` and `notify` to the web and the chat bridge, `send` for files,
+and `hook install --guide`.
+

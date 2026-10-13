@@ -17,6 +17,7 @@ import (
 
 	"github.com/jiangmuran/vibepanel/internal/auth"
 	"github.com/jiangmuran/vibepanel/internal/config"
+	"github.com/jiangmuran/vibepanel/internal/hooks"
 	"github.com/jiangmuran/vibepanel/internal/httpapi"
 	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/store"
@@ -36,6 +37,7 @@ type cliPanel struct {
 	ts  *httptest.Server
 	db  *store.DB
 	dir string
+	srv *httpapi.Server
 }
 
 func startCLIPanel(t *testing.T) *cliPanel { return startCLIPanelWith(t, true) }
@@ -91,7 +93,7 @@ func startCLIPanelWith(t *testing.T, withAccount bool) *cliPanel {
 	t.Setenv("VIBEPANEL_TMUX_SOCKET", socket)
 	t.Setenv("VIBEPANEL_CLI_URL", ts.URL)
 	t.Setenv("VIBEPANEL_CLI_TOKEN", "")
-	return &cliPanel{ts: ts, db: db, dir: dir}
+	return &cliPanel{ts: ts, db: db, dir: dir, srv: srv}
 }
 
 // run executes one command and returns what it printed.
@@ -308,5 +310,59 @@ func TestBeforeSetupTheCLIWorksOnTheDatabase(t *testing.T) {
 	}
 	if tokens, _ := p.db.ListAPITokens(context.Background()); len(tokens) != 0 {
 		t.Errorf("a token was minted with no account: %+v", tokens)
+	}
+}
+
+// `vibepanel me` from inside a session: the environment the panel gave the
+// session is the whole configuration, and what it says shows on the owner's
+// side -- in the state and under the row.
+func TestMeSpeaksForTheSessionItRunsIn(t *testing.T) {
+	p := startCLIPanel(t)
+	ctx := context.Background()
+	mustRun(t, "project", "add", t.TempDir(), "--name", "Voice")
+	mustRun(t, "session", "new", "--project", "Voice", "--title", "agent", "--", "sleep", "60")
+	sessions, _ := p.db.ListSessions(ctx)
+	if len(sessions) != 1 {
+		t.Fatalf("sessions: %+v", sessions)
+	}
+	root, err := p.srv.HookToken(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VIBEPANEL_SESSION_ID", sessions[0].ID)
+	t.Setenv("VIBEPANEL_TOKEN", hooks.ReportToken(root, sessions[0].ID))
+	t.Setenv("VIBEPANEL_URL", p.ts.URL)
+	if out := mustRun(t, "me"); !strings.Contains(out, "agent") || !strings.Contains(out, "Voice") {
+		t.Errorf("me: %s", out)
+	}
+	mustRun(t, "me", "state", "waiting", "--why", "which table to drop")
+	mustRun(t, "me", "info", "set", "summary", "3 of 5 done, blocked on the migration")
+	mustRun(t, "me", "info", "set", "progress", "60%")
+	mustRun(t, "me", "info", "set", "labels", "db,migration")
+	mustRun(t, "me", "title", "schema work")
+	row, _ := p.db.GetSession(ctx, sessions[0].ID)
+	if row.State != "waiting" || row.Summary != "3 of 5 done, blocked on the migration" || row.Progress != 60 || strings.Join(row.Labels, ",") != "db,migration" || row.Title != "schema work" {
+		t.Errorf("row: %+v", row)
+	}
+	if last, ok, _ := p.db.LatestSessionMessage(ctx, row.ID); !ok || last.Text != "which table to drop" {
+		t.Errorf("why: %+v", last)
+	}
+	if out := mustRun(t, "status"); !strings.Contains(out, "▲ waiting") || !strings.Contains(out, "schema work") {
+		t.Errorf("status: %s", out)
+	}
+	// The owner's side of the same fields, and clearing.
+	t.Setenv("VIBEPANEL_SESSION_ID", "")
+	mustRun(t, "session", "info", "schema", "clear")
+	row, _ = p.db.GetSession(ctx, sessions[0].ID)
+	if row.Summary != "" || row.Progress != -1 || len(row.Labels) != 0 {
+		t.Errorf("after clear: %+v", row)
+	}
+	if out := mustRun(t, "me", "guide"); !strings.Contains(out, "me state waiting") {
+		t.Errorf("guide: %s", out)
+	}
+	// Outside a session there is nothing to speak for.
+	t.Setenv("VIBEPANEL_TOKEN", "")
+	if _, err := runCLI(t, "me"); err == nil || !strings.Contains(err.Error(), "inside a session") {
+		t.Errorf("me outside a session: %v", err)
 	}
 }

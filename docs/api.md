@@ -348,6 +348,21 @@ the frame to a remote page.
 ### `PATCH /api/sessions/{id}`
 ### `DELETE /api/sessions/{id}`
 ### `POST /api/sessions/{id}/restart`
+### `GET /api/me/v1`
+### `PATCH /api/me/v1`
+
+A session's own door (`docs/cli.md`, `vibepanel me`). The credential is
+the session's derived token -- `VIBEPANEL_TOKEN` in its environment, the
+same one its state reporter uses -- as a Bearer, with the session's id in
+`X-Vibepanel-Session`; it names that one session and reaches this prefix
+and nothing else, and there is no target parameter. `GET` answers what the
+session may know about itself: `{id, project, title, state, summary,
+progress, labels, pinned, exited}`. `PATCH` takes any of `title`, `state`
+(with an optional `why`, kept as a notice the chat card shows), `summary`
+(120 characters), `progress` (0-100, -1 clears), `labels` (at most five of
+24 characters), and answers the same view. Audited `session.info`; a token
+that is not the named session's is `me.rejected`.
+
 ### `GET /api/sessions/{id}/screen`
 
 `{text}`: the session's pane as text, what `vibepanel session screen`

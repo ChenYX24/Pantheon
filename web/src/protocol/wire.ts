@@ -208,6 +208,10 @@ export interface Session {
   rows: number
   createdAt: number
   archivedAt: number | null
+  /** What the session says about itself (`vibepanel me`): a line, 0-100 or -1, a few chips. */
+  summary: string
+  progress: number
+  labels: string[]
 
   /**
    * The argv this session was created with — the only version of it that can be

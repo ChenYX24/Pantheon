@@ -470,6 +470,7 @@ func (s *Server) Routes() http.Handler {
 		// declared secret before anything runs. See pluginservice.go.
 		s.registerPluginInboundRoute(r)
 		s.registerPluginHTTPRoute(r)
+		s.registerMeRoutes(r)
 
 		// Everything else needs a session. This panel hands out a writable
 		// terminal; there is no such thing as a harmless unauthenticated
@@ -1818,6 +1819,12 @@ type patchSessionRequest struct {
 	// RestoreOnBoot asks for this session to be rebuilt without confirmation
 	// the next time the panel starts and finds its tmux session gone.
 	RestoreOnBoot *bool `json:"restoreOnBoot"`
+	// What the session says about itself, settable by the owner too (the
+	// CLI's `session info`); the same fields as a session's own door.
+	Summary  *string  `json:"summary"`
+	Progress *int     `json:"progress"`
+	Labels   []string `json:"labels"`
+	Why      string   `json:"why"`
 }
 
 func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
@@ -1859,6 +1866,19 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RestoreOnBoot != nil {
 		if err := s.DB.SetSessionRestoreOnBoot(ctx, sid, *req.RestoreOnBoot); err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+	}
+	if req.Summary != nil || req.Progress != nil || req.Labels != nil || req.Why != "" {
+		row, err := s.DB.GetSession(ctx, sid)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		u, _ := currentUserFrom(r)
+		if err := s.applySessionInfo(ctx, row, mePatch{Summary: req.Summary, Progress: req.Progress, Labels: req.Labels, Why: req.Why},
+			u.Username, s.clientIP(r)); err != nil {
 			s.writeStoreErr(w, err)
 			return
 		}

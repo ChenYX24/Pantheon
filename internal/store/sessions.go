@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jiangmuran/vibepanel/internal/session"
 )
@@ -56,6 +57,15 @@ type Session struct {
 	// migration v9 are the second, and the restore dialog has to say so rather
 	// than quietly starting a shell under an agent's name.
 	LaunchRecorded bool `json:"launchRecorded"`
+
+	// What the session says about itself (docs/cli.md, `vibepanel me`): a
+	// one-line summary, a progress figure (0-100, -1 for none) and a few
+	// labels. Written only by the session's own credential and the owner;
+	// shown in the sidebar and on the chat card, so each is bounded as a
+	// title is.
+	Summary  string   `json:"summary"`
+	Progress int      `json:"progress"`
+	Labels   []string `json:"labels"`
 
 	// LaunchProfileID is the profile this session was started with, empty for
 	// one started without a profile.
@@ -205,7 +215,7 @@ const sessionColumns = `s.id, s.project_id, s.tmux_name, s.title, s.title_source
 	s.state_source, s.state_changed_at, s.pinned, s.sort_index, s.cwd, s.command, s.cols,
 	s.rows, s.last_output_at, s.created_at, s.archived_at, s.scratch, s.exited,
 	s.exit_status, s.launch_command, s.launch_profile_id, s.claude_account_id, s.restore_on_boot,
-	s.restored_at,
+	s.restored_at, s.summary, s.progress, s.labels,
 	COALESCE(sb.captured_at, 0)`
 
 // sessionFrom is the FROM clause every session read shares.
@@ -215,15 +225,22 @@ func scanSession(sc interface{ Scan(...any) error }) (Session, error) {
 	var s Session
 	var sortIdx sql.NullInt64
 	var archived sql.NullInt64
-	var launch string
+	var launch, labels string
 	err := sc.Scan(&s.ID, &s.ProjectID, &s.TmuxName, &s.Title, &s.TitleSource,
 		&s.State, &s.StateSource, &s.StateChangedAt, &s.Pinned, &sortIdx,
 		&s.CWD, &s.Command, &s.Cols, &s.Rows, &s.LastOutputAt, &s.CreatedAt, &archived,
 		&s.Scratch, &s.Exited, &s.ExitStatus, &launch, &s.LaunchProfileID, &s.ClaudeAccountID,
 		&s.RestoreOnBoot,
-		&s.RestoredAt, &s.ScrollbackAt)
+		&s.RestoredAt, &s.Summary, &s.Progress, &labels, &s.ScrollbackAt)
 	if err != nil {
 		return Session{}, err
+	}
+	s.Labels = []string{}
+	if labels != "" {
+		_ = json.Unmarshal([]byte(labels), &s.Labels)
+		if s.Labels == nil {
+			s.Labels = []string{}
+		}
 	}
 	if sortIdx.Valid {
 		v := int(sortIdx.Int64)
@@ -554,4 +571,51 @@ func (d *DB) MarkSessionRestored(ctx context.Context, id string, at int64) error
 // DeleteSession removes a session row.
 func (d *DB) DeleteSession(ctx context.Context, id string) error {
 	return d.exec1(ctx, `DELETE FROM sessions WHERE id = ?`, id)
+}
+
+// Session info limits: a summary is read on a phone under a title, labels
+// are chips beside it.
+const (
+	MaxSessionSummary = 120
+	MaxSessionLabels  = 5
+	MaxSessionLabel   = 24
+)
+
+// SetSessionInfo writes what a session says about itself. A nil slice
+// leaves that field as it is; an empty one clears it. Progress below zero
+// clears it.
+func (d *DB) SetSessionInfo(ctx context.Context, id string, summary *string, progress *int, labels []string) error {
+	sets, args := []string{}, []any{}
+	if summary != nil {
+		sets = append(sets, "summary = ?")
+		args = append(args, session.TruncateTitle(*summary))
+	}
+	if progress != nil {
+		p := *progress
+		if p < 0 {
+			p = -1
+		}
+		if p > 100 {
+			p = 100
+		}
+		sets = append(sets, "progress = ?")
+		args = append(args, p)
+	}
+	if labels != nil {
+		raw, _ := json.Marshal(labels)
+		sets = append(sets, "labels = ?")
+		args = append(args, string(raw))
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, id)
+	res, err := d.sql.ExecContext(ctx, `UPDATE sessions SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
+	if err != nil {
+		return fmt.Errorf("store: set session info: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

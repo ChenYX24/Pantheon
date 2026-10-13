@@ -61,6 +61,7 @@ scripts.
 | `session kill <s>` | |
 | `session send <s> [text] [--enter]` | type into it; with no text, stdin; `--enter` presses Enter after |
 | `session screen <s>` | the pane as text |
+| `session info <s> summary <text> \| progress <0-100> \| labels a,b \| clear` | what the session says about itself, set from outside |
 | `session restore` | rebuild the sessions a reboot took |
 | `note get\|set <p> [text]` | the project's note; `set` with no text reads stdin |
 | `todo ls\|add\|done\|undo\|rm <p> [text\|id]` | the project's todos; `done`, `undo` and `rm` take an id or the start of the text |
@@ -69,6 +70,32 @@ scripts.
 | `settings archive-idle <days>` | archive a project idle that long; 0 never |
 | `settings timezone <zone>` | |
 | `page …`, `plugin …`, `account …`, `service …`, `hook …`, `tune …`, `doctor` | as before: share pages, plugins, the first account, the service, the agent hooks, another tool's settings, a health check |
+
+## From inside a session
+
+`vibepanel me` is the agent's own voice. It runs inside a session the
+panel started and needs nothing: the environment holds the session's id,
+its own token and the panel's address. The token names that one session
+and reaches `/api/me/v1` and nothing else, so an agent can say what it is
+up to and cannot touch another session, a project or the owner's settings
+(`TestASessionTokenIsItsSessionsAlone`).
+
+| | |
+|---|---|
+| `me` | who am I: title, state, summary, progress, labels |
+| `me state working\|waiting\|done [--why "…"]` | mark the state; the why is kept as a notice the chat card shows |
+| `me title <title>` | |
+| `me info set summary <text>` | one line, 120 characters, under the title in the sidebar |
+| `me info set progress <0-100>` | a bar with the figure beside it |
+| `me info set labels a,b` | up to five chips |
+| `me info clear [summary\|progress\|labels]` | |
+| `me guide` | the best practice, one page |
+
+The practice, in short: mark `waiting` with a why **before** asking a
+person anything; one summary per milestone, written for somebody reading
+a phone at 2am; say a thing once. `vibepanel me guide` prints the rest,
+and `vibepanel hook install --guide` writes it into a project's
+`AGENTS.md` for the agent to find.
 
 ## In a container
 

@@ -514,6 +514,9 @@ func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 		"plugin.created": true,
 		// Text typed into a session from the API: the CLI's `session send`.
 		"session.input": true,
+		// A session saying what it is up to, and a token that was not its own.
+		"session.info": true,
+		"me.rejected":  true,
 		// The door on the panel's port: a token minted or revoked, the
 		// owner's cross-origin list changed.
 		"plugin.token_created":   true,

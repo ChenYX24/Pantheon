@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import {
   Archive,
   ChevronLeft,
@@ -22,6 +22,7 @@ import { InlineName } from './InlineName'
 import { ProjectMark } from './ProjectMark'
 import { EXIT_VANISHED } from '../protocol/wire'
 import { t, useLang } from '../i18n'
+import { safeText } from './text'
 
 export interface SidebarProps {
   projects: Project[]
@@ -477,8 +478,8 @@ export function Sidebar(props: SidebarProps) {
               const isLive = props.live.includes(s.id)
               const isSelected = props.selected === s.id
               return (
+                <Fragment key={s.id}>
                 <div
-                  key={s.id}
                   data-testid="session-row"
                   // The id, so a check can ask about *this* session's terminal
                   // rather than about whichever one it happens to find. The
@@ -604,6 +605,33 @@ export function Sidebar(props: SidebarProps) {
                   </button>
                   )}
                 </div>
+                {/* What the session says about itself (`vibepanel me`): a
+                    line, a figure and a few chips under the row. The figure
+                    is printed beside the bar, so the bar is never the only
+                    carrier (red line 4). */}
+                {(s.summary !== '' || s.progress >= 0 || s.labels.length > 0) && (
+                  <div data-testid="session-info" className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pr-2 pl-7 text-vp-xs text-ink-2">
+                    {s.summary !== '' && (
+                      <span className="min-w-0 truncate" title={safeText(s.summary)}>
+                        {safeText(s.summary)}
+                      </span>
+                    )}
+                    {s.progress >= 0 && (
+                      <span className="tabular inline-flex shrink-0 items-center gap-1" data-testid="session-progress">
+                        <span className="h-1 w-10 overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
+                          <span className="block h-full" style={{ width: `${s.progress}%`, background: 'var(--vp-accent)' }} />
+                        </span>
+                        {s.progress}%
+                      </span>
+                    )}
+                    {s.labels.map((l) => (
+                      <span key={l} className="rounded-vp bg-surface-2 px-1 text-ink-3">
+                        {safeText(l)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                </Fragment>
               )
             })}
             </div>
