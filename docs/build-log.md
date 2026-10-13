@@ -26212,3 +26212,62 @@ rules are in `dialogFocus.ts` with `dialogFocus.test.ts`; render-check's
 Escape from inside the body, and asserts the focus is back on the opener.
 Removing the wrap or the restore turns both red. A control that needs Escape
 for itself calls `preventDefault`, which the hook honours.
+
+**Forced colours.** There was no `@media (forced-colors: active)` rule, and
+"chosen" here is carried by a background: the selected session row, the active
+tab, a meter's fill. Windows High Contrast replaces every background with
+Canvas, so the row you are on matched its neighbours and a bar was an empty
+outline. The block names each: an outline on `[aria-current='true']` and on a
+selected tab, a border on `.vp-primary` buttons, an outline around `.vp-bar`
+with `Highlight` for what fills it (and a Canvas gap between the spend mix's
+segments), and `CanvasText` for sparkline strokes. System colours only. Checked
+once in Chromium with `forcedColors: 'active'` on the real rules; pinned in
+`styles.test.ts`, red with the block's media query renamed.
+
+**Contrast.** The light theme's tertiary ink was 2.85-3.0:1 and carried about
+180 pieces of text; the comment beside it said 3.0 as if that were a pass. It
+is 0.75 alpha now (and secondary 0.86 to stay above it), dark tertiary 0.53,
+the light accent `#0062cc`, and the dark accent `#2e90ff` with black ink on it
+(white on the old one was 3.65). `contrast.test.ts` computes WCAG ratios from
+the declarations in all three blocks that hold them, against all three
+surfaces, so a token cannot slide back; red with the old ink-3 alphas and with
+the old accent. Dark secondary was already 6.9.
+
+**Tabs.** `.vp-segmented > .vp-tab` was `flex: 1 1 0; min-width: 0`, so a strip
+with more in it than its row shrank each tab below its label: "Alerts" ran into
+the next icon at 1440px, and at 320px the chat strip and the settings rail
+clipped with nothing saying there was more. A tab sizes to its content now, a
+strip scrolls, and edge shadows (`local`/`scroll` background layers, no
+JavaScript) show which side has more. `chat-check` measures chat and settings
+tabs in four language/width corners (`lib/tabs.mjs`: content fits, nothing
+sticks out, neighbours do not overlap, every tab can be scrolled into view);
+the old rule fails three of them.
+
+**Settings uses its own width.** The rail answered to `sm:`, the window, while
+the dialog is at most 48rem. It is a `@container` and the rail uses `@xl:`.
+`container-queries.test.ts` forbids viewport breakpoints in `Settings.tsx` and
+`settings/`; red against the old file.
+
+**Untranslated strings.** The sign-in refusals reached the page as English
+prose. The server now sends a stable `code` beside the sentence for the
+sign-in and password refusals (`bad_credentials`, `too_many_attempts` with a
+`retryAfter`, `busy`, `bad_setup_token`, `already_configured`,
+`wrong_current_password`, `same_password`) and the page translates the code
+(`errorText`); it never matches prose. The built-in page templates' labels
+live in manifests that hold one English string, so `pages/labels.ts` maps
+exactly those to the dictionary, and a test fails when a template gains a
+label without one. The selection bar, the sidebar's Close/Collapse tooltip,
+the rename tooltip and the compose Enter toggle were English under a Chinese
+UI; the last was found by the new rule, which looks at literals inside a
+conditional `title`. Validation messages from `auth.ValidateCredentials`
+(too short, too long) still go through as the server's sentence.
+`TestAuthRefusalsCarryTheirCode` pins the wire.
+
+**The drawer arrives.** The phone's project drawer was on screen the next
+frame with its scrim popping in. `.vp-drawer-in` slides it from the left for
+220ms on the shared curve and the scrim takes the backdrop's fade; it is an
+entrance only (the drawer unmounts to close) and the global reduced-motion
+rule collapses it to the open state. render-check samples the drawer from the
+menu button frame by frame: first frame off-screen, last at the edge, scrim
+starting transparent, and already open under reduced motion. Each of the
+drawer and the scrim fails with its class removed.
