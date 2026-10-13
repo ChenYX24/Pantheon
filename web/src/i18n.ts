@@ -264,6 +264,9 @@ const DICT = {
     en: 'The browser refused a clipboard write that did not come from a click',
   },
   'app.closeProjects': { zh: '关闭项目列表', en: 'Close projects' },
+  'app.closeSheet': { zh: '关闭面板', en: 'Close panel' },
+  'app.panelSheet': { zh: '面板', en: 'Panel' },
+  'app.terminalsSheet': { zh: '终端', en: 'Terminals' },
   'files.escapeLink': {
     zh: '这个链接指向项目外面，面板不会打开它。',
     en: 'This link points outside the project. The panel will not open it.',

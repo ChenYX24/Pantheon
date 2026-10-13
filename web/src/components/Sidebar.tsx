@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react'
+import { Menu } from './Menu'
 import { DisconnectedBar } from './Disconnected'
 import {
   Archive,
@@ -7,6 +8,7 @@ import {
   GripVertical,
   ListOrdered,
   Pause,
+  PanelRight,
   Pin,
   PinOff,
   Plus,
@@ -92,6 +94,13 @@ export interface SidebarProps {
    * phone, so it says so itself.
    */
   disconnected?: boolean
+
+  /**
+   * Opens the side panel or the project's terminals as a sheet. Only in the
+   * phone drawer: on a phone the side panel and the bottom strip had no way in
+   * at all, so files, notes, git, the monitor and tokens did not exist there.
+   */
+  onOpenSheet?: (which: 'panel' | 'terminals') => void
 
   /** An agent is running and nothing is reporting its state. */
   stateGuessed: boolean
@@ -347,7 +356,12 @@ export function Sidebar(props: SidebarProps) {
   // and acting second is one more tap and it is how every list on a phone
   // works; it also gives the row you are on something to be, which is the
   // other half of 「没有层次感」.
-  const rowControls = (isSelected: boolean) => !overlay || isSelected
+  //
+  // The same holds on any touch screen, not only in the phone's drawer: an
+  // iPad's sidebar is the desktop one, and with pin and kill drawn on every
+  // row at 44px the names came out "vib…", "dot…" and "pag…" -- in portrait
+  // and in landscape at 1194.
+  const rowControls = (isSelected: boolean) => !(overlay || props.touch) || isSelected
 
   // The overlay covers the terminal and must be opaque.
   const shell = overlay
@@ -465,24 +479,41 @@ export function Sidebar(props: SidebarProps) {
                   happens to exist gives you a project you could not remove from
                   here at all — the endpoint, the CLI and even the client method
                   were all there, and nothing in the panel called it. */}
+              {overlay || props.touch ? (
+                // On a touch screen every control is 44px and always drawn, and
+                // three of them beside a project's name left "vi…": archive and
+                // remove go into one menu, which also stops the destructive
+                // one sitting under a thumb next to archive.
+                <Menu
+                  testid="project-more"
+                  label={t('menu.moreFor', { name: projectLabel(p) })}
+                  items={[
+                    { label: t('project.archive'), icon: Archive, testid: 'project-archive', onSelect: () => props.onArchiveProject(p) },
+                    { label: t('project.remove'), icon: X, testid: 'project-remove', destructive: true, onSelect: () => props.onRemoveProject(p) },
+                  ]}
+                />
+              ) : (
+                <>
               <button
-                type="button"
-                onClick={() => props.onArchiveProject(p)}
-                data-testid="project-archive"
-                title={t('project.archive')}
-                className="vp-control vp-tap vp-reveal"
-              >
-                <Archive size={13} />
-              </button>
-              <button
-                type="button"
-                onClick={() => props.onRemoveProject(p)}
-                data-testid="project-remove"
-                title={t('project.remove')}
-                className="vp-control vp-tap vp-reveal"
-              >
-                <X size={13} />
-              </button>
+                    type="button"
+                    onClick={() => props.onArchiveProject(p)}
+                    data-testid="project-archive"
+                    title={t('project.archive')}
+                    className="vp-control vp-tap vp-reveal"
+                  >
+                    <Archive size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => props.onRemoveProject(p)}
+                    data-testid="project-remove"
+                    title={t('project.remove')}
+                    className="vp-control vp-tap vp-reveal"
+                  >
+                    <X size={13} />
+                  </button>
+                </>
+              )}
             </div>
 
             <div className={(byProject.get(p.id) ?? []).length > 0 ? pack.kids : ''}>
@@ -684,6 +715,29 @@ export function Sidebar(props: SidebarProps) {
           </button>
         )}
       </nav>
+
+      {overlay && props.onOpenSheet && (
+        <div className="grid shrink-0 grid-cols-2 gap-1 border-t border-hairline px-2 py-2">
+          <button
+            type="button"
+            data-testid="open-panel-sheet"
+            onClick={() => props.onOpenSheet?.('panel')}
+            className="vp-press flex min-h-11 items-center justify-center gap-1.5 rounded-vp text-vp-base text-ink-2 hover:bg-surface-2 hover:text-ink"
+          >
+            <PanelRight size={15} aria-hidden />
+            {t('app.panelSheet')}
+          </button>
+          <button
+            type="button"
+            data-testid="open-terminals-sheet"
+            onClick={() => props.onOpenSheet?.('terminals')}
+            className="vp-press flex min-h-11 items-center justify-center gap-1.5 rounded-vp text-vp-base text-ink-2 hover:bg-surface-2 hover:text-ink"
+          >
+            <TerminalIcon size={15} aria-hidden />
+            {t('app.terminalsSheet')}
+          </button>
+        </div>
+      )}
 
       {/* What this software is, at the bottom-left, always.
           

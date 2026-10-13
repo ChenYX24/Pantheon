@@ -2356,6 +2356,53 @@ browser = await chromium.launch({ headless: true })
     else note('PASS', 'disconnect', 'said after the grace, in the drawer too, and gone on reconnect')
   }
 
+  // ── the tablet tier and the phone's way to the side panel ───────────────
+  // From 768 up there was one layout, three columns, and an iPad mini in
+  // portrait was left a ~215px terminal. Between 768 and 1100 the side panel
+  // is a sheet over the terminal, opened from the header toggle; on a phone,
+  // where it and the bottom strip had no way in at all, the drawer opens it.
+  {
+    await page.setViewportSize({ width: 900, height: 800 })
+    await sleep(900)
+    const columns = await page.locator('[data-testid="right-panel"]').count()
+    const term = await page.locator('[data-testid="terminal-area"]').boundingBox().catch(() => null)
+    if (columns !== 0) note('FAIL', 'tablet', 'the side panel is a third column at 900px')
+    if (!term || term.width < 500) note('FAIL', 'tablet', `the terminal is ${term ? Math.round(term.width) : 0}px wide at 900px`)
+    await page.locator('[data-testid="right-show"]').click()
+    await sleep(600)
+    const placed = await page.getAttribute('[data-testid="right-panel"]', 'data-placement').catch(() => null)
+    if (placed !== 'sheet') note('FAIL', 'tablet', `the header toggle opened the side panel as ${placed}, not a sheet`)
+    await page.locator('[data-testid="sheet-scrim"]').click({ position: { x: 20, y: 400 } }).catch(() => {})
+    await sleep(500)
+    if ((await page.locator('[data-testid="right-panel"]').count()) !== 0) note('FAIL', 'tablet', 'the sheet did not close from its scrim')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await sleep(900)
+    for (const [entry, sheet, inner, close] of [
+      ['open-panel-sheet', 'panel-sheet', 'right-panel', 'panel-collapse'],
+      ['open-terminals-sheet', 'terminals-sheet', 'bottom-terminals', 'bottom-collapse'],
+    ]) {
+      await page.locator('[data-testid="menu-button"]').click()
+      await sleep(500)
+      const offered = await page.locator(`[data-testid="${entry}"]`).isVisible().catch(() => false)
+      if (!offered) {
+        note('FAIL', 'phone-panel', `the drawer has no ${entry}`)
+        await page.mouse.click(370, 400).catch(() => {})
+        continue
+      }
+      await page.locator(`[data-testid="${entry}"]`).click()
+      await sleep(700)
+      if (!(await page.locator(`[data-testid="${sheet}"] [data-testid="${inner}"]`).isVisible().catch(() => false))) {
+        note('FAIL', 'phone-panel', `${entry} did not show ${inner}`)
+      }
+      await page.locator(`[data-testid="${sheet}"] [data-testid="${close}"]`).click().catch(() => {})
+      await sleep(500)
+      if (await page.locator(`[data-testid="${sheet}"]`).isVisible().catch(() => false)) {
+        note('FAIL', 'phone-panel', `${sheet} did not close`)
+      }
+    }
+  }
+
   // ── a short phone keeps its terminal ─────────────────────────────────────
   // The compose box and two rows of keys were 105-153px whatever the screen,
   // and a phone in landscape or with its keyboard up came out with a 0px

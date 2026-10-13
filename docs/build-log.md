@@ -26154,3 +26154,27 @@ the guard, each written by hand. Now one `isEnter` (`isComposing` or
 keyCode 229 is not a submit) used at all ten, and `enter.test.ts` scans the
 source for an event's bare `.key === 'Enter'` so the next form cannot
 reintroduce it.
+
+## 2026-10-13 — The UI and device audit, batch 2
+
+**A tablet tier, and the side panel reachable on a phone.** From 768 up
+there was one layout, the desktop's three columns: on an iPad mini or Air in
+portrait and in Slide Over the terminal was left about 215px, narrower than
+on the phone, and the header's trailing controls were cut off. Between 768
+and 1100 (`COMPACT_QUERY`) the side panel is now a sheet over the terminal,
+opened and closed by the same header toggle, per visit and starting closed;
+at 820 the terminal went from 215 to 548px. The phone had no way to the side
+panel or the bottom strip at all -- files, notes, git, the monitor and tokens
+did not exist there -- and its drawer now opens either as a full-screen
+sheet, closed by the panel's own collapse control. One mechanism, three
+placements: `RightPanel`'s `column`, `sheet` and `fill`, and
+`BottomTerminals`' `fill`.
+
+On any touch screen, not only the phone's drawer, a session row's pin and
+kill are drawn on the selected row only, and a project's archive and remove
+are in one menu: with every 44px control drawn on every row, an iPad's names
+came out "vib…", "dot…" and "pag…" in portrait and in landscape at 1194. The
+menu also takes the destructive remove out from under a thumb next to
+archive. render-check measures the terminal and the sheet at 900 and opens
+both sheets from the phone's drawer; archive-check reaches archive through
+the menu when there is one.

@@ -52,7 +52,7 @@ import { disambiguatedLabels, projectLabel, sessionLabel } from './components/la
 import { applyTheme, loadTheme } from './components/theme'
 import { PANEL_PATH, pageToOpen, projectToOpen, sessionToOpen } from './routes'
 import type { ThemeChoice } from './components/theme'
-import { NARROW_QUERY, useMediaQuery } from './hooks/useMediaQuery'
+import { COMPACT_QUERY, NARROW_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { EXIT_VANISHED } from './protocol/wire'
 import { shellQuote } from './shell'
 import type { LaunchProfile } from './protocol/wire'
@@ -270,6 +270,14 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   const socket = useMemo(() => new PanelSocket(), [])
   const disconnected = useDisconnected(socket)
   const narrow = useMediaQuery(NARROW_QUERY)
+  const compact = useMediaQuery(COMPACT_QUERY) && !narrow
+  // Which sheet is over the terminal, in the layouts that use sheets. Per
+  // visit and starting closed, like the drawer: a tablet opens on the
+  // terminal. Read through `sheetShown`, so widening the window past the
+  // tier puts the column back without a stale sheet waiting behind it.
+  const [sheet, setSheet] = useState<'panel' | 'terminals' | null>(null)
+  const sheetLayout = narrow || compact
+  const sheetShown = sheetLayout ? sheet : null
   const keyFit = useViewportFit(narrow)
   // Width decides the layout; the pointer decides the gestures. A tablet in
   // landscape is not narrow and still has nothing but fingers, so keying
@@ -1342,6 +1350,14 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           hasProjectOrder={state.hasProjectOrder}
           onRestoreProjectOrder={() => void guard(() => api.restoreProjectOrder())}
           disconnected={disconnected}
+          onOpenSheet={
+            narrow
+              ? (which) => {
+                  setDrawerOpen(false)
+                  setSheet(which)
+                }
+              : undefined
+          }
           stateGuessed={state.stateGuessed}
           hooksInstalled={state.hooksInstalled}
           onOpenSettings={() => {
@@ -1504,9 +1520,11 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
               <button
                 type="button"
                 data-testid="right-show"
-                onClick={() => setRightOpen(rightWidth === 0)}
-                aria-pressed={rightWidth > 0}
-                title={rightWidth === 0 ? t('app.showPanelShort') : t('app.hidePanel')}
+                onClick={() =>
+                  compact ? setSheet((v) => (v === 'panel' ? null : 'panel')) : setRightOpen(rightWidth === 0)
+                }
+                aria-pressed={compact ? sheetShown === 'panel' : rightWidth > 0}
+                title={(compact ? sheetShown !== 'panel' : rightWidth === 0) ? t('app.showPanelShort') : t('app.hidePanel')}
                 className="vp-control"
               >
                 <PanelRight size={15} />
@@ -1977,8 +1995,9 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
         />
       )}
 
-      {!narrow && rightWidth > 0 && (
+      {!narrow && !compact && rightWidth > 0 && (
         <RightPanel
+          placement="column"
           project={currentProject}
           sessions={state.sessions}
           socket={socket}
@@ -1990,7 +2009,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           }}
           width={rightWidth}
           onWidthChange={setRightSize}
-          onCollapse={() => setRightOpen(false)}
+          onCollapse={() => (sheetLayout ? setSheet(null) : setRightOpen(false))}
           onOpenTokens={() => setTokensOpen(true)}
           onOpenResources={(id) => {
             setFocusSession(id)
@@ -2000,6 +2019,71 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           onPaste={pasteToSession}
           previewAsk={previewAsk}
         />
+      )}
+
+      {/* The tablet tier and the phone reach the same panel as a sheet over
+          the terminal: from the header toggle at tablet width, from the
+          drawer on a phone, where there used to be no way to it at all. */}
+      {sheetShown && (
+        <button
+          type="button"
+          aria-label={t('app.closeSheet')}
+          data-testid="sheet-scrim"
+          onClick={() => setSheet(null)}
+          className="vp-backdrop absolute inset-0 z-20 bg-black/30"
+        />
+      )}
+      {sheetShown === 'panel' && (
+        <div
+          data-testid="panel-sheet"
+          className={narrow ? 'absolute inset-0 z-30 flex flex-col vp-solid vp-safe-pad-top' : 'contents'}
+        >
+          <RightPanel
+            placement={narrow ? 'fill' : 'sheet'}
+          project={currentProject}
+            sessions={state.sessions}
+            socket={socket}
+            layout={paneLayout}
+            onLayout={setPaneLayout}
+            extTabs={extTabs}
+            onRefocus={() => {
+              if (current) focusTerminal(current.id)
+            }}
+            width={rightWidth}
+            onWidthChange={setRightSize}
+            onCollapse={() => (sheetLayout ? setSheet(null) : setRightOpen(false))}
+            onOpenTokens={() => setTokensOpen(true)}
+            onOpenResources={(id) => {
+              setFocusSession(id)
+              setSettingsAt('usage')
+            }}
+            currentSession={current}
+            onPaste={pasteToSession}
+            previewAsk={previewAsk}
+          />
+        </div>
+      )}
+      {sheetShown === 'terminals' && current && (
+        <div
+          data-testid="terminals-sheet"
+          className="absolute inset-0 z-30 flex flex-col vp-solid vp-safe-pad-top"
+        >
+          <BottomTerminals
+            fill
+            key={current.projectId}
+            socket={socket}
+            near={current}
+            touchSelect
+            terminals={bottomTerminals}
+            themeKey={themeKey}
+            height={0}
+            onHeightChange={() => {}}
+            onCollapse={() => setSheet(null)}
+            onNew={newBottomTerminal}
+            onClose={(t) => void guard(() => api.deleteSession(t.id))}
+            onRename={(t, title) => void guard(() => api.patchSession(t.id, { title }))}
+          />
+        </div>
       )}
 
       {/* Last in the tree and z-50, so it is over the settings dialog that two

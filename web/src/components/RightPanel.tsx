@@ -105,6 +105,12 @@ const DROP_LABEL: Record<DropKind, Key> = {
 }
 
 interface Props {
+  /**
+   * Where it sits. A column beside the terminal on a desktop; a sheet over the
+   * terminal in the tablet tier; the whole screen on a phone, which had no way
+   * to reach files, notes, git, the monitor or tokens at all.
+   */
+  placement?: 'column' | 'sheet' | 'fill'
   project: Project | null
   /** Every session, so the monitor can name what it is measuring. */
   sessions: Session[]
@@ -161,6 +167,7 @@ interface DragState {
 
 export function RightPanel(props: Props) {
   const { project, layout, width } = props
+  const placement = props.placement ?? 'column'
   useLang()
   const order: PanelTab[] = [...PANEL_TABS, ...props.extTabs.map((x) => x.id)]
 
@@ -512,10 +519,17 @@ export function RightPanel(props: Props) {
       // the reveal is what makes the collapse control's chevron read as a
       // direction rather than a decoration — you saw where it came from, so
       // you know where it goes.
-      className="vp-edge-in-right flex shrink-0 border-l border-hairline vp-blur"
-      style={{ width }}
+      data-placement={placement}
+      className={
+        placement === 'sheet'
+          ? 'vp-edge-in-right absolute inset-y-0 right-0 z-30 flex border-l border-hairline shadow-2xl vp-solid'
+          : placement === 'fill'
+            ? 'flex min-h-0 w-full flex-1 vp-solid'
+            : 'vp-edge-in-right flex shrink-0 border-l border-hairline vp-blur'
+      }
+      style={placement === 'sheet' ? { width: `min(${width}px, calc(100% - 3rem))` } : placement === 'fill' ? undefined : { width }}
     >
-      <div
+      {placement === 'column' && <div
         data-testid="panel-resize"
         role="separator"
         aria-orientation="vertical"
@@ -547,7 +561,7 @@ export function RightPanel(props: Props) {
         // elementFromPoint across the grip: offsets 0-3 hit it, 4-7 hit the
         // content. Half the target, and the wrong half.
         className="vp-grip z-10 -mr-1 w-2 cursor-col-resize"
-      />
+      />}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* An opened block takes the whole column, panes and all.

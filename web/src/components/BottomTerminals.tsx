@@ -38,6 +38,8 @@ interface Props {
    * finger does not stop being a finger halfway down the window.
    */
   touchSelect?: boolean
+  /** Takes the space it is given instead of its own height: a phone's sheet. */
+  fill?: boolean
 }
 
 /**
@@ -101,10 +103,14 @@ export function BottomTerminals(props: Props) {
       data-testid="bottom-terminals"
       // From the edge it lives on, like the side panel from its own. The two
       // strips are the same object seen twice; they open the same way.
-      className="vp-edge-in-bottom flex shrink-0 flex-col border-t border-hairline"
-      style={{ height }}
+      className={
+        props.fill
+          ? 'flex min-h-0 flex-1 flex-col'
+          : 'vp-edge-in-bottom flex shrink-0 flex-col border-t border-hairline'
+      }
+      style={props.fill ? undefined : { height }}
     >
-      <div
+      {!props.fill && <div
         role="separator"
         aria-orientation="horizontal"
         aria-valuenow={Math.round(height)}
@@ -128,7 +134,7 @@ export function BottomTerminals(props: Props) {
         // comes with .vp-grip — without it the browser scrolls instead of
         // reporting the drag, and on touch the gesture never arrives at all.
         className="vp-grip -mt-1 h-2 cursor-row-resize"
-      />
+      />}
 
       <div className="vp-chrome gap-1 px-2 vp-blur">
         {/* The tabs scroll; the controls after them do not.
