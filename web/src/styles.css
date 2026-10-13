@@ -354,6 +354,15 @@ body,
   height: 100%;
 }
 
+/* What is visible, not what is laid out. On a phone the keyboard covers the
+   bottom of a layout that iOS does not shrink, and a 100% root kept the
+   compose box and the keys underneath it. useViewportFit sets the variable
+   from the visual viewport in the narrow layout; everywhere else it is unset
+   and the root is the full height as before. */
+#root {
+  height: var(--vp-app-h, 100%);
+}
+
 /* The canvas, painted explicitly rather than by propagation.
  *
  * A body background propagates to the canvas when `html` has none, which is

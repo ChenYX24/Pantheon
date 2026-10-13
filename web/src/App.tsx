@@ -36,6 +36,7 @@ import { TokenUsageView } from './components/TokenUsageView'
 import { MobileKeyBar } from './components/mobile/MobileKeyBar'
 import { ComposeInput } from './components/mobile/ComposeInput'
 import { DisconnectedBar, useDisconnected } from './components/Disconnected'
+import { useViewportFit } from './components/mobile/viewport'
 import { TouchControls, TouchKeys } from './components/mobile/TouchControls'
 import { SelectionCopy } from './components/mobile/SelectionCopy'
 import {
@@ -262,6 +263,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   const socket = useMemo(() => new PanelSocket(), [])
   const disconnected = useDisconnected(socket)
   const narrow = useMediaQuery(NARROW_QUERY)
+  const keyFit = useViewportFit(narrow)
   // Width decides the layout; the pointer decides the gestures. A tablet in
   // landscape is not narrow and still has nothing but fingers, so keying
   // press-and-hold selection to the layout breakpoint would leave it with no
@@ -1708,7 +1710,11 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             and a few pixels of chrome showing around it are what say "this is
             the thing, that was the frame". */}
         <div
-          className={`relative m-2 min-h-0 flex-1 overflow-hidden rounded-vp border border-hairline ${
+          // On a phone the terminal keeps a floor of a few rows: below it the
+          // keys give way instead (useViewportFit). It used to be the terminal
+          // that gave way, to 0px, under the keyboard.
+          data-testid="terminal-area"
+          className={`relative m-2 flex-1 overflow-hidden rounded-vp border border-hairline ${narrow ? 'min-h-22' : 'min-h-0'} ${
             disconnected ? 'vp-disconnected' : ''
           }`}
           data-disconnected={disconnected}
@@ -1823,7 +1829,9 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
               // then the path on the command line.
               onFiles={(files) => void uploadInto(files)}
             />
-            <MobileKeyBar onSend={sendToCurrent} onPaste={pasteToCurrent} />
+            {keyFit !== 'none' && (
+              <MobileKeyBar onSend={sendToCurrent} onPaste={pasteToCurrent} oneRow={keyFit === 'one'} />
+            )}
           </>
         )}
 

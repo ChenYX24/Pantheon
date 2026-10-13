@@ -25917,3 +25917,17 @@ Pinned by `TestASessionThatExitedNonZeroReachesTheSnapshotAsCrashed` (the two
 fields a wall depends on arrive, and only for a non-zero status) and, for the
 templates, `pages-check`, which now fails if `wall` or `glance` against the
 `busy` fixture, which has crashed rows, shows no cross and no word "crashed".
+
+**A short phone keeps its terminal.** The compose box and two rows of keys
+were 105-153px whatever the screen. In landscape, or with the keyboard up,
+the terminal on an iPhone SE, an iPhone 13 and a 320 Android came out 0px
+tall; and nothing read `visualViewport`, so on iOS -- which does not shrink
+the layout for its keyboard -- the box and the keys could sit underneath it.
+Now `useViewportFit` sizes `#root` to the visual viewport in the narrow layout
+(not on a pinch-zoom, which also shrinks it), `interactive-widget=
+resizes-content` asks Chrome on Android for the same, and the keys give way
+first: one row below 500px visible or with a keyboard up, none below 320. The
+terminal keeps a floor of 5.5rem. `viewport.test.ts` pins the rule with the
+audit's heights, including iOS's tall-layout-short-viewport case Chromium
+cannot reproduce; render-check measures the terminal and the rows at four
+sizes and that the page does not grow past the screen.

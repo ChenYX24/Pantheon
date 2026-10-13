@@ -2327,6 +2327,30 @@ browser = await chromium.launch({ headless: true })
     else note('PASS', 'disconnect', 'said after the grace, in the drawer too, and gone on reconnect')
   }
 
+  // ── a short phone keeps its terminal ─────────────────────────────────────
+  // The compose box and two rows of keys were 105-153px whatever the screen,
+  // and a phone in landscape or with its keyboard up came out with a 0px
+  // terminal. The keys give way now: one row when short, none when a sliver.
+  // Chromium shrinks the layout with the viewport, which is what Chrome on
+  // Android does under interactive-widget=resizes-content; the iOS half (the
+  // layout staying tall under the keyboard) is keyBarFit's unit test.
+  // Under 768 wide, because this context has a mouse: a real landscape phone
+  // reaches the same narrow layout through (pointer: coarse).
+  for (const [w, h, rows] of [[390, 844, 2], [740, 390, 1], [390, 420, 1], [560, 300, 0]]) {
+    await page.setViewportSize({ width: w, height: h })
+    await sleep(700)
+    const term = await page.locator('[data-testid="terminal-area"]').boundingBox().catch(() => null)
+    const primary = await page.locator('[data-testid="key-row-primary"]').count()
+    const secondary = await page.locator('[data-testid="key-row-secondary"]').count()
+    const shown = primary === 0 ? 0 : secondary === 0 ? 1 : 2
+    if (!term || term.height < 80) {
+      note('FAIL', 'phone-fit', `${w}x${h}: the terminal is ${term ? Math.round(term.height) : 0}px tall`)
+    }
+    if (shown !== rows) note('FAIL', 'phone-fit', `${w}x${h}: ${shown} rows of keys, expected ${rows}`)
+    const over = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)
+    if (over > 1) note('FAIL', 'phone-fit', `${w}x${h}: the page is ${over}px taller than the screen`)
+  }
+
   // ── the phone layout ─────────────────────────────────────────────────────
   // Not a squeezed desktop: typing into a raw terminal is unusable with an
   // input method, so input arrives through a compose box and a bar of the keys
