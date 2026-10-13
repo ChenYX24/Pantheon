@@ -25587,3 +25587,37 @@ there and is refused. The page gets a `notice` with `level: "file"` and
 the url. `vibepanel me send` and `vibepanel session attach` stream the
 file as multipart; `session attachments` lists them.
 
+## 2026-10-13 — The CLI after the audit's hands-on run
+
+An audit of HEAD c50485f (`audit-2026-10/`, eight subagents) and a
+device/UI audit beside it; the two sessions that wrote them are fixing
+their findings on branches, and this entry is the CLI's share, which is
+code of mine.
+
+- **`panel.url` was trusted blindly** (04-F4). A crash leaves the file; a
+  panel that is not running holds no lock; and the CLI sent its
+  never-expiring owner token to whatever bound that port since, then on
+  a 401 minted a fresh one and sent that too. Now the file counts only
+  while the panel holds the data directory's lock -- the lock is the
+  panel's own, taken by `serve` and released at exit, so "held" means
+  "that panel, now" -- the client never follows a redirect with the token
+  on it, and plain http off loopback is refused unless
+  `VIBEPANEL_CLI_INSECURE=1`.
+- **`session restart` printed fields the answer did not carry** -- the
+  panel restarts in place and answers 204 -- so the receipt read
+  `restarted X as  (tmux )`, and `docs/cli.md` said "a new session". The
+  row is read back for the receipt; the doc says in place.
+- **A directory could be added as a project twice**, after which
+  `project order` and `session new --project <name>` had two of the same
+  name to choose between. The panel answers 409 naming the first.
+- **`--data-dir` was refused wherever it went**; `session --help` and
+  `project --help` were refused; `--cols 0` was accepted. The two panel
+  flags are lifted out of the arguments into the environment before any
+  command sees them; every command answers `--help`; a grid is 1-500 by
+  1-200.
+- **`vibepanel doctor` probed the configured loopback port** rather than
+  the data directory's panel, and on a machine with two panels reported
+  every hook token stale. It asks `panel.url` first.
+- `todo`: the panel's pages no longer draw a project's todos; the CLI and
+  the docs now say who reads them (plugins, the chat assistant).
+

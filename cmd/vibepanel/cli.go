@@ -27,6 +27,10 @@ const statusUsage = `usage: vibepanel status [--json]
   the projects and sessions as the sidebar shows them: state, title, pid, live`
 
 func cmdStatus(args []string) error {
+	if wantsHelp(args) {
+		fmt.Println(statusUsage)
+		return nil
+	}
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print the panel's state as JSON")
 	if err := fs.Parse(args); err != nil {
@@ -378,6 +382,9 @@ func sessionViaAPI(ctx context.Context, sub string, rest []string) (handled bool
 		if project == "" {
 			return true, nil, errors.New("usage: vibepanel session new --project <project> [--title T] [-- command…]")
 		}
+		if cols <= 0 || rows <= 0 || cols > 500 || rows > 200 {
+			return true, nil, errors.New("--cols and --rows are a grid: 1-500 by 1-200")
+		}
 		p, err := c.project(ctx, project)
 		if err != nil {
 			if errors.Is(err, errPanelDown) || errors.Is(err, errNoAccount) {
@@ -442,14 +449,20 @@ func sessionViaAPI(ctx context.Context, sub string, rest []string) (handled bool
 		if err != nil {
 			return true, nil, err
 		}
-		var made store.Session
-		if err := c.do(ctx, http.MethodPost, "/api/sessions/"+s.ID+"/restart", map[string]any{}, &made); err != nil {
+		// The panel restarts in place and answers 204: the same session,
+		// its command run again in its pane. Nothing in the answer to print,
+		// so the row is read back for the receipt.
+		if err := c.do(ctx, http.MethodPost, "/api/sessions/"+s.ID+"/restart", map[string]any{}, nil); err != nil {
+			return true, nil, err
+		}
+		fresh, err := c.session(ctx, s.ID)
+		if err != nil {
 			return true, nil, err
 		}
 		if *asJSON {
-			return true, nil, printJSON(made)
+			return true, nil, printJSON(fresh)
 		}
-		fmt.Printf("restarted %s as %s (tmux %s)\n", s.Title, made.ID, made.TmuxName)
+		fmt.Printf("restarted %s (%s): %s\n", fresh.Title, fresh.ID, strings.Join(fresh.LaunchCommand, " "))
 		return true, nil, nil
 	case "kill":
 		ref := sid
@@ -631,6 +644,10 @@ const noteUsage = `usage: vibepanel note <get|set> <project> [text]
   set    replace it with the text, or with stdin when no text is given`
 
 func cmdNote(args []string) error {
+	if wantsHelp(args) {
+		fmt.Println(noteUsage)
+		return nil
+	}
 	if len(args) < 2 {
 		return errors.New(noteUsage)
 	}
@@ -674,12 +691,19 @@ func cmdNote(args []string) error {
 
 const todoUsage = `usage: vibepanel todo <ls|add|done|undo|rm> <project> [text|todo id]
 
+  A project's todos are read by plugins (read:todos) and the chat assistant;
+  the panel's own pages no longer draw them.
+
   ls           the project's todos
   add          add one with the text
   done, undo   tick or untick one, by id or by its text's start
   rm           remove one`
 
 func cmdTodo(args []string) error {
+	if wantsHelp(args) {
+		fmt.Println(todoUsage)
+		return nil
+	}
 	if len(args) < 2 {
 		return errors.New(todoUsage)
 	}
@@ -777,6 +801,10 @@ const tokenUsage = `usage: vibepanel token <ls|create|revoke> [name|id]
   revoke    delete one by id or by name`
 
 func cmdToken(args []string) error {
+	if wantsHelp(args) {
+		fmt.Println(tokenUsage)
+		return nil
+	}
 	if len(args) < 1 {
 		return errors.New(tokenUsage)
 	}
@@ -853,6 +881,10 @@ const auditUsage = `usage: vibepanel audit [-n 50] [--json]
   the activity log, newest last`
 
 func cmdAudit(args []string) error {
+	if wantsHelp(args) {
+		fmt.Println(auditUsage)
+		return nil
+	}
 	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
 	n := fs.Int("n", 50, "how many entries")
 	asJSON := fs.Bool("json", false, "print as JSON")
@@ -892,6 +924,10 @@ const settingsUsage = `usage: vibepanel settings <archive-idle|timezone> <value>
   timezone <zone>       the panel's time zone, e.g. Asia/Shanghai`
 
 func cmdSettings(args []string) error {
+	if wantsHelp(args) {
+		fmt.Println(settingsUsage)
+		return nil
+	}
 	if len(args) != 2 {
 		return errors.New(settingsUsage)
 	}

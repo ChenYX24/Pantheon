@@ -129,7 +129,11 @@ func init() {
 func run(args []string) error {
 	// Subcommands are matched before flag parsing so that `vibepanel project
 	// add --name x` can have its own flag set rather than fighting the global
-	// one.
+	// one. Two flags are the panel's rather than any command's, and a person
+	// puts them wherever they put them: `--data-dir` and `--tmux-socket`
+	// are lifted out of the arguments first and become the environment the
+	// configuration already reads, so every command sees them.
+	args = liftPanelFlags(args)
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, rest := args[0], args[1:]
 		run, ok := commands[cmd]
@@ -579,6 +583,40 @@ func startResources(ctx context.Context, a *app, srv *httpapi.Server, logger *sl
 
 // ─── project ──────────────────────────────────────────────────────────────
 
+// liftPanelFlags takes --data-dir and --tmux-socket (either spelling, with
+// = or a following value) out of args and into the environment.
+func liftPanelFlags(args []string) []string {
+	out := make([]string, 0, len(args))
+	lift := map[string]string{"data-dir": "VIBEPANEL_DATA_DIR", "tmux-socket": "VIBEPANEL_TMUX_SOCKET"}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			return append(out, args[i:]...)
+		}
+		name, value, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		env, ok := lift[name]
+		if !ok || !strings.HasPrefix(a, "-") {
+			out = append(out, a)
+			continue
+		}
+		if !hasValue {
+			if i+1 >= len(args) {
+				out = append(out, a)
+				continue
+			}
+			i++
+			value = args[i]
+		}
+		_ = os.Setenv(env, value)
+	}
+	return out
+}
+
+// wantsHelp is the three spellings of "show me the usage".
+func wantsHelp(args []string) bool {
+	return len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help")
+}
+
 const projectUsage = `usage: vibepanel project <ls|add|rename|pin|unpin|order|archive|restore|rm> [args]
 
   ls                        projects and archived projects
@@ -592,6 +630,10 @@ Through the running panel; ls, add, archive, restore and rm work on the
 database directly when it is not running.`
 
 func cmdProject(args []string) error {
+	if wantsHelp(args) {
+		fmt.Println(projectUsage)
+		return nil
+	}
 	if len(args) == 0 {
 		return errors.New(projectUsage)
 	}
@@ -774,6 +816,10 @@ Through the running panel; ls, new and kill work on the database and tmux
 directly when it is not running.`
 
 func cmdSession(args []string) error {
+	if wantsHelp(args) {
+		fmt.Println(sessionUsage)
+		return nil
+	}
 	if len(args) == 0 {
 		return errors.New(sessionUsage)
 	}
@@ -1280,7 +1326,15 @@ func cmdDoctor(args []string) error {
 			// question is whether anything answers there, not whether the
 			// certificate is right -- and probing more strictly than the hook
 			// does would report a problem the hook does not have.
-			probeURL := cfg.LoopbackURL() + "/api/health"
+			// The data directory's own panel, where it said it answers;
+			// the configured loopback only when it did not say. On a
+			// machine with two panels the configured port is the other one,
+			// and this used to report its hook tokens as all stale.
+			probeBase := panelAddress(cfg.DataDir)
+			if probeBase == "" {
+				probeBase = cfg.LoopbackURL()
+			}
+			probeURL := probeBase + "/api/health"
 			probe := &http.Client{
 				Timeout: 3 * time.Second,
 				Transport: &http.Transport{

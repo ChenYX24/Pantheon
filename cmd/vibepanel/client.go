@@ -79,18 +79,25 @@ func openClient(ctx context.Context, args []string) (*panelClient, error) {
 	}
 	base := strings.TrimRight(os.Getenv("VIBEPANEL_CLI_URL"), "/")
 	if base == "" {
-		// The address the panel wrote, not the one the configuration would
-		// compute: the configuration says where a panel *would* listen, and
-		// on a machine with two of them that is somebody else's.
-		if raw, rerr := os.ReadFile(panelURLPath(cfg.DataDir)); rerr == nil { //nolint:gosec // our own file
-			base = strings.TrimRight(strings.TrimSpace(string(raw)), "/")
-		}
+		base = panelAddress(cfg.DataDir)
 	}
-	c := &panelClient{cfg: cfg, base: base, http: &http.Client{Timeout: 30 * time.Second}}
+	c := &panelClient{cfg: cfg, base: base, http: &http.Client{
+		Timeout: 30 * time.Second,
+		// Never follow a redirect with the token on it: Go keeps the
+		// Authorization header across ports of one host, and a redirect is
+		// a second address nobody named.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}
 	if base != "" {
 		u, err := url.Parse(base)
 		if err != nil || u.Host == "" {
 			return nil, fmt.Errorf("the panel's address %q is not an http(s) URL", base)
+		}
+		// A bearer token over cleartext http is a token for whoever is on
+		// the wire. Loopback has no wire; anywhere else wants https, or an
+		// explicit VIBEPANEL_CLI_INSECURE=1 from somebody who knows.
+		if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) && os.Getenv("VIBEPANEL_CLI_INSECURE") != "1" {
+			return nil, fmt.Errorf("%s is plain http and not loopback: the CLI's token would cross the wire in the clear; use https, or VIBEPANEL_CLI_INSECURE=1 if you mean it", base)
 		}
 		c.http.Transport = mcpTransport(u.Hostname())
 	}
@@ -109,6 +116,23 @@ func openClient(ctx context.Context, args []string) (*panelClient, error) {
 }
 
 func (c *panelClient) tokenPath() string { return filepath.Join(c.cfg.DataDir, cliTokenFile) }
+
+// panelAddress is where this data directory's panel answers: the address
+// it wrote into panel.url, and only while it holds the data directory's
+// lock. A crash leaves the file behind; a panel that is not running holds
+// no lock; and a stale address with a token sent to it is a token for
+// whoever bound that port since. The lock is the panel's own, taken by
+// serve and released at exit, so "held" means "that panel, now".
+func panelAddress(dataDir string) string {
+	raw, err := os.ReadFile(panelURLPath(dataDir)) //nolint:gosec // our own file
+	if err != nil {
+		return ""
+	}
+	if config.DataDirLockedBy(dataDir) == "" {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(string(raw)), "/")
+}
 
 // mint writes an API token row and the file. The prefix is the first eight
 // characters, as the settings page's own mint does.

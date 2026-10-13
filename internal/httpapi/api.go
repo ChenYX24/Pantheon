@@ -1465,6 +1465,17 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
+	// A directory is one project. A second row at the same path was two
+	// sidebars entries for one place, and `project order` and `session new
+	// --project <name>` then had two of the same name to choose between.
+	if existing, err := s.DB.ListProjects(r.Context()); err == nil {
+		for _, p := range existing {
+			if filepath.Clean(p.Path) == abs {
+				writeErr(w, http.StatusConflict, "that directory is already the project "+p.Name+" ("+p.ID+")")
+				return
+			}
+		}
+	}
 	p, err := s.DB.CreateProject(r.Context(), id.New(), req.Name, abs)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())

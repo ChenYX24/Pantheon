@@ -282,12 +282,65 @@ func TestTheCLIReadsThePanelsAddressFromItsDataDirectory(t *testing.T) {
 	if _, err := runCLI(t, "status"); err == nil || !strings.Contains(err.Error(), panelURLFile) {
 		t.Errorf("status with no address: %v", err)
 	}
-	// The file the panel writes is what points the CLI at it.
+	// The file the panel writes is what points the CLI at it -- while the
+	// panel holds the lock. The file alone, as a crash leaves it, is nothing:
+	// no token goes to whatever bound that port since.
 	if err := os.WriteFile(filepath.Join(p.dir, panelURLFile), []byte(p.ts.URL+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := runCLI(t, "status"); err == nil || !strings.Contains(err.Error(), "not running") {
+		t.Errorf("panel.url with no lock held: %v", err)
+	}
+	release, err := config.LockDataDir(p.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
 	if out := mustRun(t, "status"); !strings.Contains(out, "Omega") {
 		t.Errorf("status through panel.url: %s", out)
+	}
+}
+
+// The findings of the audit's hands-on run, each pinned: a directory is
+// one project; a restart's receipt names what it restarted; the panel's
+// two flags go anywhere; every command answers --help; a grid is bounded.
+func TestTheCLIAfterTheHandsOnRun(t *testing.T) {
+	p := startCLIPanel(t)
+	dir := t.TempDir()
+	mustRun(t, "project", "add", dir, "--name", "Once")
+	if _, err := runCLI(t, "project", "add", dir, "--name", "Twice"); err == nil || !strings.Contains(err.Error(), "already the project Once") {
+		t.Errorf("the same directory twice: %v", err)
+	}
+	mustRun(t, "session", "new", "--project", "Once", "--title", "brief", "--", "true")
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if rows, _ := p.db.ListSessions(context.Background()); len(rows) == 1 && rows[0].Exited {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if out := mustRun(t, "session", "restart", "brief"); !strings.Contains(out, "restarted brief (") || strings.Contains(out, "(tmux )") {
+		t.Errorf("restart receipt: %q", out)
+	}
+	if _, err := runCLI(t, "session", "new", "--project", "Once", "--cols", "0", "--rows", "0", "--", "sleep", "60"); err == nil || !strings.Contains(err.Error(), "grid") {
+		t.Errorf("a zero grid: %v", err)
+	}
+	for _, cmd := range [][]string{{"project", "--help"}, {"session", "-h"}, {"note", "help"}, {"token", "--help"}, {"me", "--help"}} {
+		if out, err := runCLI(t, cmd...); err != nil || !strings.Contains(out, "usage: vibepanel "+cmd[0]) {
+			t.Errorf("%v: %v %q", cmd, err, out)
+		}
+	}
+	// The panel's flags anywhere on the line, lifted into the environment.
+	got := liftPanelFlags([]string{"session", "ls", "--data-dir", "/x", "--tmux-socket=s1", "--", "--data-dir", "kept"})
+	if strings.Join(got, " ") != "session ls -- --data-dir kept" || os.Getenv("VIBEPANEL_DATA_DIR") != "/x" || os.Getenv("VIBEPANEL_TMUX_SOCKET") != "s1" {
+		t.Errorf("lift: %v %q %q", got, os.Getenv("VIBEPANEL_DATA_DIR"), os.Getenv("VIBEPANEL_TMUX_SOCKET"))
+	}
+	t.Setenv("VIBEPANEL_DATA_DIR", p.dir)
+	t.Setenv("VIBEPANEL_TMUX_SOCKET", "")
+	// A cleartext bearer off loopback is refused; loopback is not a wire.
+	t.Setenv("VIBEPANEL_CLI_URL", "http://10.1.2.3:18443")
+	if _, err := runCLI(t, "status"); err == nil || !strings.Contains(err.Error(), "in the clear") {
+		t.Errorf("plain http off loopback: %v", err)
 	}
 }
 

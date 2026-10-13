@@ -22,7 +22,15 @@ keeps it in `<data dir>/cli.token`, mode 0600. It is on the settings page's
 token list like any other; revoking it there (or `vibepanel token revoke
 cli`) locks the shell out until the next command mints a new one, which the
 activity log records. `VIBEPANEL_CLI_TOKEN` supplies a token instead, for a
-panel across a wire.
+panel across a wire -- over https; plain http off loopback is refused
+unless `VIBEPANEL_CLI_INSECURE=1`, because the token would cross the wire
+in the clear. `panel.url` is trusted only while the panel holds the data
+directory's lock: a file a crash left behind points nowhere, and no token
+is sent to whatever bound that port since.
+
+`--data-dir` and `--tmux-socket` may go anywhere on the command line; they
+become `VIBEPANEL_DATA_DIR` and `VIBEPANEL_TMUX_SOCKET` for the command.
+Every command answers `--help`.
 
 Without a running panel -- or before the first account exists, when there
 is nothing to mint a token for -- the subcommands that existed before the
@@ -57,7 +65,7 @@ scripts.
 | `session rename <s> <title>` | the title is then manual: the next poll does not overwrite it |
 | `session pin\|unpin <s>` | |
 | `session state <s> working\|waiting\|done` | set the state by hand |
-| `session restart <s>` | the same command again in a new session |
+| `session restart <s>` | the same command again, in place: the session keeps its id and its pane |
 | `session kill <s>` | |
 | `session send <s> [text] [--enter]` | type into it; with no text, stdin; `--enter` presses Enter after |
 | `session screen <s>` | the pane as text |
@@ -68,7 +76,7 @@ scripts.
 | `session attachments <s>` | its attachments and where to download them |
 | `session restore` | rebuild the sessions a reboot took |
 | `note get\|set <p> [text]` | the project's note; `set` with no text reads stdin |
-| `todo ls\|add\|done\|undo\|rm <p> [text\|id]` | the project's todos; `done`, `undo` and `rm` take an id or the start of the text |
+| `todo ls\|add\|done\|undo\|rm <p> [text\|id]` | the project's todos, which plugins and the chat assistant read; the panel's own pages no longer draw them |
 | `token ls\|create <name>\|revoke <id\|name>` | API tokens; `create` prints the token once |
 | `audit [-n 50]` | the activity log, oldest first |
 | `settings archive-idle <days>` | archive a project idle that long; 0 never |
