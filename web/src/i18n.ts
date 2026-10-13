@@ -541,6 +541,7 @@ const DICT = {
   'compose.placeholder': { zh: '输入命令…', en: 'Type a command…' },
   'touch.showKeys': { zh: '显示按键', en: 'Show the keys' },
   'touch.hideKeys': { zh: '收起按键', en: 'Hide the keys' },
+  'compose.unsent': { zh: '未连接，没有发出。稍后再试', en: 'Not connected, nothing sent. Try again shortly' },
   'compose.attach': { zh: '选图片或文件', en: 'Pick an image or a file' },
   'compose.send': { zh: '发送', en: 'Send' },
   'settings.title': { zh: '设置', en: 'Settings' },

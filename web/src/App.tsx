@@ -832,15 +832,11 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   // and the key bar, so tapping it must not raise the software keyboard over
   // the thing being read.
   const sendToCurrent = useCallback(
-    (text: string) => {
-      if (current) socket.writeText(current.id, text)
-    },
+    (text: string): boolean => (current ? socket.writeText(current.id, text) : false),
     [socket, current],
   )
   const pasteToCurrent = useCallback(
-    (text: string, submit: boolean) => {
-      if (current) socket.pasteText(current.id, text, submit)
-    },
+    (text: string, submit: boolean): boolean => (current ? socket.pasteText(current.id, text, submit) : false),
     [socket, current],
   )
   // By id rather than "the current one": a share page's Preview names the

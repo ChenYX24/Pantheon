@@ -2333,6 +2333,37 @@ browser = await chromium.launch({ headless: true })
       note('FAIL', 'mobile', 'the compose box kept its text after sending')
     }
 
+    // ...and must not clear when nothing was sent. It did: typed offline,
+    // sent, the box emptied, and after the reconnect the words were in no
+    // pane. The socket is closed here by taking the network away, which is
+    // what a phone in a lift does.
+    {
+      const ctx = page.context()
+      await ctx.setOffline(true)
+      for (let i = 0; i < 40; i++) {
+        if ((await page.getAttribute('[data-testid="connection"]', 'data-status').catch(() => 'open')) !== 'open') break
+        await sleep(250)
+      }
+      await compose.fill('echo SENT_WHILE_OFFLINE')
+      await page.locator('[data-testid="compose-send"]').click()
+      await sleep(400)
+      if ((await compose.inputValue()) !== 'echo SENT_WHILE_OFFLINE') {
+        note('FAIL', 'mobile', 'a send made while disconnected cleared the compose box')
+      }
+      if (!(await page.locator('[data-testid="compose-unsent"]').isVisible().catch(() => false))) {
+        note('FAIL', 'mobile', 'a send made while disconnected said nothing')
+      }
+      await ctx.setOffline(false)
+      for (let i = 0; i < 60; i++) {
+        if ((await page.getAttribute('[data-testid="connection"]', 'data-status').catch(() => '')) === 'open') break
+        await sleep(250)
+      }
+      // Not resent on its own: whether it still makes sense is the person's
+      // call. Cleared here so the steps below start from an empty box.
+      await compose.fill('')
+      await sleep(300)
+    }
+
     // What is in the box belongs to the session it was typed for.
     //
     // The box is rendered by position rather than keyed, so switching session

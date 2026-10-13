@@ -357,3 +357,47 @@ describe('a session that comes back', () => {
     expect(resets).toBe(1)
   })
 })
+
+/**
+ * Whether a write left.
+ *
+ * The compose box cleared itself after every send whether or not anything was
+ * sent, and `write` returned nothing it could have looked at: typed offline,
+ * sent, gone, and no pane had it after the reconnect. The box now keeps the
+ * text on false, so false has to mean "nothing went" and true "it went".
+ */
+describe('writes say whether they were sent', () => {
+  const handlers = { onData: () => {}, onSize: () => {} }
+
+  function subscribed(readyState: number) {
+    const sock = newSocket()
+    ;(sock as unknown as { dark: () => boolean }).dark = () => false
+    const frames: unknown[] = []
+    ;(sock as unknown as { ws: unknown }).ws = { readyState, send: (f: unknown) => frames.push(f) }
+    sock.subscribe('s1', 80, 24, handlers)
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 7 })
+    frames.length = 0
+    return { sock, frames }
+  }
+
+  it('reports true and sends when the socket is open', () => {
+    const { sock, frames } = subscribed(WebSocket.OPEN)
+    expect(sock.pasteText('s1', 'echo hi', true)).toBe(true)
+    expect(sock.writeText('s1', 'x')).toBe(true)
+    expect(frames).toHaveLength(2)
+  })
+
+  it('reports false and sends nothing while the socket is not open', () => {
+    for (const state of [WebSocket.CONNECTING, WebSocket.CLOSING, WebSocket.CLOSED]) {
+      const { sock, frames } = subscribed(state)
+      expect(sock.pasteText('s1', 'echo hi', true)).toBe(false)
+      expect(sock.writeText('s1', 'x')).toBe(false)
+      expect(frames).toHaveLength(0)
+    }
+  })
+
+  it('reports false for a session it holds no stream for', () => {
+    const { sock } = subscribed(WebSocket.OPEN)
+    expect(sock.pasteText('nobody', 'echo hi')).toBe(false)
+  })
+})

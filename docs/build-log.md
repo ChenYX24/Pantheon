@@ -25842,3 +25842,23 @@ was pinned for five; `govulncheck` found ten more reachable from this code
 also vendored there, `golang.org/x/net` v0.60.0. Both bumped; govulncheck
 now reports none reachable. Nothing in CI runs it, which is how the gap
 opened between two audits.
+
+
+## 2026-10-13 — The UI and device audit, batch 1
+
+Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5
+(the Linux build, in the playwright docker image) across phones, tablets,
+widths from 320 to 2560, both themes and both languages, plus four people
+acted out end to end without reading the source. This batch is the part
+that lost words or showed something untrue.
+
+**A send that did not leave kept its words.** `PanelSocket.write` and
+`pasteText` returned nothing, and gave up silently when the socket was not
+open; the compose box cleared after every send regardless. On a Pixel 7
+taken offline, `echo OFFLINE_MARK_1` was typed, sent, gone from the box, and
+in no pane after the reconnect. Both now return whether anything went; the
+box keeps the text on false and says it was not connected. It does not
+resend on reconnect -- a command typed a minute ago may no longer be the
+one to run, so that is the person's call. `socket.test.ts` pins the return
+for every non-open state; render-check takes the network away at phone
+width and reads the box and the notice.

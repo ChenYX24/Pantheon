@@ -535,8 +535,8 @@ export class PanelSocket {
   }
 
   /** Sends text, encoded as UTF-8. */
-  writeText(sessionId: string, text: string) {
-    this.write(sessionId, new TextEncoder().encode(text))
+  writeText(sessionId: string, text: string): boolean {
+    return this.write(sessionId, new TextEncoder().encode(text))
   }
 
   /**
@@ -552,20 +552,29 @@ export class PanelSocket {
    * The server routes this through tmux, which brackets it only if the pane's
    * application asked for bracketed paste. See MsgPaste.
    */
-  pasteText(sessionId: string, text: string, submit = false) {
+  pasteText(sessionId: string, text: string, submit = false): boolean {
     const stream = this.streams.get(sessionId)
-    if (!stream || stream.ref === null || this.ws?.readyState !== WebSocket.OPEN) return
+    if (!stream || stream.ref === null || this.ws?.readyState !== WebSocket.OPEN) return false
     // `submit` is the server's job: the paste goes by the tmux command socket
     // and a return would go by the PTY, so sending them from here would be
     // racing two roads to the same pane.
     this.send({ t: 'paste', sessionId, text, submit })
+    return true
   }
 
-  /** Sends raw bytes to a session. */
-  write(sessionId: string, data: Uint8Array) {
+  /**
+   * Sends raw bytes to a session, and says whether they left.
+   *
+   * False means nothing was sent: no socket, or no stream yet. The compose box
+   * cleared itself without asking and the words were simply gone -- typed on a
+   * phone in a lift, sent, the box emptied, and after the reconnect no pane had
+   * them. A caller holding something the person wrote keeps it on false.
+   */
+  write(sessionId: string, data: Uint8Array): boolean {
     const stream = this.streams.get(sessionId)
-    if (!stream || stream.ref === null || this.ws?.readyState !== WebSocket.OPEN) return
+    if (!stream || stream.ref === null || this.ws?.readyState !== WebSocket.OPEN) return false
     this.ws.send(encodeData(stream.ref, data))
+    return true
   }
 
   resize(sessionId: string, cols: number, rows: number, takeControl = false) {

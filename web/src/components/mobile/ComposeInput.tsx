@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { CornerDownLeft, ImagePlus, Send } from 'lucide-react'
+import { CornerDownLeft, ImagePlus, Send, WifiOff } from 'lucide-react'
 import { t, useLang } from '../../i18n'
 
 /**
@@ -39,7 +39,8 @@ export function ComposeInput({
   onFiles,
 }: {
   sessionId: string
-  onPaste: (text: string, submit: boolean) => void
+  /** False when nothing was sent, and then the box keeps what was typed. */
+  onPaste: (text: string, submit: boolean) => boolean
   /**
    * Attach files, which on a phone has no other road.
    *
@@ -63,6 +64,9 @@ export function ComposeInput({
   const lastSent = useRef('')
   const [text, setText] = useState('')
   const [newline, setNewline] = useState(true)
+  // Set when a send did not leave: the words stay in the box and this says
+  // why. Cleared by the next edit or the next send that does leave.
+  const [unsent, setUnsent] = useState(false)
 
   // What is in the box belongs to the session it was typed for.
   //
@@ -126,7 +130,15 @@ export function ComposeInput({
     // So there is one road now. It was two because a single line looked like
     // it did not need the paste machinery, which is true of the bracketing and
     // false of the part that matters.
-    onPaste(text, newline)
+    if (!onPaste(text, newline)) {
+      // Not connected. The box used to clear regardless, and the text was in
+      // no pane after the reconnect. Kept, and not queued: whether it still
+      // makes sense to send once the link is back is the person's call.
+      lastSent.current = ''
+      setUnsent(true)
+      return
+    }
+    setUnsent(false)
     setDrafts((d) => {
       const next = { ...d }
       delete next[sessionId]
@@ -136,16 +148,21 @@ export function ComposeInput({
   }
 
   return (
-    <div
-      data-testid="compose"
-      className="flex shrink-0 items-end gap-1 border-t border-hairline px-2 py-1.5 vp-blur"
-    >
+    <div data-testid="compose" className="shrink-0 border-t border-hairline px-2 py-1.5 vp-blur">
+      {unsent && (
+        <p role="alert" data-testid="compose-unsent" className="mb-1 flex items-center gap-1.5 text-vp-sm text-ink">
+          <WifiOff size={14} aria-hidden className="shrink-0" style={{ color: 'var(--vp-state-crashed)' }} />
+          {t('compose.unsent')}
+        </p>
+      )}
+      <div className="flex items-end gap-1">
       <textarea
         value={text}
         onChange={(e) => {
           // Any edit makes the next submission a new one, including retyping
           // the same words on purpose.
           lastSent.current = ''
+          setUnsent(false)
           setText(e.target.value)
         }}
         onKeyDown={(e) => {
@@ -224,6 +241,7 @@ export function ComposeInput({
       >
         <Send size={13} />
       </button>
+      </div>
     </div>
   )
 }
