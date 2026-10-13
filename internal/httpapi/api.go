@@ -1798,6 +1798,12 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Height: req.Rows,
 	})
 	if err != nil {
+		// tmux may have made it anyway: a request whose context ended while
+		// new-session was in flight kills the client, not what the server
+		// already did, and then no row is ever written for it. The same
+		// cleanup as a failed row below; Kill is a no-op when it is absent,
+		// and the name is this request's own.
+		_ = s.Tmux.Kill(context.WithoutCancel(ctx), tmuxName)
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

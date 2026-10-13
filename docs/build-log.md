@@ -25948,6 +25948,16 @@ out, which for an idle terminal is never. A failed ping now closes the
 connection. `TestAViewerThatStopsAnsweringPingsIsClosed` dials with a client
 that reads nothing, so never pongs, then reads: closed now, still open
 before.
+
+**A create the browser gave up on could leave an invisible agent running.**
+`Tmux.Create` runs under the request's context; a client that went away
+while `new-session` was in flight had its tmux client killed after the
+server had already made the session, the handler answered 500, and no row
+was ever written -- an agent running in a session the panel would never
+list. The failed-row path below it already killed the session; the failed-
+create path now does the same (a no-op when tmux made nothing).
+`TestACancelledCreateLeavesNoTmuxSessionBehind` puts a tmux in front that
+makes the session and then waits, and a client that gives up first.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

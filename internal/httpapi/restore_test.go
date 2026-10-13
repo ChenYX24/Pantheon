@@ -15,6 +15,7 @@ import (
 
 	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/store"
+	"github.com/jiangmuran/vibepanel/internal/tmux"
 )
 
 // A reboot, honestly simulated.
@@ -704,4 +705,47 @@ func TestStartingThePollerSealsWhatWasStoredInTheClear(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// A create the browser gave up on does not leave a session nobody can see.
+// tmux can have made the session by the time the request's context kills
+// the client; the handler answered 500 with no row written, and the agent
+// kept running in a tmux session the panel would never list. Here the tmux
+// in front makes the session and then dawdles, so the request ends first.
+func TestACancelledCreateLeavesNoTmuxSessionBehind(t *testing.T) {
+	ts, srv := newTestServer(t)
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"abandoned"}`)
+	real := srv.Tmux.Bin
+	fake := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = new-session ]; then " + real + " \"$@\"; sleep 2; exit 0; fi\ndone\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before, err := srv.Tmux.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Tmux.Bin = fake
+	client := ts.Client()
+	client.Timeout = 300 * time.Millisecond
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/sessions", strings.NewReader(newSessionBody(t, project.ID, "sleep", "600")))
+	req.Header.Set("Content-Type", "application/json")
+	if res, err := client.Do(req); err == nil {
+		res.Body.Close()
+		t.Fatalf("the create finished (%d) before the client gave up; the test did not test anything", res.StatusCode)
+	}
+	time.Sleep(2500 * time.Millisecond) // the fake's sleep, and the handler after it
+	// A client of its own to look with. srv.Tmux.Bin stays the fake, which
+	// passes everything else through: the handler is still running after the
+	// client gave up, and setting Bin back here raced its Kill reading it.
+	look := tmux.New(srv.Tmux.Socket, t.TempDir())
+	look.Bin = real
+	after, err := look.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := srv.DB.ListSessions(context.Background())
+	if len(after) > len(before) && len(rows) == 0 {
+		t.Errorf("tmux has %d sessions and the panel has no row for the new one", len(after))
+	}
 }
