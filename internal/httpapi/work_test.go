@@ -740,3 +740,35 @@ func TestAScopedLinkSeesOnlyItsOwnEvents(t *testing.T) {
 
 // repoManifest is a page of what got built, with no options.
 const repoManifest = `{"sdk":1,"name":"Built","sections":["repo"]}`
+
+// The chat tables are swept by the running panel, not only by a function a
+// test can call: the sweep used to exist and be called by nothing. Started
+// the way Poll starts it; the startup pass is enough to see.
+func TestTheEventDrainSweepsChatLeftovers(t *testing.T) {
+	_, srv := newTestServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	old := time.Now().AddDate(0, 0, -store.ChatOutboundRetentionDays-1).Unix()
+	if err := srv.DB.RecordChatOutbound(ctx, store.ChatOutbound{Channel: "t", PeerID: "p", Ref: "old", SessionID: "nobody", Kind: store.OutboundStatus, At: old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.DB.SetSessionTranscript(ctx, "nobody", "claude", "/t"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); srv.drainEvents(ctx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var n int
+		_ = srv.DB.SQL().QueryRow(`SELECT (SELECT COUNT(*) FROM chat_outbound) + (SELECT COUNT(*) FROM session_transcripts)`).Scan(&n)
+		if n == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d chat rows left for a session that does not exist and a month-old push", n)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+}

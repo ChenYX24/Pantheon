@@ -25694,3 +25694,20 @@ ranges) passed as public. The table now has the mapped form of each of
 those, and the deletion turns eight rows red. The same pass adds RFC 8215's
 local-use NAT64 prefix, `64:ff9b:1::/48`, which translates to whatever IPv4
 the operator's translator picks.
+
+**The chat tables were never swept.** The migration says none of them
+cascade from sessions and that rows pointing at nothing are swept;
+`SweepSessionMessages` and `SweepChatOutbound` existed, were tested, and
+were called by nothing. `chat_outbound` grew by a row per push per peer for
+as long as a panel ran, and a deleted session left its messages, transcript
+path, status ref and mutes behind. One `SweepChatLeftovers` replaces both,
+in one transaction: sent-message records older than thirty days, and the
+deleted sessions' rows in `session_messages`, `session_transcripts`,
+`chat_status` and `chat_mutes`. It runs on the event log's hourly tick and
+once at startup. `chat_handles` is deliberately not swept: a handle is
+`MAX+1` and promised never to be reused, and deleting the highest row hands
+its number to the next session, so a reply to an old "#7" reaches the wrong
+one -- the first draft of this did exactly that, and
+`TestChatLeftoversAreSweptAndHandlesAreNot` now says so.
+`TestTheEventDrainSweepsChatLeftovers` starts the drain as Poll does and
+goes red with the call removed.

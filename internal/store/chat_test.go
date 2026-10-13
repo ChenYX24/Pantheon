@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/jiangmuran/vibepanel/internal/session"
 )
 
 func TestSessionMessagesAreBoundedPerSession(t *testing.T) {
@@ -259,7 +261,7 @@ func TestOutboundRefsResolveAndRecentIsNewestFirst(t *testing.T) {
 	if len(recent) != 2 || recent[0].Ref != "m3" || recent[1].Ref != "m2" {
 		t.Fatalf("recent: %+v", recent)
 	}
-	if err := db.SweepChatOutbound(ctx, 102); err != nil {
+	if _, err := db.SweepChatLeftovers(ctx, 102); err != nil {
 		t.Fatal(err)
 	}
 	recent, _ = db.RecentChatOutbound(ctx, "t", "p", 10)
@@ -395,5 +397,98 @@ func TestANameIsNotOverwrittenByTheIM(t *testing.T) {
 	_ = db.TouchChatPeer(ctx, "t", "1", "lin_2024", "", 6)
 	if p, _ := db.GetChatPeer(ctx, "t", "1"); p.Display != "Lin" || p.LastSeenAt != 6 {
 		t.Fatalf("peer: %+v", p)
+	}
+}
+
+// What the chat tables hold for a deleted session goes; a live session's
+// stays; a handle stays either way, so its number is never given to another
+// session; sent-message records go when they age out.
+func TestChatLeftoversAreSweptAndHandlesAreNot(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	project, err := db.CreateProject(ctx, "p-sweep", "sweep", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An archived project's session, itself archived, is still a session:
+	// its rows are not leftovers.
+	shelf, err := db.CreateProject(ctx, "p-shelf", "shelf", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"live", "gone", "shelved"} {
+		pid := project.ID
+		if id == "shelved" {
+			pid = shelf.ID
+		}
+		if _, err := db.CreateSession(ctx, Session{ID: id, ProjectID: pid, TmuxName: "vp_" + id, State: session.StateWorking}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.AddSessionMessage(ctx, SessionMessage{SessionID: id, Kind: MessageAssistant, Text: "hi"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetSessionTranscript(ctx, id, "claude", "/t/"+id); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.SetChatStatusRef(ctx, "t", "p", id, "ref-"+id); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.MuteChat(ctx, "t", "p", id, 1<<40); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ChatHandle(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.RecordChatOutbound(ctx, ChatOutbound{Channel: "t", PeerID: "p", Ref: "m-" + id, SessionID: id, Kind: OutboundStatus, At: 1000}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE sessions SET archived_at = 1 WHERE id = 'shelved'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ArchiveProject(ctx, shelf.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	goneHandle, _ := db.ChatHandle(ctx, "gone")
+	if err := db.DeleteSession(ctx, "gone"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SweepChatLeftovers(ctx, 500); err != nil {
+		t.Fatal(err)
+	}
+	count := func(table, id string) int {
+		var n int
+		if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE session_id = ?`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for _, table := range []string{"session_messages", "session_transcripts", "chat_status", "chat_mutes", "chat_outbound"} {
+		for _, kept := range []string{"live", "shelved"} {
+			if n := count(table, kept); n != 1 {
+				t.Errorf("%s: the %s session's row was swept (%d left)", table, kept, n)
+			}
+		}
+		if table == "chat_outbound" {
+			continue // not by session; by age, below
+		}
+		if n := count(table, "gone"); n != 0 {
+			t.Errorf("%s: %d rows left for a deleted session", table, n)
+		}
+	}
+	if n := count("chat_handles", "gone"); n != 1 {
+		t.Error("a deleted session's handle was swept, so its number can be handed out again")
+	}
+	if _, err := db.CreateSession(ctx, Session{ID: "next", ProjectID: project.ID, TmuxName: "vp_next", State: session.StateWorking}); err != nil {
+		t.Fatal(err)
+	}
+	if h, _ := db.ChatHandle(ctx, "next"); h == goneHandle {
+		t.Errorf("the next session got handle %d, the deleted one's", h)
+	}
+	if _, err := db.SweepChatLeftovers(ctx, 2000); err != nil {
+		t.Fatal(err)
+	}
+	if n := count("chat_outbound", "live") + count("chat_outbound", "shelved"); n != 0 {
+		t.Error("a sent-message record older than the cutoff survived the sweep")
 	}
 }

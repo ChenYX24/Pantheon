@@ -147,16 +147,6 @@ func (d *DB) TouchSessionMessage(ctx context.Context, id, at int64) error {
 	return nil
 }
 
-// SweepSessionMessages removes reports for sessions that no longer exist.
-func (d *DB) SweepSessionMessages(ctx context.Context) error {
-	_, err := d.sql.ExecContext(ctx,
-		`DELETE FROM session_messages WHERE session_id NOT IN (SELECT id FROM sessions)`)
-	if err != nil {
-		return fmt.Errorf("store: sweep session messages: %w", err)
-	}
-	return nil
-}
-
 // SessionTranscript is where an agent said it writes its own transcript.
 type SessionTranscript struct {
 	SessionID string
@@ -700,16 +690,50 @@ func (d *DB) chatOutbounds(ctx context.Context, where string, args ...any) ([]Ch
 	return out, rows.Err()
 }
 
-// SweepChatOutbound drops sent-message records older than the cutoff.
+// ChatOutboundRetentionDays is how long a sent message can still be replied
+// to by quoting it. A quote of a message from last month is not a thing
+// anybody does, and the table is one row per push to every peer forever
+// otherwise.
+const ChatOutboundRetentionDays = 30
+
+// SweepChatLeftovers removes what the chat tables hold for sessions that are
+// gone, and sent-message records older than outboundBefore. It returns the
+// number of rows removed.
 //
-// A quote of a message from last month is not a thing anybody does, and the
-// table is one row per push to every peer forever otherwise.
-func (d *DB) SweepChatOutbound(ctx context.Context, before int64) error {
-	_, err := d.sql.ExecContext(ctx, `DELETE FROM chat_outbound WHERE at < ?`, before)
+// None of these tables cascade from sessions (the migration says why), so
+// this is the only thing that empties them. It existed as two functions that
+// nothing called, and chat_outbound grew by a row per push per peer for as
+// long as the panel ran.
+//
+// chat_handles is deliberately left alone. A handle is MAX+1 and promised
+// never to be reused (ChatHandle); deleting the highest row would hand its
+// number to the next session, and a reply to an old message -- "#7 ok" --
+// would reach the wrong one. One small row per session ever is the price.
+func (d *DB) SweepChatLeftovers(ctx context.Context, outboundBefore int64) (int64, error) {
+	tx, err := d.sql.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("store: sweep chat outbound: %w", err)
+		return 0, fmt.Errorf("store: sweep chat: %w", err)
 	}
-	return nil
+	defer tx.Rollback() //nolint:errcheck // a no-op after Commit
+	var total int64
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`DELETE FROM chat_outbound WHERE at < ?`, []any{outboundBefore}},
+		{`DELETE FROM session_messages WHERE session_id NOT IN (SELECT id FROM sessions)`, nil},
+		{`DELETE FROM session_transcripts WHERE session_id NOT IN (SELECT id FROM sessions)`, nil},
+		{`DELETE FROM chat_status WHERE session_id NOT IN (SELECT id FROM sessions)`, nil},
+		{`DELETE FROM chat_mutes WHERE session_id NOT IN (SELECT id FROM sessions)`, nil},
+	} {
+		res, err := tx.ExecContext(ctx, q.sql, q.args...)
+		if err != nil {
+			return 0, fmt.Errorf("store: sweep chat: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+	return total, tx.Commit()
 }
 
 // ChatStatusRef is the message an adapter keeps editing for a session, if one

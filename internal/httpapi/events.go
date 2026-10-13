@@ -173,12 +173,14 @@ func (s *Server) drainEvents(ctx context.Context) {
 	// day would otherwise never reach the first tick, and the log would be the
 	// one table here that only ever grows.
 	s.sweepEvents(ctx)
+	s.sweepChatLeftovers(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-sweep.C:
 			s.sweepEvents(ctx)
+			s.sweepChatLeftovers(ctx)
 		case ev := <-ch:
 			// context.WithoutCancel is deliberately *not* used. This goroutine's
 			// context is the server's, so a shutdown should stop writing rather
@@ -244,6 +246,25 @@ func gather(ctx context.Context, ch <-chan store.SessionEvent,
 }
 
 // sweepEvents trims the log back to its retention window.
+// sweepChatLeftovers empties the chat tables of deleted sessions and of
+// sent-message records nobody can still be replying to. On the event log's
+// hourly tick because it is the same kind of chore on the same kind of
+// panel: one that is never restarted. The store functions it replaces were
+// written and never called, and chat_outbound grew by a row per push per peer.
+func (s *Server) sweepChatLeftovers(ctx context.Context) {
+	before := time.Now().AddDate(0, 0, -store.ChatOutboundRetentionDays).Unix()
+	n, err := s.DB.SweepChatLeftovers(ctx, before)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.Log.Warn("sweep chat leftovers", "err", err)
+		}
+		return
+	}
+	if n > 0 {
+		s.Log.Info("swept chat leftovers", "rows", n)
+	}
+}
+
 func (s *Server) sweepEvents(ctx context.Context) {
 	keep := s.EventKeepDays
 	if keep <= 0 {
