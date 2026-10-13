@@ -66,15 +66,16 @@
   /* Text, most to least prominent. */
   --vp-ink: #1d1d1f;
   /* Alpha values verified against the frosted surface they actually sit on,
-     not against a flat white assumption. Apple's own secondaryLabel (0.60) and
-     tertiaryLabel (0.30) measure 3.44:1 and 1.73:1 here — the second of those
-     is barely visible. Secondary carries real content and meets AA at 4.5:1;
-     tertiary is decorative only and meets 3:1. Anything informational uses
-     secondary. See scripts/render-check for the measurement. */
-  --vp-ink-2: rgb(60 60 67 / 0.75); /* 5.2:1 */
-  --vp-ink-3: rgb(60 60 67 / 0.55); /* 3.0:1 */
+     not against a flat white assumption, and against the darkest of the three
+     surfaces they are drawn on (--vp-bg). Secondary and tertiary both carry
+     real content -- hints, timestamps, counts -- so both meet AA at 4.5:1.
+     Tertiary used to be "decorative only" at 3:1 and was then used about 180
+     times for text somebody has to read; styles contrast.test.ts computes the
+     ratios from these values so they cannot slide back. */
+  --vp-ink-2: rgb(60 60 67 / 0.86); /* 6.2:1 on the darkest surface */
+  --vp-ink-3: rgb(60 60 67 / 0.75); /* 4.5:1 on the darkest surface */
 
-  --vp-accent: #007aff;
+  --vp-accent: #0062cc;
   --vp-accent-ink: #ffffff;
   --vp-selection: rgb(0 122 255 / 0.20);
 
@@ -154,10 +155,10 @@
 
     --vp-ink: #f5f5f7;
     --vp-ink-2: rgb(235 235 245 / 0.65); /* 6.9:1 */
-    --vp-ink-3: rgb(235 235 245 / 0.45); /* 4.0:1 */
+    --vp-ink-3: rgb(235 235 245 / 0.53); /* 4.8:1 */
 
-    --vp-accent: #0a84ff;
-    --vp-accent-ink: #ffffff;
+    --vp-accent: #2e90ff;
+    --vp-accent-ink: #000000;
     --vp-selection: rgb(10 132 255 / 0.30);
 
     --vp-state-waiting: #ff9f0a;
@@ -201,10 +202,10 @@
 
   --vp-ink: #f5f5f7;
   --vp-ink-2: rgb(235 235 245 / 0.65); /* 6.9:1 */
-  --vp-ink-3: rgb(235 235 245 / 0.45); /* 4.0:1 */
+  --vp-ink-3: rgb(235 235 245 / 0.53); /* 4.8:1 */
 
-  --vp-accent: #0a84ff;
-  --vp-accent-ink: #ffffff;
+  --vp-accent: #2e90ff;
+  --vp-accent-ink: #000000;
   --vp-selection: rgb(10 132 255 / 0.30);
 
   --vp-state-waiting: #ff9f0a;
