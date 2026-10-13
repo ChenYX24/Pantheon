@@ -3629,3 +3629,55 @@ func TestAHookReportedWaitingFiresTheWebhook(t *testing.T) {
 		t.Errorf("webhook hits = %d after a poll, want 1", n)
 	}
 }
+
+// A report that changes nothing sends nothing. Every hook report calls
+// notifyState, and most repeat the state already stored; each rebuilt the
+// whole snapshot and sent it to every viewer, identical to what each had.
+// The poller already compared; this path did not. A change still goes out.
+func TestARepeatedReportDoesNotRebroadcastTheSnapshot(t *testing.T) {
+	ts, srv := newTestServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws", wsDialOptions(t, ts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	states := make(chan struct{}, 64)
+	go func() {
+		for {
+			typ, data, rerr := c.Read(ctx)
+			if rerr != nil {
+				return
+			}
+			var msg ws.ServerMessage
+			if typ == websocket.MessageText && json.Unmarshal(data, &msg) == nil && msg.Type == ws.MsgState {
+				states <- struct{}{}
+			}
+		}
+	}()
+	count := func(within time.Duration) int {
+		n, deadline := 0, time.After(within)
+		for {
+			select {
+			case <-states:
+				n++
+			case <-deadline:
+				return n
+			}
+		}
+	}
+	srv.notifyState() // the first one is news to the hub
+	count(500 * time.Millisecond)
+	for i := 0; i < 10; i++ {
+		srv.notifyState()
+		time.Sleep(100 * time.Millisecond) // past the hub's coalescing window
+	}
+	if n := count(300 * time.Millisecond); n != 0 {
+		t.Errorf("ten reports that changed nothing sent %d snapshots", n)
+	}
+	postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"news"}`)
+	if n := count(time.Second); n == 0 {
+		t.Error("a real change was not sent")
+	}
+}

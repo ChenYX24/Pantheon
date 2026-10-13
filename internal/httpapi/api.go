@@ -788,9 +788,19 @@ func (s *Server) notifyState() {
 		if payload == nil {
 			return nil
 		}
+		// The same test the poller makes. Every hook report calls this, and
+		// most repeat the state already stored: rebuilding and sending the
+		// whole snapshot to every viewer for those was measured at 40 KB/s per
+		// viewer of bytes identical to what each already had.
 		s.snapMu.Lock()
-		s.lastSnapshot = payload
+		changed := !bytes.Equal(payload, s.lastSnapshot)
+		if changed {
+			s.lastSnapshot = payload
+		}
 		s.snapMu.Unlock()
+		if !changed {
+			return nil
+		}
 		return payload
 	})
 }

@@ -25843,6 +25843,15 @@ also vendored there, `golang.org/x/net` v0.60.0. Both bumped; govulncheck
 now reports none reachable. Nothing in CI runs it, which is how the gap
 opened between two audits.
 
+**A hook report that changed nothing resent the whole snapshot.** The poller
+compares the snapshot it built with the last one sent and sends nothing when
+they match; `notifyState`, which every hook report calls, did not. Most
+reports repeat the stored state, so each rebuilt the snapshot and sent it to
+every viewer: measured on the running panel at 40 KB/s per viewer of bytes
+identical to what each already had. It makes the same comparison now.
+`TestARepeatedReportDoesNotRebroadcastTheSnapshot` counts the state messages
+a viewer receives: ten from ten unchanged reports before, none now, and a real
+change still arrives.
 
 ## 2026-10-13 — The UI and device audit, batch 1
 
