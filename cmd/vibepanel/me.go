@@ -29,6 +29,8 @@ const meUsage = `usage: vibepanel me [--json]
        vibepanel me title <title>
        vibepanel me info set <summary|progress|labels> <value>
        vibepanel me info clear [summary|progress|labels]
+       vibepanel me say <text>
+       vibepanel me notify <text> [--level info|warn|ask] [--choices a,b]
        vibepanel me guide
 
 Run inside a session the panel started. The agent says what it is up to:
@@ -126,6 +128,10 @@ func cmdMe(args []string) error {
 		}
 		printMe(v)
 		return nil
+	}
+	switch args[0] {
+	case "say", "notify":
+		return meSpeak(ctx, c, args[0], args[1:])
 	}
 	patch := map[string]any{}
 	switch args[0] {
@@ -245,6 +251,61 @@ needs nothing: the environment already holds your session's credential.
   ` + "`labels db,migration`" + ` for what the work is about (up to five).
 - ` + "`vibepanel me title \"...\"`" + ` if the title the panel guessed from your
   terminal is wrong.
+- ` + "`vibepanel me say \"...\"`" + ` for a milestone worth a line on the phone
+  and a quiet toast on the panel: the migration ran, the tests pass.
+- ` + "`vibepanel me notify \"...\" --choices drop,keep`" + ` only when a person
+  has to decide now: it rings every open page and every phone, with the
+  choices as buttons, and the pressed one is typed into this session. Mark
+  ` + "`waiting`" + ` first, then read the answer from stdin as you would any
+  reply. Six a minute at most; past that, say it in the summary.
 - Do not loop on these. A state change is an event on somebody's phone;
   say a thing once.
 `
+
+// meSpeak is say and notify: the text from the arguments or stdin, and for
+// notify the level and the choices. The answer to an ask arrives in the
+// terminal, typed, which is where the agent reads everything.
+func meSpeak(ctx context.Context, c *meClient, what string, args []string) error {
+	fs := flag.NewFlagSet("me "+what, flag.ContinueOnError)
+	level := fs.String("level", "info", "info, warn or ask (notify only)")
+	choices := fs.String("choices", "", "comma-separated buttons for the phone; a press types the choice into this session")
+	pos, err := parseInterspersed(fs, args)
+	if err != nil {
+		return err
+	}
+	text := strings.Join(pos, " ")
+	if len(pos) == 0 {
+		raw, rerr := io.ReadAll(io.LimitReader(os.Stdin, 64<<10))
+		if rerr != nil {
+			return rerr
+		}
+		text = string(raw)
+	}
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("usage: vibepanel me %s <text>   (or text on stdin)", what)
+	}
+	if what == "say" {
+		if err := c.do(ctx, http.MethodPost, "/api/me/v1/say", map[string]any{"text": text}, nil); err != nil {
+			return err
+		}
+		fmt.Println("said")
+		return nil
+	}
+	list := []string{}
+	for _, ch := range strings.Split(*choices, ",") {
+		if ch = strings.TrimSpace(ch); ch != "" {
+			list = append(list, ch)
+		}
+	}
+	var out struct {
+		Contacts int `json:"contacts"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/me/v1/notify", map[string]any{"text": text, "level": *level, "choices": list}, &out); err != nil {
+		return err
+	}
+	fmt.Printf("notified: every open page, and %d contact(s) on the phone\n", out.Contacts)
+	if len(list) > 0 {
+		fmt.Println("the answer arrives here as typed input; read it from where you read everything")
+	}
+	return nil
+}

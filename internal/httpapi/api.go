@@ -115,7 +115,9 @@ type Server struct {
 	// phx is the door on the panel's port: pluginhttp.go.
 	phx pluginHTTPState
 	// pdl is the declared downloads: plugindownload.go.
-	pdl        pluginDownloadState
+	pdl pluginDownloadState
+	// ntc is the per-session rate on say and notify: notices.go.
+	ntc        noticeState
 	serviceCtx context.Context
 
 	// Restart asks the process to stop and be brought back by whatever
@@ -495,6 +497,7 @@ func (s *Server) Routes() http.Handler {
 			r.Delete("/sessions/{id}", s.handleDeleteSession)
 			r.Post("/sessions/{id}/restart", s.handleRestartSession)
 			s.registerSessionIORoutes(r)
+			s.registerSessionNoticeRoutes(r)
 			// Plural and id-less on purpose. Restoring after a reboot is a
 			// batch by nature — the whole machine went down, so the whole list
 			// is gone — and a per-id route would have the browser fire two

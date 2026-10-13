@@ -308,10 +308,13 @@ func projectViaAPI(ctx context.Context, sub string, rest []string) (handled bool
 func sessionViaAPI(ctx context.Context, sub string, rest []string) (handled bool, offline []string, err error) {
 	fs := flag.NewFlagSet("session "+sub, flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "print the panel's answer as JSON")
-	var project, title, sid, profile string
+	var project, title, sid, profile, level, choices string
 	var cols, rows int
 	enter := false
 	switch sub {
+	case "notify":
+		fs.StringVar(&level, "level", "info", "info, warn or ask")
+		fs.StringVar(&choices, "choices", "", "comma-separated buttons for the phone")
 	case "new":
 		fs.StringVar(&project, "project", "", "project (id, name or directory)")
 		fs.StringVar(&title, "title", "", "initial title")
@@ -505,6 +508,38 @@ func sessionViaAPI(ctx context.Context, sub string, rest []string) (handled bool
 			return true, nil, printJSON(out)
 		}
 		fmt.Print(strings.TrimRight(out.Text, "\n") + "\n")
+		return true, nil, nil
+	case "say", "notify":
+		// Speaking for a session from outside: the same routes as its own
+		// `me say` and `me notify`, under the owner's credential.
+		if len(args) < 2 {
+			return true, nil, fmt.Errorf("usage: vibepanel session %s <session> <text> [--level L] [--choices a,b]", sub)
+		}
+		s, err := c.session(ctx, args[0])
+		if err != nil {
+			return true, nil, err
+		}
+		text := strings.Join(args[1:], " ")
+		if sub == "say" {
+			if err := c.do(ctx, http.MethodPost, "/api/sessions/"+s.ID+"/say", map[string]any{"text": text}, nil); err != nil {
+				return true, nil, err
+			}
+			fmt.Printf("%s said it\n", s.Title)
+			return true, nil, nil
+		}
+		list := []string{}
+		for _, ch := range strings.Split(choices, ",") {
+			if ch = strings.TrimSpace(ch); ch != "" {
+				list = append(list, ch)
+			}
+		}
+		var out struct {
+			Contacts int `json:"contacts"`
+		}
+		if err := c.do(ctx, http.MethodPost, "/api/sessions/"+s.ID+"/notify", map[string]any{"text": text, "level": level, "choices": list}, &out); err != nil {
+			return true, nil, err
+		}
+		fmt.Printf("notified for %s: every open page, %d contact(s)\n", s.Title, out.Contacts)
 		return true, nil, nil
 	case "info":
 		// What the session says about itself, set by the owner: the same

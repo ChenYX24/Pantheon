@@ -67,7 +67,7 @@ import { RestoreDialog } from './components/RestoreDialog'
 import { LaunchPicker } from './components/LaunchPicker'
 import { filesFrom, uploadErrorText } from './components/upload'
 import { copyTextInGesture } from './clipboard'
-import { notifyOnArchivedWaiting, notifyOnResourceAlert, notifyOnWaiting } from './notify'
+import { notifyOnArchivedWaiting, notifyOnNotice, notifyOnResourceAlert, notifyOnWaiting } from './notify'
 import { readSkipped, shouldNotice, writeSkipped } from './components/updateView'
 import { t, useLang } from './i18n'
 import { PluginHeaderItems, usePlugins } from './components/plugins/slots'
@@ -488,6 +488,19 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   useEffect(
     () => notifyOnResourceAlert(resourceAlert, state.sessions, document.hasFocus()),
     [resourceAlert, state.sessions],
+  )
+  // A session speaking up (`vibepanel me say|notify`): a toast naming it,
+  // with its words as detail, and a notification when the page is not in
+  // front. The words are a session's: detail, never the key's params.
+  useEffect(
+    () =>
+      socket.onNotice((n) => {
+        const name = n.title || n.sessionId
+        const key = n.level === 'say' ? 'notice.say' : n.level === 'warn' ? 'notice.warn' : n.level === 'ask' ? 'notice.ask' : 'notice.info'
+        showToast({ kind: n.level === 'warn' ? 'error' : 'info', key, params: { name: safeText(name) }, detail: n.text })
+        notifyOnNotice(n, document.hasFocus())
+      }),
+    [socket],
   )
 
   // What the server says went wrong, said to the person it happened to.

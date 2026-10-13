@@ -62,6 +62,8 @@ scripts.
 | `session send <s> [text] [--enter]` | type into it; with no text, stdin; `--enter` presses Enter after |
 | `session screen <s>` | the pane as text |
 | `session info <s> summary <text> \| progress <0-100> \| labels a,b \| clear` | what the session says about itself, set from outside |
+| `session say <s> <text>` | a line in the session's messages: the chat card shows it, the routes push it by their rules, every open page gets a quiet toast |
+| `session notify <s> <text> [--level info\|warn\|ask] [--choices a,b]` | ring every open page and every paired phone whatever the state, with the choices as buttons; a pressed choice is typed into the session |
 | `session restore` | rebuild the sessions a reboot took |
 | `note get\|set <p> [text]` | the project's note; `set` with no text reads stdin |
 | `todo ls\|add\|done\|undo\|rm <p> [text\|id]` | the project's todos; `done`, `undo` and `rm` take an id or the start of the text |
@@ -89,6 +91,8 @@ up to and cannot touch another session, a project or the owner's settings
 | `me info set progress <0-100>` | a bar with the figure beside it |
 | `me info set labels a,b` | up to five chips |
 | `me info clear [summary\|progress\|labels]` | |
+| `me say <text>` | a milestone: a line on the phone by the chat rules, a quiet toast on the panel |
+| `me notify <text> [--level info\|warn\|ask] [--choices a,b]` | a person has to decide now: every page and phone, buttons for the choices, the pressed one typed back into the session. Six a minute |
 | `me guide` | the best practice, one page |
 
 The practice, in short: mark `waiting` with a why **before** asking a

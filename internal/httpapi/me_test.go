@@ -148,8 +148,58 @@ func TestASessionTokenReachesOnlyTheseRoutes(t *testing.T) {
 		return nil
 	})
 	sort.Strings(got)
-	want := []string{"GET /api/me/v1", "PATCH /api/me/v1"}
+	want := []string{"GET /api/me/v1", "PATCH /api/me/v1", "POST /api/me/v1/notify", "POST /api/me/v1/say"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("a session's door is %v, want %v: a route added here is one every agent in every session can reach", got, want)
+	}
+}
+
+// say and notify from inside: a line in the session's messages, an audit
+// row with the byte count and not the words, and a rate: the seventh notice
+// in a minute is a 429 with a Retry-After.
+func TestASessionSaysAndNotifies(t *testing.T) {
+	ts, srv := newTestServer(t)
+	sess, token := meSession(t, ts, srv)
+	if status, body := meCall(t, ts, http.MethodPost, "/api/me/v1/say", sess.ID, token, `{"text":"the migration finished"}`); status != http.StatusNoContent {
+		t.Fatalf("say: %d %s", status, body)
+	}
+	if last, ok, _ := srv.DB.LatestSessionMessage(t.Context(), sess.ID); !ok || last.Text != "the migration finished" || last.Kind != store.MessageNotice {
+		t.Errorf("after say: %+v", last)
+	}
+	status, body := meCall(t, ts, http.MethodPost, "/api/me/v1/notify", sess.ID, token, `{"text":"drop the old table?","choices":["drop","keep","a very long choice that gets cut"]}`)
+	if status != http.StatusOK || !strings.Contains(string(body), `"contacts":0`) {
+		t.Fatalf("notify: %d %s", status, body)
+	}
+	for i := 0; i < noticeRateNotify; i++ {
+		meCall(t, ts, http.MethodPost, "/api/me/v1/notify", sess.ID, token, `{"text":"again"}`)
+	}
+	status, _ = meCall(t, ts, http.MethodPost, "/api/me/v1/notify", sess.ID, token, `{"text":"once more"}`)
+	if status != http.StatusTooManyRequests {
+		t.Errorf("the notice after the limit: %d", status)
+	}
+	if status, _ := meCall(t, ts, http.MethodPost, "/api/me/v1/say", sess.ID, token, `{"text":"   "}`); status != http.StatusBadRequest {
+		t.Errorf("an empty say: %d", status)
+	}
+	// The owner's door to the same thing.
+	if status, body := doJSON(t, ts, http.MethodPost, "/api/sessions/"+sess.ID+"/say", `{"text":"from the owner"}`); status != http.StatusNoContent {
+		t.Errorf("owner say: %d %s", status, body)
+	}
+	entries, _ := srv.DB.RecentAudit(t.Context(), 50)
+	said, notified := 0, 0
+	for _, e := range entries {
+		if e.Event == "session.said" {
+			said++
+			if strings.Contains(e.Detail, "migration") {
+				t.Errorf("the audit row carries the words: %s", e.Detail)
+			}
+		}
+		if e.Event == "session.notified" {
+			notified++
+		}
+	}
+	// The limit is six a minute: the first and five more are audited, the
+	// seventh is the 429 above and leaves no row.
+	if said != 2 || notified != noticeRateNotify {
+		t.Errorf("audit: said %d notified %d", said, notified)
 	}
 }

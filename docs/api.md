@@ -363,6 +363,25 @@ progress, labels, pinned, exited}`. `PATCH` takes any of `title`, `state`
 24 characters), and answers the same view. Audited `session.info`; a token
 that is not the named session's is `me.rejected`.
 
+### `POST /api/me/v1/say`
+### `POST /api/me/v1/notify`
+### `POST /api/sessions/{id}/say`
+### `POST /api/sessions/{id}/notify`
+
+A session speaking, through its own door or the owner's. `say {text}`
+(1000 characters) is a line in the session's messages: the chat card shows
+it as the last thing the session said and the routes push it by their
+rules; every open page gets a quiet toast. 204. `notify {text, level,
+choices}` is an explicit call for attention: a toast and a browser
+notification on every open page, and a card on every paired contact
+whatever the session's state (muted contacts excepted, and in quiet hours
+only an `ask`), with up to four choices of twelve characters as buttons; a
+pressed choice is typed into the session. `level` is `info`, `warn` or
+`ask`; choices make it `ask`. Answers `{contacts}`, how many were sent to.
+Rate: 60 says and 6 notices a minute per session; 429 with `Retry-After`
+after. Audited `session.said` and `session.notified` with byte counts, not
+words.
+
 ### `GET /api/sessions/{id}/screen`
 
 `{text}`: the session's pane as text, what `vibepanel session screen`

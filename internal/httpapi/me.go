@@ -40,6 +40,8 @@ func (s *Server) registerMeRoutes(r chi.Router) {
 	// router, the walk that pins it and the documentation alike.
 	r.With(s.requireSessionToken).Get("/me/v1", s.handleMe)
 	r.With(s.requireSessionToken).Patch("/me/v1", s.handleMePatch)
+	r.With(s.requireSessionToken).Post("/me/v1/say", s.handleSessionSay)
+	r.With(s.requireSessionToken).Post("/me/v1/notify", s.handleSessionNotify)
 }
 
 type meKey struct{}

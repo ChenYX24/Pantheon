@@ -25537,3 +25537,34 @@ is registered flat and spelled one way.
 Next: `say` and `notify` to the web and the chat bridge, `send` for files,
 and `hook install --guide`.
 
+## 2026-10-13 — A session's own voice, step 2: say and notify
+
+Two more things through the same door and the owner's session routes,
+one implementation each (`internal/httpapi/notices.go`):
+
+- `say` is a line in the session's messages, the kind the chat card
+  already shows as the last thing the session said, pushed by the routes
+  as any change is, and a quiet toast on every open page.
+- `notify` is an explicit call for attention. `Bridge.Notify`
+  (`internal/chat/notice.go`) sends a card to every paired contact whatever
+  the session's state -- the agent asked -- still honouring a contact's
+  mute, the routes' recipients when a rule names some, and quiet hours
+  unless it is an `ask`, as a prompt is. The choices are buttons whose
+  value is `reply:<session>:0:<text>`, and a press types the words into
+  the session through the same paste-and-submit a typed reply gets,
+  without the "it is working" gate: the agent asked, so its state is not a
+  reason to refuse the answer. Twelve characters a choice, four choices,
+  because Telegram's callback data is 64 bytes and the session id rides
+  in it. The page gets a `notice` event on the socket -- a toast with the
+  session's name and its words as detail, and a browser notification
+  through the worker when the page is not in front, opening the session
+  on click as a waiting one does.
+- Sixty says and six notices a minute per session, 429 with Retry-After
+  after: an agent in a loop is the likely caller, and a notice a second is
+  a phone that never stops. Audited with byte counts and not words.
+
+The socket pin (`TestMessageTypesMatchTheClient`) went red the moment the
+server knew `notice` and the page did not, which is the drift it exists
+for. The bridge test presses a choice on a session that is still `working`
+and reads the words in the fake terminal.
+

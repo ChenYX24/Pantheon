@@ -1200,6 +1200,11 @@ const DICT = {
   'term.loadingReplay': { zh: '加载终端内容', en: 'Loading terminal content' },
 
   'notify.waitingTitle': { zh: '有 agent 在等你', en: 'An agent is waiting' },
+  'notify.noticeTitle': { zh: '一个会话在叫你', en: 'A session is calling' },
+  'notice.say': { zh: '{name} 说', en: '{name} says' },
+  'notice.info': { zh: '{name} 提醒', en: '{name}' },
+  'notice.warn': { zh: '{name} 警告', en: '{name} warns' },
+  'notice.ask': { zh: '{name} 在问你，去会话里回答', en: '{name} asks; answer in the session' },
   'notify.waitingBody': { zh: '{name} 停下来等你处理了', en: '{name} has stopped and needs you' },
   'notify.archivedWaitingBody': {
     zh: '已归档的项目 {name} 里有会话在等你',

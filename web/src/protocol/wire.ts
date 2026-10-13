@@ -118,6 +118,9 @@ export interface ServerMessage {
     | 'panel'
     // The memory question changed: `alert` is the new one, or null.
     | 'resources'
+    // A session spoke up (`vibepanel me say|notify`): a toast, and a
+    // browser notification when the page is not in front.
+    | 'notice'
   sessionId?: string
   ref?: number
   cols?: number
@@ -2395,6 +2398,18 @@ export interface PluginDownloadSpec {
   sha256: string
   size: number
   unpack?: string
+}
+
+/** A session speaking up (ws `notice`): what the page shows as a toast and a notification. */
+export interface SessionNotice {
+  t: 'notice'
+  sessionId: string
+  title: string
+  project: string
+  /** 'say' | 'info' | 'warn' | 'ask' */
+  level: string
+  text: string
+  choices: string[]
 }
 
 /** One declared download (docs/plugins.md §5): what the card shows, with the job's progress while one runs. */

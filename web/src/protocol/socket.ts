@@ -1,5 +1,5 @@
 import { decodeData, encodeData } from './wire'
-import type { ClientMessage, LoadTiming, PanelState, ResourceAction, ResourceAlert, ServerMessage, StateMessage } from './wire'
+import type { ClientMessage, LoadTiming, PanelState, ResourceAction, ResourceAlert, ServerMessage, StateMessage, SessionNotice } from './wire'
 
 /** What a subscriber to one session receives. */
 export interface StreamHandlers {
@@ -155,6 +155,7 @@ export class PanelSocket {
   private stateListeners = new Set<(s: PanelState) => void>()
   private panelListeners = new Set<(projectId: string, kind: string) => void>()
   private resourceListeners = new Set<(alert: ResourceAlert | null, acted: ResourceAction | null) => void>()
+  private noticeListeners = new Set<(n: SessionNotice) => void>()
   private errorListeners = new Set<(sessionId: string, message: string) => void>()
 
   constructor() {
@@ -342,6 +343,23 @@ export class PanelSocket {
         for (const fn of this.resourceListeners) fn(m.alert ?? null, m.acted ?? null)
         break
       }
+      case 'notice': {
+        // Rebuilt from checked fields: the words are a session's, shown
+        // through safeText by whoever draws them, and the shape is this.
+        const m = msg as Partial<SessionNotice>
+        if (typeof m.sessionId !== 'string' || typeof m.text !== 'string') break
+        const n: SessionNotice = {
+          t: 'notice',
+          sessionId: m.sessionId,
+          title: typeof m.title === 'string' ? m.title : '',
+          project: typeof m.project === 'string' ? m.project : '',
+          level: typeof m.level === 'string' ? m.level : 'info',
+          text: m.text,
+          choices: Array.isArray(m.choices) ? m.choices.filter((c): c is string => typeof c === 'string') : [],
+        }
+        for (const fn of this.noticeListeners) fn(n)
+        break
+      }
       case 'state': {
         const st = msg as unknown as StateMessage
         // A session this client watched to its end is running again: restored
@@ -429,6 +447,14 @@ export class PanelSocket {
     this.panelListeners.add(fn)
     return () => {
       this.panelListeners.delete(fn)
+    }
+  }
+
+  /** A session spoke up: `vibepanel me say` or `notify`. */
+  onNotice(fn: (n: SessionNotice) => void) {
+    this.noticeListeners.add(fn)
+    return () => {
+      this.noticeListeners.delete(fn)
     }
   }
 
