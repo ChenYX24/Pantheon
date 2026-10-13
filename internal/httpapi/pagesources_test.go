@@ -25,7 +25,19 @@ func TestASourceReachesOnlyPublicAddresses(t *testing.T) {
 		"255.255.255.255": false, "198.18.0.1": false, "240.0.0.1": false, "192.0.2.1": false,
 		"::1": false, "fd00:ec2::254": false, "fe80::1": false, "::ffff:127.0.0.1": false,
 		"::ffff:10.0.0.1": false, "64:ff9b::7f00:1": false, "2002:7f00:1::": false, "::": false,
-		"8.8.8.8": true, "1.1.1.1": true, "2606:4700:4700::1111": true,
+		// The IPv4-mapped forms of the ranges netip's own predicates do not
+		// know. IsLoopback and IsPrivate unmap by themselves, so the mapped
+		// loopback and private rows above pass without publicAddr's Unmap;
+		// Prefix.Contains does not, and an IPv4 prefix never contains a
+		// mapped address. Without these rows the Unmap could be deleted and
+		// every test stayed green, while ::ffff:100.64.0.1 reached a CGNAT host.
+		"::ffff:100.64.0.1": false, "::ffff:198.18.0.1": false, "::ffff:240.0.0.1": false,
+		"::ffff:192.0.2.1": false, "::ffff:0.0.0.1": false, "::ffff:192.0.0.1": false,
+		"::ffff:255.255.255.255": false, "::ffff:8.8.8.8": true,
+		// RFC 8215's local-use NAT64 prefix translates to whatever IPv4 the
+		// operator's translator chooses, including private ones.
+		"64:ff9b:1::a00:1": false,
+		"8.8.8.8":          true, "1.1.1.1": true, "2606:4700:4700::1111": true,
 	} {
 		if got := publicAddr(netip.MustParseAddr(addr)); got != public {
 			t.Errorf("publicAddr(%s) = %v, want %v", addr, got, public)

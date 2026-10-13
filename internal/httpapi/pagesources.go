@@ -465,9 +465,12 @@ var (
 	reserved  = netip.MustParsePrefix("240.0.0.0/4")
 	testNets  = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("203.0.113.0/24"), netip.MustParsePrefix("2001:db8::/32")}
 	nat64     = netip.MustParsePrefix("64:ff9b::/96")
-	sixToFour = netip.MustParsePrefix("2002::/16")
-	teredo    = netip.MustParsePrefix("2001::/32")
-	orchid    = netip.MustParsePrefix("2001:10::/28")
+	// RFC 8215, local-use NAT64: the translator is the operator's, and so is
+	// the IPv4 it reaches, private ones included.
+	nat64Local = netip.MustParsePrefix("64:ff9b:1::/48")
+	sixToFour  = netip.MustParsePrefix("2002::/16")
+	teredo     = netip.MustParsePrefix("2001::/32")
+	orchid     = netip.MustParsePrefix("2001:10::/28")
 )
 
 // fakeIPResolver reports whether the resolver is a fake-ip one: asked for a
@@ -516,7 +519,7 @@ func publicAddr(a netip.Addr) bool {
 		a.IsMulticast() || a.IsUnspecified() || a.IsInterfaceLocalMulticast() {
 		return false
 	}
-	for _, p := range append([]netip.Prefix{cgnat, thisNet, ietf, benchmark, reserved, nat64, sixToFour, teredo, orchid}, testNets...) {
+	for _, p := range append([]netip.Prefix{cgnat, thisNet, ietf, benchmark, reserved, nat64, nat64Local, sixToFour, teredo, orchid}, testNets...) {
 		if p.Contains(a) {
 			return false
 		}

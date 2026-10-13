@@ -25683,3 +25683,14 @@ comment names the page's mirror instead of claiming there is none. A
 refactor: the header is byte-for-byte what it was, which the handler tests
 compare against, and a token added to `previewSandbox` now reaches the
 served header and fails there as well.
+
+**`publicAddr`'s `Unmap` was not pinned.** Deleting it left every test
+green, because the only IPv4-mapped rows in the table were loopback and
+private, and netip's `IsLoopback`/`IsPrivate` unmap on their own.
+`Prefix.Contains` does not, and an IPv4 prefix never contains a mapped
+address, so without the `Unmap` a page source resolving to
+`::ffff:100.64.0.1` (or the benchmark, reserved, test, `0/8` or broadcast
+ranges) passed as public. The table now has the mapped form of each of
+those, and the deletion turns eight rows red. The same pass adds RFC 8215's
+local-use NAT64 prefix, `64:ff9b:1::/48`, which translates to whatever IPv4
+the operator's translator picks.
