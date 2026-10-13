@@ -532,6 +532,16 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := s.clientIP(r)
 
+	// The allowlist first, as on every route. Setup asked the throttle and
+	// the token and never this, so on a panel started with --allow-from and
+	// no account yet, anybody outside it holding the token -- which is
+	// printed to a terminal and a unit's journal -- could make the first
+	// account. Refused with the same audit row as every other address off
+	// the list.
+	if s.refuseAddress(ctx, w, r) {
+		return
+	}
+
 	// The same throttle as sign-in, and this endpoint has the better claim to
 	// it of the two.
 	//

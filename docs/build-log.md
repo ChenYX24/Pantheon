@@ -26338,3 +26338,13 @@ The comment labels had drifted: v25 to v30 were labelled one higher than
 their position (drop-idx-sessions-state said "v26"), which is the same
 collision's leftover; they match now, and the type's comment says so for
 whoever reads the build log's older entries. No step's body changed.
+
+**Setup did not ask the allowlist.** The walk above listed it as one of the
+routes reachable off `--allow-from`, and it was the one that mattered: on a
+panel started with an allowlist and no account yet, anybody outside it who
+held the setup token -- printed to a terminal and to a unit's journal --
+could make the first account. `handleSetup` now refuses an address off the
+list before the throttle, with the same audit row as every other refusal,
+and it comes off `beyondTheAllowlist`. `TestSetupIsRefusedToAnAddressOffTheAllowlist`
+posts the right token from loopback to a panel that allows only
+203.0.113.0/24: 201 and an account before, 403 and a `blocked` row now.

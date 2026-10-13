@@ -1210,9 +1210,9 @@ var beyondTheAllowlist = map[string]string{
 	"/api/plugin-hook/{pluginID}/{path}": "a plugin's inbound route; verified against its secret",
 	// Recorded as they are, not endorsed: both were noted by the October audit
 	// (04-F7) as surfaces a stranger reaches whatever --allow-from says.
+	// Setup was a third, until it was made to ask.
 	"/api/auth/passkey/login/begin":  "as it is: reachable off the list (audit 04-F7)",
 	"/api/auth/passkey/login/finish": "as it is: reachable off the list (audit 04-F7)",
-	"/api/auth/setup":                "as it is: closed once an account exists, unchecked before",
 	// The page's own files. What they call is what is guarded.
 	"/*": "the SPA bundle; every API it calls is behind the list",
 }
@@ -1252,5 +1252,37 @@ func TestEveryRouteRefusesAnAddressOffTheAllowlist(t *testing.T) {
 		if !seen[route] {
 			t.Errorf("%s is listed as beyond the allowlist and is not a route any more; take it off", route)
 		}
+	}
+}
+
+// Setup is refused to an address off --allow-from, like every other route.
+// It asked the throttle and the token and never the list, so on a panel
+// started with --allow-from and no account yet, whoever outside it held the
+// setup token -- printed to a terminal, a unit's journal -- could make the
+// first account. The token was the only thing between them and ownership, on
+// the one route the allowlist exists to put something in front of.
+func TestSetupIsRefusedToAnAddressOffTheAllowlist(t *testing.T) {
+	ts, srv := newUnconfiguredServer(t)
+	nets, err := auth.ParseCIDRs([]string{"203.0.113.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Auth.Allow = nets // the test client is on loopback
+	res, err := anonymousClient(t).Post(ts.URL+"/api/auth/setup", "application/json",
+		strings.NewReader(`{"token":"test-setup-token","username":"outsider","password":"a sufficiently long password"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("setup from an address off the list: %d, want 403", res.StatusCode)
+	}
+	if n, _ := srv.DB.CountUsers(context.Background()); n != 0 {
+		t.Fatalf("an account was made from an address off the list (%d)", n)
+	}
+	var rows int
+	_ = srv.DB.SQL().QueryRow(`SELECT COUNT(*) FROM audit_log WHERE event = 'blocked'`).Scan(&rows)
+	if rows == 0 {
+		t.Error("the refusal left no audit row")
 	}
 }
