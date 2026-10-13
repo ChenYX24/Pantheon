@@ -25853,6 +25853,15 @@ identical to what each already had. It makes the same comparison now.
 a viewer receives: ten from ten unchanged reports before, none now, and a real
 change still arrives.
 
+**The process sampler walked /proc to then answer from its cache.**
+`TreeSampler.Sample` read the whole process table first and only then
+checked whether the last answer was under half a second old -- 7 ms and
+1.8 MB a call measured here, once a second per share link watching a wall,
+to be told nothing had changed. The table is read after the cache says no,
+under the lock so two callers arriving together walk it once.
+`TestACachedAnswerDoesNotWalkProc` counts the walks: eleven samples in one
+window walked it eleven times before (twelve with the walk restored on top),
+once now.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

@@ -354,3 +354,25 @@ func TestAProcessBornInsideTheWindowCounts(t *testing.T) {
 		t.Errorf("a spinner born after the first sample reads %.3f%% for the session", u.CPUPercent)
 	}
 }
+
+// A caller inside the window is answered from the cache without walking
+// /proc. The walk came first, on every call, and the cache only decided
+// what to do with the result: a share wall polling once a second paid for a
+// full read of the process table each time to be told nothing had changed.
+func TestACachedAnswerDoesNotWalkProc(t *testing.T) {
+	if _, err := os.Stat("/proc/self/stat"); err != nil {
+		t.Skip("no /proc here")
+	}
+	walks := 0
+	defer func(orig func() map[int]procStat) { readProcTable = orig }(readProcTable)
+	readProcTable = func() map[int]procStat { walks++; return readProcTableOS() }
+	pane := map[string]int{"self": os.Getpid()}
+	var ts TreeSampler
+	ts.Sample(pane)
+	for i := 0; i < 10; i++ {
+		ts.Sample(pane)
+	}
+	if walks != 1 {
+		t.Errorf("eleven samples inside one window walked /proc %d times, want 1", walks)
+	}
+}
