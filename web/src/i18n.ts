@@ -142,6 +142,15 @@ const DICT = {
   },
   'auth.signInHint': { zh: '登录后就能看到你的会话。', en: 'Sign in to reach your sessions.' },
   'auth.setupToken': { zh: '一次性 token', en: 'Setup token' },
+  // Refusals from the sign-in surface, by the code the server sends beside its
+  // English sentence (internal/httpapi/auth.go, Code*).
+  'auth.err.bad_credentials': { zh: '用户名或密码不对', en: 'Wrong username or password' },
+  'auth.err.too_many_attempts': { zh: '尝试次数过多，{n} 秒后再试', en: 'Too many attempts. Try again in {n}s' },
+  'auth.err.busy': { zh: '面板正忙，稍后再试', en: 'The panel is busy. Try again shortly' },
+  'auth.err.bad_setup_token': { zh: '一次性 token 不对', en: 'Wrong setup token' },
+  'auth.err.already_configured': { zh: '已经初始化过了', en: 'Already set up' },
+  'auth.err.wrong_current_password': { zh: '当前密码不对', en: 'The current password is wrong' },
+  'auth.err.same_password': { zh: '新密码和旧密码相同', en: 'The new password is the same as the old one' },
   'auth.username': { zh: '用户名', en: 'Username' },
   'auth.password': { zh: '密码', en: 'Password' },
   'auth.passwordHint': {
@@ -548,9 +557,17 @@ const DICT = {
   'touch.hideKeys': { zh: '收起按键', en: 'Hide the keys' },
   'compose.unsent': { zh: '未连接，没有发出。稍后再试', en: 'Not connected, nothing sent. Try again shortly' },
   'compose.attach': { zh: '选图片或文件', en: 'Pick an image or a file' },
+  'compose.withEnter': { zh: '发送时带回车', en: 'Sends with Enter' },
+  'compose.withoutEnter': { zh: '发送时不带回车', en: 'Sends without Enter' },
   'compose.send': { zh: '发送', en: 'Send' },
   'settings.title': { zh: '设置', en: 'Settings' },
   'settings.close': { zh: '关闭', en: 'Close' },
+  'sidebar.collapse': { zh: '收起', en: 'Collapse' },
+  'name.rename': { zh: '双击或长按来改名', en: 'Double click, or press and hold, to rename' },
+  'sel.count': { zh: '已选 {n} 个字符', en: '{n} characters selected' },
+  'sel.countOne': { zh: '已选 1 个字符', en: '1 character selected' },
+  'sel.copy': { zh: '复制', en: 'Copy' },
+  'sel.copied': { zh: '已复制', en: 'Copied' },
   'settings.language': { zh: '语言', en: 'Language' },
   'settings.groups': { zh: '设置分组', en: 'Settings groups' },
 
@@ -1456,6 +1473,23 @@ const DICT = {
   'page.followPublished': { zh: '跟随发布 (v{v})', en: 'Follow published (v{v})' },
   'page.pinned': { zh: '固定 v{v}', en: 'Pinned v{v}' },
   'page.noParams': { zh: '这个页面没有可调的设置', en: 'This page has no settings' },
+
+  // The labels the built-in page templates ship in their manifests, which hold
+  // one English string and no translations. components/pages/labels.ts maps
+  // the English text to these.
+  'pl.title': { zh: '标题', en: 'Title' },
+  'pl.accent': { zh: '强调色', en: 'Accent' },
+  'pl.warnAt': { zh: '等待数达到多少时转为紧急', en: 'Waiting turns urgent at' },
+  'pl.announcement': { zh: '公告', en: 'Announcement' },
+  'pl.guestbook': { zh: '留言簿', en: 'Guestbook' },
+  'pl.message': { zh: '留言', en: 'Message' },
+  'pl.name': { zh: '名字', en: 'Name' },
+  'pl.notes': { zh: '给负责这块屏幕的人的备注', en: 'Notes for whoever runs this screen' },
+  'pl.signGuestbook': { zh: '签名留言', en: 'Sign the guestbook' },
+  'pl.splitBy': { zh: '分组方式', en: 'Split by' },
+  'pl.vote': { zh: '投票', en: 'Vote' },
+  'pl.votes': { zh: '票数', en: 'Votes' },
+  'pl.voteFor': { zh: '投票的主题', en: 'What the vote is for' },
   'page.firstPrompt': { zh: '先读 AGENTS.md。这个页面要做成：', en: 'Read AGENTS.md first. Make this page: ' },
   'page.restoredPrompt': {
     zh: '这个目录是从已发布的版本恢复的。先读 AGENTS.md。接下来要改：',

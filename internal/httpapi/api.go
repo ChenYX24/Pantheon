@@ -2152,6 +2152,13 @@ func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
 }
 
+// writeErrCode is writeErr with a stable machine-readable code beside the
+// sentence, for the refusals the panel's own page shows to a person and has to
+// say in their language. See the Code constants in auth.go.
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
+}
+
 // writeStoreErr answers a failed database call, and remembers that it failed.
 //
 // A method rather than a function so the failure is recorded somewhere the

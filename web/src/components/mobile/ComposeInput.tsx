@@ -225,7 +225,7 @@ export function ComposeInput({
       <button
         type="button"
         onClick={() => setNewline((v) => !v)}
-        title={newline ? 'Sends with Enter' : 'Sends without Enter'}
+        title={newline ? t('compose.withEnter') : t('compose.withoutEnter')}
         data-testid="compose-newline"
         data-on={newline ? 'true' : 'false'}
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-vp border border-hairline transition-colors duration-150 ease-vp ${

@@ -1,4 +1,4 @@
-import { t } from '../i18n'
+import { t, tKey } from '../i18n'
 import type {
   ApiToken,
   AuditEntry,
@@ -97,14 +97,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let setupRequired = false
     let needsTrust = ''
     let answersTo: string[] = []
+    let code = ''
+    let retryAfter = 0
     try {
       const body = (await res.json()) as {
         error?: string
         setupRequired?: boolean
         originNeedsTrust?: string
         panelAnswersTo?: string[]
+        code?: string
+        retryAfter?: number
       }
       if (body.error) message = body.error
+      code = body.code ?? ''
+      retryAfter = body.retryAfter ?? 0
       setupRequired = body.setupRequired === true
       needsTrust = body.originNeedsTrust ?? ''
       answersTo = body.panelAnswersTo ?? []
@@ -113,10 +119,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     // Distinguished so the shell can return to the sign-in screen rather than
     // showing a permission error inside a panel the user cannot use.
-    if (res.status === 401) throw new UnauthorizedError(message, setupRequired)
+    if (res.status === 401) throw new UnauthorizedError(message, setupRequired, code)
     // Distinguished for the same reason: it is a question, not a failure, and
     // the only thing that can answer it is the person at the wizard.
     if (needsTrust) throw new OriginNotTrustedError(message, needsTrust, answersTo)
+    if (code) throw new CodedError(message, code, retryAfter)
     throw new Error(message)
   }
   if (res.status === 204) {
@@ -296,11 +303,46 @@ export function refusedByProxy(status: number, body: { error?: string } | null):
 
 export class UnauthorizedError extends Error {
   readonly setupRequired: boolean
-  constructor(message: string, setupRequired: boolean) {
+  readonly code: string
+  constructor(message: string, setupRequired: boolean, code = '') {
     super(message)
     this.name = 'UnauthorizedError'
     this.setupRequired = setupRequired
+    this.code = code
   }
+}
+
+/**
+ * A refusal the server gave a stable code for (internal/httpapi/auth.go, Code*).
+ *
+ * The sentence in `message` is English and is the server's; the code is what
+ * this page translates. See errorText.
+ */
+export class CodedError extends Error {
+  readonly code: string
+  readonly retryAfter: number
+  constructor(message: string, code: string, retryAfter = 0) {
+    super(message)
+    this.name = 'CodedError'
+    this.code = code
+    this.retryAfter = retryAfter
+  }
+}
+
+/**
+ * What to show a person for a failed request: their language when the server
+ * sent a code this build has words for, the server's sentence otherwise.
+ *
+ * Prose is never matched. A reworded error would stop matching and fall back
+ * to English silently, which is the bug this replaced.
+ */
+export function errorText(err: unknown): string {
+  if (err instanceof CodedError || err instanceof UnauthorizedError) {
+    const retry = err instanceof CodedError ? err.retryAfter : 0
+    const own = err.code ? tKey(`auth.err.${err.code}`, { n: retry }) : null
+    if (own) return own
+  }
+  return err instanceof Error ? err.message : String(err)
 }
 
 /**

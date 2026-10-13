@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { isEnter } from './enter'
+import { t, useLang } from '../i18n'
 
 interface Base {
   value: string
@@ -44,6 +45,7 @@ const LONG_PRESS_SLOP = 10
  * session row uses a press-and-hold, so the gesture was free.
  */
 export function InlineName({ value, onCommit, className, title, ...controlled }: Props) {
+  useLang()
   const [innerEditing, setInnerEditing] = useState(false)
   const editing = controlled.editing ?? innerEditing
   const setEditing = (next: boolean) => {
@@ -140,7 +142,7 @@ export function InlineName({ value, onCommit, className, title, ...controlled }:
     <span
       data-testid="inline-name"
       className={`min-w-0 truncate ${className ?? ''}`}
-      title={title ?? 'Double click, or press and hold, to rename'}
+      title={title ?? t('name.rename')}
       onDoubleClick={(e) => {
         e.stopPropagation()
         startEditing()

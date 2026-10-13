@@ -6,6 +6,7 @@ import type { SharePageData, SharePageDataNamespace, SharePageDataSpec } from '.
 import { t, useLang } from '../../i18n'
 import { askConfirm } from '../ask'
 import { safeText } from '../text'
+import { pageLabel } from './labels'
 
 /**
  * A page's data, as a form drawn from its declared schema.
@@ -199,7 +200,7 @@ export function DataForm({ pageId, ns }: { pageId: string; ns: SharePageDataName
           <div key={key} data-testid="data-field" data-key={key} className="min-w-0 border-t border-hairline pt-2 first:border-t-0 first:pt-0">
             <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-vp-sm">
               <label htmlFor={id} className="text-ink-2">
-                {safeText(spec.label || key)}
+                {safeText(pageLabel(spec.label || key))}
               </label>
               <code className="font-mono text-vp-xs text-ink-3">{safeText(key)}</code>
               {spec.visibility === 'admin' && (
@@ -388,7 +389,7 @@ function ObjectEditor({
       {Object.entries(spec.fields ?? {}).map(([k, f]) => (
         <div key={k} className="min-w-0">
           <label htmlFor={`${id}-${k}`} className="mb-0.5 block text-vp-xs text-ink-3">
-            {safeText(f.label || k)}
+            {safeText(pageLabel(f.label || k))}
           </label>
           <Scalar
             id={`${id}-${k}`}

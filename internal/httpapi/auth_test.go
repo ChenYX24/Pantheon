@@ -1106,3 +1106,76 @@ func TestOneAddressCannotTakeEveryPasskeyCeremony(t *testing.T) {
 		t.Errorf("another address after the flood: %d", status)
 	}
 }
+
+// The sign-in surface's refusals carry a code beside the sentence, because the
+// page translates the code. Without it "wrong username or password" appeared
+// verbatim under a Chinese form. Each case is one refusal a person can meet.
+func TestAuthRefusalsCarryTheirCode(t *testing.T) {
+	post := func(t *testing.T, c *http.Client, url, body string) (int, map[string]any) {
+		t.Helper()
+		res, err := c.Post(url, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST %s: %v", url, err)
+		}
+		defer res.Body.Close()
+		var m map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&m)
+		return res.StatusCode, m
+	}
+
+	t.Run("wrong password then throttled", func(t *testing.T) {
+		ts, _ := newTestServer(t)
+		c := anonymousClient(t)
+		_, m := post(t, c, ts.URL+"/api/auth/login", `{"username":"tester","password":"nope"}`)
+		if m["code"] != CodeBadCredentials {
+			t.Errorf("wrong password code = %v, want %s", m["code"], CodeBadCredentials)
+		}
+		var throttled map[string]any
+		for i := 0; i < 20 && throttled == nil; i++ {
+			if status, m := post(t, c, ts.URL+"/api/auth/login", `{"username":"tester","password":"nope"}`); status == http.StatusTooManyRequests {
+				throttled = m
+			}
+		}
+		if throttled == nil {
+			t.Fatal("never throttled")
+		}
+		if throttled["code"] != CodeTooManyAttempts {
+			t.Errorf("throttled code = %v, want %s", throttled["code"], CodeTooManyAttempts)
+		}
+		if n, _ := throttled["retryAfter"].(float64); n < 1 {
+			t.Errorf("throttled retryAfter = %v, want a number of seconds", throttled["retryAfter"])
+		}
+	})
+
+	t.Run("unknown user", func(t *testing.T) {
+		ts, _ := newTestServer(t)
+		_, m := post(t, anonymousClient(t), ts.URL+"/api/auth/login", `{"username":"nobody","password":"nope"}`)
+		if m["code"] != CodeBadCredentials {
+			t.Errorf("unknown user code = %v, want %s", m["code"], CodeBadCredentials)
+		}
+	})
+
+	t.Run("setup", func(t *testing.T) {
+		ts, _ := newUnconfiguredServer(t)
+		_, m := post(t, anonymousClient(t), ts.URL+"/api/auth/setup",
+			`{"token":"not-the-token","username":"owner","password":"a sufficiently long password"}`)
+		if m["code"] != CodeBadSetupToken {
+			t.Errorf("bad token code = %v, want %s", m["code"], CodeBadSetupToken)
+		}
+		ts2, _ := newTestServer(t)
+		_, m = post(t, anonymousClient(t), ts2.URL+"/api/auth/setup",
+			`{"token":"test-setup-token","username":"second","password":"another long password"}`)
+		if m["code"] != CodeAlreadyConfigured {
+			t.Errorf("second setup code = %v, want %s", m["code"], CodeAlreadyConfigured)
+		}
+	})
+
+	t.Run("changing the password", func(t *testing.T) {
+		ts, _ := newTestServer(t)
+		c := ts.Client()
+		_, m := post(t, c, ts.URL+"/api/auth/password", `{"current":"wrong one","next":"a brand new long password"}`)
+		if m["code"] != CodeWrongCurrentPassword {
+			t.Errorf("wrong current code = %v, want %s", m["code"], CodeWrongCurrentPassword)
+		}
+	})
+}

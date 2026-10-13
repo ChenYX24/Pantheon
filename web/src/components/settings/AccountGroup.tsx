@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { api } from '../../protocol/api'
+import { api, errorText } from '../../protocol/api'
 import type { AuditEntry, SettingsInfo } from '../../protocol/wire'
 import { safeText } from '../text'
 import { t } from '../../i18n'
@@ -65,7 +65,7 @@ function PasswordSection() {
       setNext('')
       setDone(true)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(errorText(e))
     } finally {
       setBusy(false)
     }

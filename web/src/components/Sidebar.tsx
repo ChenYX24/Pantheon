@@ -375,7 +375,7 @@ export function Sidebar(props: SidebarProps) {
         <button
           type="button"
           onClick={props.onToggle}
-          title={overlay ? 'Close' : 'Collapse'}
+          title={overlay ? t('settings.close') : t('sidebar.collapse')}
           className="vp-control"
         >
           <ChevronLeft size={15} />

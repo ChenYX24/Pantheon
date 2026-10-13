@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 
 import { t, useLang } from '../i18n'
-import { api, OriginNotTrustedError } from '../protocol/api'
+import { api, errorText, OriginNotTrustedError } from '../protocol/api'
 import {
   decodeRequestOptions,
   encodeAssertion,
@@ -324,7 +324,7 @@ function AuthForm({ state, onDone }: { state: AuthState; onDone: () => void }) {
       if (err instanceof DOMException && err.name === 'NotAllowedError') {
         setError(null)
       } else {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(errorText(err))
       }
     } finally {
       setBusy(false)
@@ -343,7 +343,7 @@ function AuthForm({ state, onDone }: { state: AuthState; onDone: () => void }) {
       // Not an error on the way to the screen: a question, and the form is
       // kept exactly as it is so answering it costs nothing typed twice.
       if (err instanceof OriginNotTrustedError) setAskOrigin(err)
-      else setError(err instanceof Error ? err.message : String(err))
+      else setError(errorText(err))
     } finally {
       setBusy(false)
     }
@@ -362,7 +362,7 @@ function AuthForm({ state, onDone }: { state: AuthState; onDone: () => void }) {
       setPassword('')
       onDone()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorText(err))
     } finally {
       setBusy(false)
     }

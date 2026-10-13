@@ -536,7 +536,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if n > 0 {
 		// Once an account exists this endpoint is closed forever. Leaving it
 		// open would be a second way in that nobody is watching.
-		writeErr(w, http.StatusConflict, "already configured")
+		writeErrCode(w, http.StatusConflict, CodeAlreadyConfigured, "already configured")
 		return
 	}
 
@@ -556,7 +556,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		// is a stranger, and a stranger must not be able to choose how many
 		// rows the audit table grows by.
 		s.auditFromOutside(ctx, "setup.rejected", req.Username, ip, "bad setup token")
-		writeErr(w, http.StatusUnauthorized, "bad setup token")
+		writeErrCode(w, http.StatusUnauthorized, CodeBadSetupToken, "bad setup token")
 		return
 	}
 	// Cleared here rather than at the end, because everything below this line
@@ -651,7 +651,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Every path from here derives a key, so the queue is here rather than
 	// around each call: see passwordSlots.
 	if !acquirePasswordSlot(r.Context()) {
-		writeErr(w, http.StatusServiceUnavailable, "the panel is busy; try again")
+		writeErrCode(w, http.StatusServiceUnavailable, CodeBusy, "the panel is busy; try again")
 		return
 	}
 	defer releasePasswordSlot()
@@ -680,7 +680,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		// exist.
 		auth.DummyVerify(req.Password)
 		s.auditLoginFailure(ctx, req.Username, ip, "unknown user")
-		writeErr(w, http.StatusUnauthorized, "wrong username or password")
+		writeErrCode(w, http.StatusUnauthorized, CodeBadCredentials, "wrong username or password")
 		return
 	}
 	ok, verr := auth.VerifyPassword(req.Password, user.PasswordHash)
@@ -689,7 +689,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		s.auditLoginFailure(ctx, req.Username, ip, "wrong password")
-		writeErr(w, http.StatusUnauthorized, "wrong username or password")
+		writeErrCode(w, http.StatusUnauthorized, CodeBadCredentials, "wrong username or password")
 		return
 	}
 
@@ -716,9 +716,7 @@ func (s *Server) throttled(w http.ResponseWriter, ip string) bool {
 	if !blocked {
 		return false
 	}
-	w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-	writeErr(w, http.StatusTooManyRequests,
-		"too many attempts; try again in "+wait.Round(time.Second).String())
+	writeThrottled(w, wait)
 	return true
 }
 
@@ -844,9 +842,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.Auth != nil {
 		if wait, blocked := s.Auth.Throttle.Delay(ip, time.Now()); blocked {
-			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-			writeErr(w, http.StatusTooManyRequests,
-				"too many attempts; try again in "+wait.Round(time.Second).String())
+			writeThrottled(w, wait)
 			return
 		}
 	}
@@ -860,7 +856,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	// Two derivations below, the check and the new hash, at 64 MiB each. See
 	// passwordSlots: a session is not a licence to allocate gigabytes.
 	if !acquirePasswordSlot(r.Context()) {
-		writeErr(w, http.StatusServiceUnavailable, "the panel is busy; try again")
+		writeErrCode(w, http.StatusServiceUnavailable, CodeBusy, "the panel is busy; try again")
 		return
 	}
 	defer releasePasswordSlot()
@@ -871,7 +867,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 			s.Auth.Throttle.Fail(ip, time.Now())
 		}
 		s.audit(ctx, "password.change_refused", user.Username, ip, "current password did not match")
-		writeErr(w, http.StatusUnauthorized, "the current password is wrong")
+		writeErrCode(w, http.StatusUnauthorized, CodeWrongCurrentPassword, "the current password is wrong")
 		return
 	}
 	if err := validateCredentials(user.Username, req.Next); err != nil {
@@ -879,7 +875,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Next == req.Current {
-		writeErr(w, http.StatusBadRequest, "the new password is the same as the old one")
+		writeErrCode(w, http.StatusBadRequest, CodeSamePassword, "the new password is the same as the old one")
 		return
 	}
 
@@ -907,4 +903,34 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(ctx, "password.changed", user.Username, ip, "other sessions signed out")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// The error codes the sign-in surface sends beside its English sentence.
+//
+// The sentence is for a log and for a client that does not know the code; the
+// code is what the panel's own page translates. Without one the page showed
+// "wrong username or password" verbatim under a Chinese form, because the
+// only thing it had to go on was prose, and matching prose is how a reworded
+// error becomes an untranslated one again. They are API: a rename is a break.
+// TestAuthRefusalsCarryTheirCode pins each against the wire.
+const (
+	CodeBadCredentials       = "bad_credentials"
+	CodeTooManyAttempts      = "too_many_attempts"
+	CodeBusy                 = "busy"
+	CodeBadSetupToken        = "bad_setup_token"
+	CodeAlreadyConfigured    = "already_configured"
+	CodeWrongCurrentPassword = "wrong_current_password"
+	CodeSamePassword         = "same_password"
+)
+
+// writeThrottled answers a request the sign-in throttle is holding back, with
+// the wait as a number so the page can say it in its own language.
+func writeThrottled(w http.ResponseWriter, wait time.Duration) {
+	secs := int(wait.Seconds()) + 1
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":      "too many attempts; try again in " + wait.Round(time.Second).String(),
+		"code":       CodeTooManyAttempts,
+		"retryAfter": secs,
+	})
 }
