@@ -158,25 +158,9 @@ func (s *Server) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		if s.Auth != nil && !auth.Allowed(s.clientIP(r), s.Auth.Allow) {
-			s.auditFromOutside(ctx, "blocked", "", s.clientIP(r), "address not in the allowlist")
-			writeErr(w, http.StatusForbidden, "not allowed from this address")
-			return
-		}
-
-		// A write whose Origin is somewhere else, refused before it reaches a
-		// handler. SameSite=Strict does not cover this: for a cookie, another
-		// port on this host is the same site, so a page served there can POST
-		// here with the session cookie attached.
-		if allowed := s.publicOrigins(r); crossOriginWrite(r, allowed) {
-			s.auditFromOutside(ctx, "blocked", "", s.clientIP(r),
-				"a write from "+r.Header.Get("Origin")+"; this panel answers to "+strings.Join(allowed, " "))
-			// The message names both sides. A bare 403 in a browser console is
-			// what a reverse proxy in front of this looked like from the
-			// outside, and it took a person reporting 「无法创建底部终端」 to
-			// find out: nginx terminates TLS, so the browser is on https and
-			// the panel sees http, and every write looked cross-origin.
-			writeErr(w, http.StatusForbidden, crossOriginRefusal(r, allowed))
+		// The address, then a write whose Origin is somewhere else, both
+		// refused before a handler runs. refuseBlockedWrite is the one copy.
+		if s.refuseBlockedWrite(ctx, w, r) {
 			return
 		}
 
@@ -235,20 +219,61 @@ func crossOriginRefusal(r *http.Request, allowed []string) string {
 //
 // Same order, same messages, same audit event as the middleware: a second
 // wording for a guard is how the two copies drift.
+//
+// RequireAuth calls this rather than a copy of it, which it used to be.
 func (s *Server) refuseBlockedWrite(ctx context.Context, w http.ResponseWriter, r *http.Request) bool {
-	ip := s.clientIP(r)
-	if s.Auth != nil && !auth.Allowed(ip, s.Auth.Allow) {
-		s.auditFromOutside(ctx, "blocked", "", ip, "address not in the allowlist")
-		writeErr(w, http.StatusForbidden, "not allowed from this address")
+	if s.refuseAddress(ctx, w, r) {
 		return true
 	}
+	// A write whose Origin is somewhere else. SameSite=Strict does not cover
+	// this: for a cookie, another port on this host is the same site, so a
+	// page served there can POST here with the session cookie attached.
 	if allowed := s.publicOrigins(r); crossOriginWrite(r, allowed) {
-		s.auditFromOutside(ctx, "blocked", "", ip,
+		s.auditFromOutside(ctx, "blocked", "", s.clientIP(r),
 			"a write from "+r.Header.Get("Origin")+"; this panel answers to "+strings.Join(allowed, " "))
+		// The message names both sides. A bare 403 in a browser console is
+		// what a reverse proxy in front of this looked like from the outside,
+		// and it took a person reporting 「无法创建底部终端」 to find out:
+		// nginx terminates TLS, so the browser is on https and the panel sees
+		// http, and every write looked cross-origin.
 		writeErr(w, http.StatusForbidden, crossOriginRefusal(r, allowed))
 		return true
 	}
 	return false
+}
+
+// ─── the address allowlist ────────────────────────────────────────────────
+//
+// --allow-from is enforced per route, not by a firewall, so every surface
+// that answers a request has to ask. It was asked by thirteen hand-copied
+// blocks; one capability route that forgot was AUDIT.md's first finding. These
+// three are the question, and every caller asks through them.
+
+// addressAllowed reports whether the request's address is on --allow-from.
+func (s *Server) addressAllowed(r *http.Request) bool {
+	return s.Auth == nil || auth.Allowed(s.clientIP(r), s.Auth.Allow)
+}
+
+// refuseAddress answers 403 to an address off the allowlist and records it,
+// and reports whether it did.
+func (s *Server) refuseAddress(ctx context.Context, w http.ResponseWriter, r *http.Request) bool {
+	if s.addressAllowed(r) {
+		return false
+	}
+	s.auditFromOutside(ctx, "blocked", "", s.clientIP(r), "address not in the allowlist")
+	writeErr(w, http.StatusForbidden, "not allowed from this address")
+	return true
+}
+
+// refuseAddressQuietly is refuseAddress without the audit row, for the
+// callers that never wrote one: a page's files, where one page load is many
+// requests, and sign-in, which records attempts its own way.
+func (s *Server) refuseAddressQuietly(w http.ResponseWriter, r *http.Request) bool {
+	if s.addressAllowed(r) {
+		return false
+	}
+	writeErr(w, http.StatusForbidden, "not allowed from this address")
+	return true
 }
 
 // stillAuthorized re-runs the checks RequireAuth made, for a request whose
@@ -281,7 +306,7 @@ func (s *Server) refuseBlockedWrite(ctx context.Context, w http.ResponseWriter, 
 // than an argument — both directions have been argued convincingly in this
 // file's history and the arguments were wrong.
 func (s *Server) stillAuthorized(r *http.Request) bool {
-	if s.Auth != nil && !auth.Allowed(s.clientIP(r), s.Auth.Allow) {
+	if !s.addressAllowed(r) {
 		return false
 	}
 	_, ok, _ := s.currentUser(r)
@@ -635,8 +660,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := s.clientIP(r)
 
-	if s.Auth != nil && !auth.Allowed(s.clientIP(r), s.Auth.Allow) {
-		writeErr(w, http.StatusForbidden, "not allowed from this address")
+	if s.refuseAddressQuietly(w, r) {
 		return
 	}
 	if s.throttled(w, ip) {

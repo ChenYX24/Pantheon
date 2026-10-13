@@ -149,11 +149,9 @@ func writeGonePage(w http.ResponseWriter, down bool) {
 func (s *Server) handleSharePage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := s.clientIP(r)
-	if s.Auth != nil && !auth.Allowed(ip, s.Auth.Allow) {
-		// The same rule requireShareToken applies, for the same reason: making
-		// a link must not be a way past --allow-from.
-		s.auditFromOutside(ctx, "blocked", "", ip, "address not in the allowlist")
-		writeErr(w, http.StatusForbidden, "not allowed from this address")
+	// The same rule requireShareToken applies, for the same reason: making a
+	// link must not be a way past --allow-from.
+	if s.refuseAddress(ctx, w, r) {
 		return
 	}
 	token := chi.URLParam(r, "token")

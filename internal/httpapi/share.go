@@ -157,9 +157,7 @@ func (s *Server) requireShareToken(next http.Handler) http.Handler {
 		ctx := r.Context()
 		ip := s.clientIP(r)
 
-		if s.Auth != nil && !auth.Allowed(ip, s.Auth.Allow) {
-			s.auditFromOutside(ctx, "blocked", "", ip, "address not in the allowlist")
-			writeErr(w, http.StatusForbidden, "not allowed from this address")
+		if s.refuseAddress(ctx, w, r) {
 			return
 		}
 

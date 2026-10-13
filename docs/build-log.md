@@ -26305,3 +26305,22 @@ lines -- added the rest. `make test` passes `-timeout 30m` now. That is a
 ceiling for a hung test and not an answer: the two heaviest additions
 (`TestOneFailedWriteDoesNotEndTheTick`, `TestAPassthroughTitleDoesNotStompAManualRename`,
 about nine seconds each here) are the ones to make cheaper next.
+## 2026-10-13 — The October audit's refactors
+
+The structural items the audit left for after v1.29.0. Behaviour does not
+change in any of them; each is pinned by a test that walks what it covers.
+
+**The allowlist is asked in one place.** `--allow-from` is enforced per
+route, and it was thirteen hand-copied blocks -- the first finding of the
+first audit was a capability route that forgot one. Three helpers in
+`auth.go` now: `addressAllowed` (the question), `refuseAddress` (audit row
+and 403) and `refuseAddressQuietly` (403 only, for the four callers that
+never wrote a row: a page's files, a plugin frame's page, sign-in, the
+plugin door). `RequireAuth` calls `refuseBlockedWrite` instead of being a
+second copy of it. `TestEveryRouteRefusesAnAddressOffTheAllowlist` walks the
+router from an address off the list and wants 403 from every route except
+`beyondTheAllowlist`, which says why for each: probes, the doors agents in
+sessions use from loopback, callbacks that verify themselves, the SPA
+bundle, and three recorded as they are rather than endorsed -- passkey
+sign-in (audit 04-F7) and setup before the first account, neither of which
+asks the allowlist.

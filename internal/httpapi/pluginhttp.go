@@ -199,8 +199,7 @@ func originAllowed(list []string, origin string) bool {
 
 func (s *Server) handlePluginHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	if s.Auth != nil && !auth.Allowed(s.clientIP(r), s.Auth.Allow) {
-		writeErr(w, http.StatusForbidden, "not allowed from this address")
+	if s.refuseAddressQuietly(w, r) {
 		return
 	}
 	p, err := s.DB.PluginByID(ctx, chi.URLParam(r, "pluginID"))

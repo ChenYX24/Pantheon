@@ -247,9 +247,7 @@ func (s *Server) requirePluginCred(next http.Handler) http.Handler {
 		}
 		ctx := r.Context()
 		ip := s.clientIP(r)
-		if s.Auth != nil && !auth.Allowed(ip, s.Auth.Allow) {
-			s.auditFromOutside(ctx, "blocked", "", ip, "address not in the allowlist")
-			writeErr(w, http.StatusForbidden, "not allowed from this address")
+		if s.refuseAddress(ctx, w, r) {
 			return
 		}
 		cred, ok, err := s.resolvePluginCred(ctx, chi.URLParam(r, "cred"))
@@ -415,9 +413,7 @@ func pluginFrameCSP(origin, grant string) string {
 
 func (s *Server) handlePluginFile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ip := s.clientIP(r)
-	if s.Auth != nil && !auth.Allowed(ip, s.Auth.Allow) {
-		writeErr(w, http.StatusForbidden, "not allowed from this address")
+	if s.refuseAddressQuietly(w, r) {
 		return
 	}
 	grantToken := chi.URLParam(r, "grant")

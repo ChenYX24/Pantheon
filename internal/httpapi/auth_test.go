@@ -1179,3 +1179,78 @@ func TestAuthRefusalsCarryTheirCode(t *testing.T) {
 		}
 	})
 }
+
+// beyondTheAllowlist are the routes --allow-from does not apply to, each for
+// a stated reason. Every other route answers 403 to an address off the list.
+//
+// The check was thirteen hand-copied blocks, and a capability route that
+// forgot it was the first finding of the first audit; it is three helpers now
+// (refuseAddress and its two neighbours), and this walk is what makes
+// forgetting them a failing test rather than a finding. Adding a route here
+// is the decision, said out loud.
+var beyondTheAllowlist = map[string]string{
+	"/api/health":     "a probe, and it says nothing",
+	"/api/auth/state": "tells a sign-in page which doors exist, and nothing else",
+	// The callers below are agents inside sessions, on this machine. The
+	// allowlist is about browsers; a panel restricted to a LAN that left
+	// loopback off the list must not stop hearing from its own sessions.
+	"/api/hook/state":                            "a session's state report, from loopback, under its own token",
+	"/api/me/v1":                                 "a session's own door, from loopback, under its derived token",
+	"/api/me/v1/say":                             "the same door",
+	"/api/me/v1/notify":                          "the same door",
+	"/api/me/v1/send":                            "the same door",
+	"/api/chat/tools/projects":                   "the chat assistant's tools, a child of the panel, under a per-process token",
+	"/api/chat/tools/sessions":                   "the same",
+	"/api/chat/tools/system":                     "the same",
+	"/api/chat/tools/usage":                      "the same",
+	"/api/chat/tools/sessions/{handle}/messages": "the same",
+	"/api/chat/tools/sessions/{handle}/screen":   "the same",
+	// Called by services on the internet, which verify themselves.
+	"/api/chat/hooks/{kind}":             "an IM's callback; the adapter verifies its signature",
+	"/api/plugin-hook/{pluginID}/{path}": "a plugin's inbound route; verified against its secret",
+	// Recorded as they are, not endorsed: both were noted by the October audit
+	// (04-F7) as surfaces a stranger reaches whatever --allow-from says.
+	"/api/auth/passkey/login/begin":  "as it is: reachable off the list (audit 04-F7)",
+	"/api/auth/passkey/login/finish": "as it is: reachable off the list (audit 04-F7)",
+	"/api/auth/setup":                "as it is: closed once an account exists, unchecked before",
+	// The page's own files. What they call is what is guarded.
+	"/*": "the SPA bundle; every API it calls is behind the list",
+}
+
+func TestEveryRouteRefusesAnAddressOffTheAllowlist(t *testing.T) {
+	ts, srv := newTestServer(t)
+	nets, err := auth.ParseCIDRs([]string{"203.0.113.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Auth.Allow = nets // the test client is on loopback, which is not on it
+	param := regexp.MustCompile(`\{[^}]+\}`)
+	seen := map[string]bool{}
+	err = chi.Walk(srv.Routes().(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if _, ok := beyondTheAllowlist[route]; ok {
+			seen[route] = true
+			return nil
+		}
+		path := strings.ReplaceAll(param.ReplaceAllString(route, "x"), "*", "x")
+		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		res, rerr := ts.Client().Do(req)
+		if rerr != nil {
+			t.Errorf("%s %s: %v", method, route, rerr)
+			return nil
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Errorf("%s %s answered %d to an address off --allow-from, want 403", method, route, res.StatusCode)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for route := range beyondTheAllowlist {
+		if !seen[route] {
+			t.Errorf("%s is listed as beyond the allowlist and is not a route any more; take it off", route)
+		}
+	}
+}

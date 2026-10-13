@@ -244,9 +244,7 @@ func (s *Server) handleDirPreview(w http.ResponseWriter, r *http.Request) {
 	// creating a preview link a way to serve files to addresses the operator
 	// had excluded, which matters more for a chosen address: a word is
 	// guessable in a way a share token is not.
-	if ip := s.clientIP(r); s.Auth != nil && !auth.Allowed(ip, s.Auth.Allow) {
-		s.auditFromOutside(ctx, "blocked", "", ip, "address not in the allowlist")
-		writeErr(w, http.StatusForbidden, "not allowed from this address")
+	if s.refuseAddress(ctx, w, r) {
 		return
 	}
 
