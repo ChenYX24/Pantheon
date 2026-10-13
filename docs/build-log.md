@@ -26012,6 +26012,15 @@ have five seconds each (`pollTmuxBudget`); the attached client itself is
 puts a tmux in front whose `list-sessions` sleeps: the tick returns an error
 now, and with the list's deadline taken away it was still waiting five
 seconds later.
+
+**A 飞书 test assumed Run had reported by the time it held the sink.**
+`TestTokenIsCachedUntilItExpiresAndRefreshedWhenRefused` failed once beside
+render-check with "oks=1" -- zero when compared, one by the time the message
+was built. `r.run` waits for `Run` to hold the sink, and `Run` holds it
+before it reads the token and reports. A test's timing, not the adapter's:
+reproduced every time by a 20 ms pause between those two lines of `Run`,
+and the test now waits up to two seconds for the report, which passes with
+that pause in place.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

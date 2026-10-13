@@ -1112,7 +1112,16 @@ func TestTokenIsCachedUntilItExpiresAndRefreshedWhenRefused(t *testing.T) {
 		t.Fatalf("first try used %q", calls[len(calls)-2].Auth)
 	}
 	// Run reports a bad secret, which is the one moment it can.
+	//
+	// After r.run returns, not at it: r.run waits for Run to hold the sink,
+	// and Run holds it before it fetches and reports. Read at once, this
+	// failed under load -- render-check beside it -- with "oks=1" in the
+	// message: zero when compared, one by the time the message was built.
 	r.run()
+	deadline := time.Now().Add(2 * time.Second)
+	for r.sink.okCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if r.sink.okCount() != 1 {
 		t.Fatalf("Run did not report the token fetch: oks=%d err=%q", r.sink.okCount(), r.sink.lastErr())
 	}
