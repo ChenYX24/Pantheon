@@ -3681,3 +3681,46 @@ func TestARepeatedReportDoesNotRebroadcastTheSnapshot(t *testing.T) {
 		t.Error("a real change was not sent")
 	}
 }
+
+// A printing session's last_output_at is written at most every
+// outputTouchEvery, not every second: at one a second it was the busiest
+// writer in the database, for a column nothing reads more finely than a
+// minute.
+func TestOutputIsStampedAtMostEveryFifteenSeconds(t *testing.T) {
+	ts, srv := newTestServer(t)
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"stamped"}`)
+	sess := postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	stamp := func() int64 {
+		var at int64
+		if err := srv.DB.SQL().QueryRow(`SELECT last_output_at FROM sessions WHERE id = ?`, sess.ID).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	setPrevious := func(ago time.Duration) {
+		srv.outMu.Lock()
+		if srv.outputSeen == nil {
+			srv.outputSeen = map[string]time.Time{}
+		}
+		srv.outputSeen[sess.ID] = time.Now().Add(-ago)
+		srv.outMu.Unlock()
+		if _, err := srv.DB.SQL().Exec(`UPDATE sessions SET last_output_at = 1 WHERE id = ?`, sess.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setPrevious(2 * time.Second)
+	srv.HandleSignals(session.Signals{SessionID: sess.ID, Visible: true})
+	time.Sleep(300 * time.Millisecond)
+	if got := stamp(); got != 1 {
+		t.Errorf("output two seconds after the last stamp was written (%d)", got)
+	}
+	setPrevious(outputTouchEvery + time.Second)
+	srv.HandleSignals(session.Signals{SessionID: sess.ID, Visible: true})
+	deadline := time.Now().Add(3 * time.Second)
+	for stamp() == 1 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if stamp() == 1 {
+		t.Error("output past the interval was never stamped")
+	}
+}

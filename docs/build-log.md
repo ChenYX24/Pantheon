@@ -25862,6 +25862,15 @@ under the lock so two callers arriving together walk it once.
 `TestACachedAnswerDoesNotWalkProc` counts the walks: eleven samples in one
 window walked it eleven times before (twelve with the walk restored on top),
 once now.
+
+**`last_output_at` was the busiest writer in the database.** Stamped once a
+second per printing session: five commits a second on the running panel,
+measured. Nothing reads it that finely -- the sidebar ranks quietness in
+sixty-second buckets, the archive tick compares it for equality, the idle
+rule counts days, and it is not on the wire. `outputTouchEvery` is fifteen
+seconds now, a quarter of the smallest of those grains.
+`TestOutputIsStampedAtMostEveryFifteenSeconds` sends output two seconds after
+a stamp (not written) and past the interval (written).
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5

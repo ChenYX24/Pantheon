@@ -1045,6 +1045,15 @@ func (s *Server) HandleKey(sessionID string) {
 	}
 }
 
+// outputTouchEvery is how often a printing session's last_output_at is
+// written. It was once a second, which on the running panel was five commits
+// a second for five busy sessions -- the busiest writer in the database, for
+// a column read only in minutes: the sidebar ranks quietness in sixty-second
+// buckets (quietBucket), the archive compares it for equality, and idle
+// projects are judged in days. Fifteen seconds is a quarter of the smallest
+// of those grains.
+const outputTouchEvery = 15 * time.Second
+
 // HandleSignals records what the PTY pump observed. Wired to
 // session.Manager.OnSignals; runs on the pump goroutine, so it must be quick.
 func (s *Server) HandleSignals(sig session.Signals) {
@@ -1061,7 +1070,7 @@ func (s *Server) HandleSignals(sig session.Signals) {
 		s.outputSeen = map[string]time.Time{}
 	}
 	last := s.outputSeen[sig.SessionID]
-	if now.Sub(last) < time.Second {
+	if now.Sub(last) < outputTouchEvery {
 		s.outMu.Unlock()
 		return
 	}
