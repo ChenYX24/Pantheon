@@ -84,6 +84,13 @@ export function useDialogFocus(
       }
       if (escape && escapeClosesThis(stack, me, e)) {
         e.preventDefault()
+        // And no further. This listener is on the document; a dialog that
+        // keeps its own Escape on the window -- the archived list, the launch
+        // picker -- hears the same press a moment later, and by then the
+        // question that answered it has already gone from the page, so the
+        // "is a confirmation up?" guard those dialogs carry finds nothing. One
+        // Escape on "delete this?" closed the archived list as well.
+        e.stopPropagation()
         closeRef.current()
       }
     }

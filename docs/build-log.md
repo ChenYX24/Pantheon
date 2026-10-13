@@ -26271,3 +26271,11 @@ rule collapses it to the open state. render-check samples the drawer from the
 menu button frame by frame: first frame off-screen, last at the edge, scrim
 starting transparent, and already open under reduced motion. Each of the
 drawer and the scrim fails with its class removed.
+
+**One Escape closes one dialog.** archive-check caught the dialog-focus change
+closing two: Escape on the archived list's "delete this?" closed the list as
+well. The hook answers Escape from the document; the archived list, which
+keeps its own handler on the window, heard the same press afterwards, and by
+then the confirmation had already left the page, so its "is a question up?"
+guard found nothing. An Escape a dialog has answered now stops there.
+archive-check is the test: it goes red with the `stopPropagation` removed.
