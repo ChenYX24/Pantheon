@@ -2489,6 +2489,18 @@ func (s *Server) pollOnce(ctx context.Context) error {
 	// in vibepanel.conf -- so nothing in the byte stream says a TUI is running.
 	fullscreen := make([]string, 0, len(rows))
 	now := time.Now()
+	// One session's failed write is that session's, not the tick's. Each of
+	// these returned out of the loop, so a single "database is locked" -- the
+	// hooks and the archive write at the same time as this -- skipped every
+	// session after it that tick and marked the panel stale. The rest still
+	// run; the first failure is still returned, so the panel still says so.
+	var firstErr error
+	fail := func(row store.Session, what string, err error) {
+		if firstErr == nil {
+			firstErr = err
+		}
+		s.Log.Debug("poll", "session", row.ID, "step", what, "err", err)
+	}
 	for _, row := range rows {
 		info, alive := byName[row.TmuxName]
 		if alive && info.AlternateOn {
@@ -2496,7 +2508,7 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		}
 		if !alive {
 			if err := s.markVanished(ctx, row); err != nil {
-				return err
+				fail(row, "vanished", err)
 			}
 			continue
 		}
@@ -2527,27 +2539,20 @@ func (s *Server) pollOnce(ctx context.Context) error {
 				live = l
 			}
 		}
-		// This writes on every tick whether anything changed or not, and so does
-		// the title update below. It was written down as a finding -- `UPDATE
-		// sessions SET cwd = ?, command = ?` has no value comparison, so at the
-		// two dozen sessions this is built for and a two-second tick, twenty-four
-		// writes a second at complete idle, forever, to the disk the projects live
-		// on -- and the premise was wrong. SQLite elides an update that changes
-		// nothing.
+		// Only when something changed, and the same for the title below.
 		//
-		// Measured with two instruments that agree, in
-		// TestAnUpdateThatChangesNothingDoesNotWrite: a thousand identical calls
-		// move `PRAGMA data_version` by zero and grow the WAL by zero bytes, while
-		// a thousand that change the row grow it by 4,120,032 -- one page each.
-		// The remaining cost is the statement itself, 10µs, which at twenty-four a
-		// second is a quarter of a millisecond per second.
-		//
-		// So the comparison SetSessionExit and SetSessionState make is not a
-		// convention these two lines break; it is those two needing it for their
-		// own reasons. The guard is left off deliberately. If SQLite ever stops
-		// eliding these the test above fails, and then it is worth adding.
-		if err := s.DB.UpdateSessionRuntime(ctx, row.ID, info.Path, info.Command); err != nil {
-			return err
+		// These wrote on every tick, deliberately: SQLite elides an UPDATE that
+		// changes nothing, so the disk saw none of it, and
+		// TestAnUpdateThatChangesNothingDoesNotWrite still says so. What the
+		// disk does not see the lock does. Each statement takes the database's
+		// one write lock, two per session per tick -- 122 every two seconds on
+		// the running panel -- queued against the hooks, the archive and every
+		// save a person makes, and each one a chance at "database is locked".
+		// The row is already in hand; comparing costs nothing.
+		if info.Path != row.CWD || info.Command != row.Command {
+			if err := s.DB.UpdateSessionRuntime(ctx, row.ID, info.Path, info.Command); err != nil {
+				fail(row, "runtime", err)
+			}
 		}
 		// The title the PTY saw, which is where a tmux-aware program's OSC
 		// arrives. See Live.title: it is not in #{pane_title} and never will
@@ -2556,18 +2561,20 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		if live != nil {
 			ptyTitle = live.Title()
 		}
-		if title := deriveTitle(info, ptyTitle, row.Scratch); title != "" {
+		if title := deriveTitle(info, ptyTitle, row.Scratch); title != "" &&
+			row.TitleSource == store.TitleAuto && session.TruncateTitle(title) != row.Title {
 			// SetSessionTitle with TitleAuto is a no-op once the user has
-			// renamed the tab, so this cannot stomp a manual name.
+			// renamed the tab, so this cannot stomp a manual name; the source
+			// is checked here too only so a renamed tab costs no statement.
 			if err := s.DB.SetSessionTitle(ctx, row.ID, title, store.TitleAuto); err != nil {
-				return err
+				fail(row, "title", err)
 			}
 		}
 		// ExitStatus rather than DeadStatus: a killed process leaves the latter
 		// empty, so an agent the OOM killer took read as "exited with 0".
 		if info.Dead != row.Exited || (info.Dead && info.ExitStatus() != row.ExitStatus) {
 			if err := s.DB.SetSessionExit(ctx, row.ID, info.Dead, info.ExitStatus()); err != nil {
-				return err
+				fail(row, "exit", err)
 			}
 		}
 		// A Codex with no hook reporting: what its own rollout file says. Here,
@@ -2608,7 +2615,8 @@ func (s *Server) pollOnce(ctx context.Context) error {
 				// because this loop is what keeps the panel's idea of every
 				// session current and nothing hung off it may hold it up.
 				if err := s.setSessionState(ctx, row, st, src); err != nil {
-					return err
+					fail(row, "state", err)
+					continue
 				}
 				// On the transition, not on the state. This runs every two
 				// seconds against every session; firing on "is waiting" rather
@@ -2622,7 +2630,7 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		}
 	}
 	s.fullscreen.Store(&fullscreen)
-	return nil
+	return firstErr
 }
 
 // deriveTitle picks the best automatic name for a session.

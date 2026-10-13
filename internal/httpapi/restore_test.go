@@ -606,3 +606,77 @@ func TestAnUnreadableListingDoesNotEndEverySession(t *testing.T) {
 			before.State, got.State, before.ExitStatus, got.ExitStatus)
 	}
 }
+
+// A tick where nothing changed takes no write lock. It ran two UPDATEs per
+// session regardless -- elided on disk, but each one queued for the
+// database's single write lock behind the hooks and the archive. Held by
+// another connection here, the steady tick has to finish without it; before,
+// it waited out busy_timeout and then failed the whole tick.
+func TestASteadyPollTakesNoWriteLock(t *testing.T) {
+	ts, srv := newTestServer(t)
+	ctx := context.Background()
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"steady"}`)
+	for i := 0; i < 2; i++ {
+		postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	}
+	// Settle: the first ticks record cwd, command, title and state.
+	for i := 0; i < 3; i++ {
+		if err := srv.pollOnce(ctx); err != nil {
+			t.Fatalf("settling poll: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	tx, err := srv.DB.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx, `UPDATE settings SET value = value WHERE key = 'nothing'`); err != nil {
+		t.Fatal(err)
+	}
+	pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	err = srv.pollOnce(pctx)
+	if took := time.Since(start); err != nil || took > time.Second {
+		t.Errorf("a tick with nothing to write, while another connection held the write lock: %v after %v", err, took)
+	}
+}
+
+// One session's failed write does not cost the sessions after it their tick.
+// Every write in the loop returned out of it, so a single "database is
+// locked" left every later session unattached and unevaluated until the next
+// tick, and the next one could fail the same way.
+func TestOneFailedWriteDoesNotEndTheTick(t *testing.T) {
+	ts, srv := newTestServer(t)
+	ctx := context.Background()
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"partial"}`)
+	first := postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	second := postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	if err := srv.pollOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// first sorts ahead and needs a write this tick; second needs attaching.
+	if _, err := srv.DB.SQL().Exec(`UPDATE sessions SET pinned = 1, cwd = '/elsewhere' WHERE id = ?`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	srv.Manager.Detach(second.ID)
+	tx, err := srv.DB.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx, `UPDATE settings SET value = value WHERE key = 'nothing'`); err != nil {
+		t.Fatal(err)
+	}
+	// Long enough for the first session's write to wait out busy_timeout and
+	// fail on its own, rather than the whole tick running out of context.
+	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := srv.pollOnce(pctx); err == nil {
+		t.Error("a tick whose write failed reported success")
+	}
+	if _, attached := srv.Manager.Get(second.ID); !attached {
+		t.Error("the session after the failed write was not attached that tick")
+	}
+}

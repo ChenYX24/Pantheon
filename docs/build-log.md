@@ -25879,6 +25879,21 @@ the running panel). The `DO UPDATE` now has a `WHERE` that skips a row whose
 tool and path are unchanged; `updated_at` is read by nothing.
 `TestAnUnchangedTranscriptPathIsNotRewritten` holds the stamp and reports the
 same path again.
+
+**A steady poll tick took the write lock twice per session, and one failure
+ended the tick.** The cwd/command and auto-title UPDATEs ran on every tick,
+on the documented grounds that SQLite elides a write that changes nothing --
+true for the disk, and `TestAnUpdateThatChangesNothingDoesNotWrite` still
+says so -- but each statement still takes the database's one write lock: 122
+every two seconds on the running panel, queued against hooks, the archive
+and every save. Both now compare with the row already in hand. And every
+write in the loop returned out of it, so one "database is locked" left every
+later session that tick unattached and unevaluated; a failed write is now
+logged, the loop carries on, and the first failure is still returned so the
+panel still says it is stale. `TestASteadyPollTakesNoWriteLock` polls while
+another connection holds the lock (4.7 s and an error before, immediate
+now); `TestOneFailedWriteDoesNotEndTheTick` makes the first session's write
+fail and expects the second attached anyway.
 ## 2026-10-13 — The UI and device audit, batch 1
 
 Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5
