@@ -26178,3 +26178,19 @@ menu also takes the destructive remove out from under a thumb next to
 archive. render-check measures the terminal and the sheet at 900 and opens
 both sheets from the phone's drawer; archive-check reaches archive through
 the menu when there is one.
+
+**The keyboard can choose a session, and leave a terminal.** A session row
+was a `div` with a click handler and nothing else: no keyboard could reach,
+choose or rename a session, and the six pin and kill buttons were all called
+"Pin" and "Kill session" to a screen reader. Inside a terminal Tab is the
+terminal's, rightly, so a keyboard that got there stayed there. The hands-on
+run tried Alt+arrows and Ctrl+K as panel keys and they arrived in the agent
+as `^[[1;3B^K` -- which is correct: Alt+arrow is a word jump in a shell and
+Ctrl+K kills to the end of the line, so neither can be taken. The panel's
+keys are Ctrl+Shift with an arrow, which no shell or agent here binds:
+up and down switch session in sidebar order from anywhere, terminal included
+(xterm lets them past), and left leaves the terminal for the session list,
+opening the drawer on a phone. A row takes the focus; Enter or Space chooses,
+F2 renames, the arrows move; pin and kill carry the session's name.
+`shortcuts.test.ts` pins the keys and that Alt+arrow, Ctrl+K and Tab stay the
+terminal's; render-check drives the whole round from inside a real terminal.

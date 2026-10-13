@@ -2356,6 +2356,44 @@ browser = await chromium.launch({ headless: true })
     else note('PASS', 'disconnect', 'said after the grace, in the drawer too, and gone on reconnect')
   }
 
+  // ── the keyboard can choose a session ────────────────────────────────────
+  // A row was a div with a click handler: no keyboard could choose a session,
+  // and from inside a terminal -- which keeps Tab, rightly -- it could not
+  // even leave. Ctrl+Shift+Down switches from inside the terminal,
+  // Ctrl+Shift+Left leaves it for the list, the arrows move, Enter chooses,
+  // F2 renames.
+  {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await sleep(600)
+    const cur = () => page.locator('[data-testid="session-row"][aria-current="true"]').getAttribute('data-session-id').catch(() => null)
+    await page.locator('[data-testid="terminal-area"] .xterm').first().click().catch(() => {})
+    await sleep(300)
+    const start = await cur()
+    await page.keyboard.press('Control+Shift+ArrowDown')
+    await sleep(800)
+    if ((await cur()) === start) note('FAIL', 'keyboard', 'Ctrl+Shift+Down inside a terminal did not move to the next session')
+    await page.keyboard.press('Control+Shift+ArrowLeft')
+    await sleep(400)
+    const left = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))
+    if (left !== 'session-row') note('FAIL', 'keyboard', `Ctrl+Shift+Left left the focus on ${left}, not the session list`)
+    await page.keyboard.press('ArrowDown')
+    await sleep(200)
+    const to = await page.evaluate(() => document.activeElement?.getAttribute('data-session-id'))
+    await page.keyboard.press('Enter')
+    await sleep(600)
+    if (!to || (await cur()) !== to) note('FAIL', 'keyboard', 'Enter on a focused session row did not choose it')
+    if (to) {
+      await page.locator(`[data-testid="session-row"][data-session-id="${to}"]`).focus()
+      await page.keyboard.press('F2')
+      await sleep(300)
+      if ((await page.locator(`[data-testid="session-row"][data-session-id="${to}"] input`).count()) !== 1) {
+        note('FAIL', 'keyboard', 'F2 on a focused session row did not start a rename')
+      }
+      await page.keyboard.press('Escape')
+      await sleep(200)
+    }
+  }
+
   // ── the tablet tier and the phone's way to the side panel ───────────────
   // From 768 up there was one layout, three columns, and an iPad mini in
   // portrait was left a ~215px terminal. Between 768 and 1100 the side panel

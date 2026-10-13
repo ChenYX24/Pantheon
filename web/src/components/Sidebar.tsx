@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from 'react'
+import { isEnter } from './enter'
 import { Menu } from './Menu'
 import { DisconnectedBar } from './Disconnected'
 import {
@@ -536,6 +537,27 @@ export function Sidebar(props: SidebarProps) {
                     isSelected ? 'bg-surface-2' : 'hover:bg-surface-2'
                   }`}
                   onClick={() => props.onSelect(s.id)}
+                  // Reachable and usable from the keyboard: it was a div with a
+                  // click handler and nothing else, so a session could not be
+                  // chosen, renamed or even reached without a pointer. Enter or
+                  // Space chooses, F2 renames, the arrows move between rows.
+                  // Only when the row itself has the focus, not a button in it.
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return
+                    if (isEnter(e) || e.key === ' ') {
+                      e.preventDefault()
+                      props.onSelect(s.id)
+                    } else if (e.key === 'F2') {
+                      e.preventDefault()
+                      setRenaming(s.id)
+                    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                      e.preventDefault()
+                      const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="session-row"]')]
+                      const at = rows.indexOf(e.currentTarget)
+                      rows[at + (e.key === 'ArrowDown' ? 1 : -1)]?.focus()
+                    }
+                  }}
                 >
                   <StateDot
                     state={s.state}
@@ -625,6 +647,8 @@ export function Sidebar(props: SidebarProps) {
                     }}
                     data-testid="pin-session"
                     title={s.pinned ? t('session.unpin') : t('session.pin')}
+                    // Six rows, six buttons all called "Pin" to a screen reader.
+                    aria-label={`${s.pinned ? t('session.unpin') : t('session.pin')}: ${props.labels.get(s.id) ?? sessionLabel(s)}`}
                     // Not vp-reveal while it is on. Being pinned is state you
                     // have to be able to see without hovering, so the row used
                     // to draw a second pin badge beside the name -- and on
@@ -645,6 +669,7 @@ export function Sidebar(props: SidebarProps) {
                     }}
                     data-testid="kill-session"
                     title={t('session.kill')}
+                    aria-label={`${t('session.kill')}: ${props.labels.get(s.id) ?? sessionLabel(s)}`}
                     className="vp-control vp-tap vp-reveal"
                   >
                     <X size={12} />

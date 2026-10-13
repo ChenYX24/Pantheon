@@ -36,6 +36,7 @@ import { TokenUsageView } from './components/TokenUsageView'
 import { MobileKeyBar } from './components/mobile/MobileKeyBar'
 import { ComposeInput } from './components/mobile/ComposeInput'
 import { DisconnectedBar, useDisconnected } from './components/Disconnected'
+import { neighbour, panelShortcut } from './components/shortcuts'
 import { useViewportFit } from './components/mobile/viewport'
 import { TouchControls, TouchKeys } from './components/mobile/TouchControls'
 import { SelectionCopy } from './components/mobile/SelectionCopy'
@@ -1209,6 +1210,34 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     // matters.
     focusTerminal(id)
   }
+
+  // The panel's keys (shortcuts.ts), on the window so they work from inside a
+  // terminal too: xterm lets them past. In the order the sidebar draws, which
+  // is the order the person sees, read off the rows rather than recomputed.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const act = panelShortcut(e)
+      if (!act) return
+      e.preventDefault()
+      const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="session-row"]')]
+      if (act === 'leave') {
+        if (narrow) setDrawerOpen(true)
+        // After the drawer has had a frame to mount its rows.
+        window.requestAnimationFrame(() => {
+          const here =
+            document.querySelector<HTMLElement>('[data-testid="session-row"][aria-current="true"]') ??
+            document.querySelector<HTMLElement>('[data-testid="session-row"]')
+          here?.focus()
+        })
+        return
+      }
+      const order = rows.map((r) => r.dataset.sessionId ?? '').filter(Boolean)
+      const next = neighbour(order, selected, act)
+      if (next) selectSession(next)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   // A page the sharing page handed over on the address (routes.ts). Opened
   // once the first snapshot is here rather than on mount, because opening
