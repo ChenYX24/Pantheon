@@ -2278,6 +2278,35 @@ browser = await chromium.launch({ headless: true })
     if (over > 1) note('FAIL', `layout/${label}`, `page scrolls horizontally by ${over}px`)
     await page.screenshot({ path: join(SHOTS, `${label}.png`) })
   }
+  // ── a session started from the picker is the one shown ──────────────────
+  // It was selected only when a page handed over a prompt: starting a shell
+  // from the picker added a row and left you on the session you were in, on
+  // an iPad and on a laptop alike.
+  {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await sleep(600)
+    const before = new Set(((await (await authed('/api/state')).json()).sessions ?? []).map((x) => x.id))
+    await page.locator('[data-testid="project-new-shell"]').first().click()
+    const offered = await page.waitForSelector('[data-testid="launch-picker"]', { timeout: 5000 }).then(() => true).catch(() => false)
+    if (!offered) {
+      note('FAIL', 'launch', 'the new-session button offered no launch picker')
+    } else {
+      await page.locator('[data-testid="launch-option"]', { hasText: 'Shell' }).first().click()
+      let made = null
+      for (let i = 0; i < 40 && !made; i++) {
+        await sleep(250)
+        made = ((await (await authed('/api/state')).json()).sessions ?? []).find((x) => !before.has(x.id) && !x.scratch)
+      }
+      await sleep(1200)
+      const shown = await page.locator('[data-testid="session-row"][aria-current="true"]').getAttribute('data-session-id').catch(() => null)
+      if (!made) note('FAIL', 'launch', 'picking Shell made no session')
+      else if (shown !== made.id) note('FAIL', 'launch', `a session started from the picker was not the one shown (shown ${shown}, made ${made.id})`)
+      else note('PASS', 'launch', 'a session started from the picker is the one shown')
+      if (made) await authed(`/api/sessions/${made.id}`, { method: 'DELETE' }).catch(() => {})
+      await sleep(800)
+    }
+  }
+
   // ── a lost connection says so ────────────────────────────────────────────
   // It used to be a 6px dot at the end of the header going hollow, and
   // nothing else: the session states, the terminal and the compose box went

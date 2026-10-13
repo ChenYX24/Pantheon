@@ -226,9 +226,16 @@ function writeStored(key: string, value: string | null) {
  * the header and the terminal area both say "no session" while the sidebar
  * lists everything. It sticks, too: the id is a real session, so every later
  * snapshot keeps it, and it is written to localStorage for the next visit.
+ *
+ * `wanted` is a session this page just started and asked to show. It wins as
+ * soon as a snapshot carries it; until then it is ignored, because a snapshot
+ * taken before the create can still arrive after the reply to it, and without
+ * the hold that snapshot sent the selection back to whatever sorted first --
+ * the new session appeared in the list and the old one stayed on screen.
  */
-export function nextSelection(sessions: Session[], cur: string | null): string | null {
+export function nextSelection(sessions: Session[], cur: string | null, wanted: string | null = null): string | null {
   const mains = sessions.filter((s) => !s.scratch)
+  if (wanted && mains.some((s) => s.id === wanted)) return wanted
   if (cur && mains.some((s) => s.id === cur)) return cur
   return mains[0]?.id ?? null
 }
@@ -290,6 +297,9 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     pluginsRev: 0,
   })
   const [selected, setSelected] = useState<string | null>(() => readStored(SELECTED_KEY))
+  // A session this page started and wants shown once a snapshot carries it.
+  // See nextSelection.
+  const wantSelected = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [theme, setThemeState] = useState<ThemeChoice>(loadTheme)
 
@@ -437,7 +447,9 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     // knows that.
     notifyOnWaiting(next.sessions, document.hasFocus())
     notifyOnArchivedWaiting(next.archived, document.hasFocus())
-    setSelected((cur) => nextSelection(next.sessions, cur))
+    const wanted = wantSelected.current
+    if (wanted && next.sessions.some((s) => s.id === wanted)) wantSelected.current = null
+    setSelected((cur) => nextSelection(next.sessions, cur, wanted))
   }, [])
 
   // Pushed updates are the primary path.
@@ -1928,8 +1940,12 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             pagePrompt.current = null
             void guard(async () => {
               const made = await api.createSession(project.id, [], { launchProfileId })
-              if (!prompt) return
+              // Shown as soon as it exists. It was selected only when a page
+              // handed over a prompt, so starting an agent from the picker
+              // added a row and left you on the session you were in.
+              wantSelected.current = made.id
               selectSession(made.id)
+              if (!prompt) return
               // After the agent has had a moment to start. A paste that
               // arrives before it has set up its terminal lands in a buffer
               // it may throw away, and nothing says so.

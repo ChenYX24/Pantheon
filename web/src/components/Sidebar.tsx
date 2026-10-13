@@ -498,6 +498,9 @@ export function Sidebar(props: SidebarProps) {
                   // scale check waited on "any terminal has content", which is
                   // true of the one that was already on screen.
                   data-session-id={s.id}
+                  // Which one is on screen, said in words a screen reader and
+                  // a check can both read rather than only as a background.
+                  aria-current={isSelected ? 'true' : undefined}
                   className={`group flex cursor-pointer items-center gap-2 rounded-vp ${pack.row} transition-colors duration-200 ease-vp ${
                     isSelected ? 'bg-surface-2' : 'hover:bg-surface-2'
                   }`}

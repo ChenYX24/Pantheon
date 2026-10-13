@@ -25955,3 +25955,13 @@ reopened a socket somebody closed; and each socket's handlers check that it
 is still the current one, so a closed socket's late `onclose` cannot mark
 its replacement closed. Three cases in `socket.test.ts`, each red with its
 guard removed.
+
+**A session started from the picker is the one shown.** It was selected only
+when a page handed over a prompt, so starting a shell or an agent from the
+picker added a row and left you on the session you were in -- on the iPad and
+on the laptop in the hands-on run. It is selected now, and held: a snapshot
+taken before the create can still arrive after the reply to it, and
+`nextSelection` would have sent the selection back to whatever sorted first,
+so the new id is kept as `wanted` until a snapshot carries it. The selected
+row says so with `aria-current`, which is also what render-check reads after
+picking Shell; `App.test.ts` covers the stale snapshot and a scratch id.
