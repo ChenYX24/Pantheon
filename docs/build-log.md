@@ -26364,3 +26364,12 @@ which `img-src` already allows, and `TestEveryTemplatePageDeclaresItsIcon`
 covers every template page. A page somebody writes from scratch still gets
 the Firefox message until it names an icon; it is harmless, and the panel
 does not edit an owner's HTML.
+
+**Pinch zoom works.** The viewport said `maximum-scale=1.0, user-scalable=no`.
+iOS has ignored that since iOS 10; Android honoured it, so somebody who
+needed a phone's terminal text larger could not have it. It stood against two
+things, each handled where it belongs now: iOS zooming into a small focused
+field (every field is 16px under a coarse pointer, and render-check measures
+it) and a double-tap on a key read as zoom (`touch-action: manipulation` on
+the root, which keeps pinch). `useViewportFit` already ignores a pinch-zoomed
+visual viewport, so zooming does not shrink the app. `zoom.test.ts`.

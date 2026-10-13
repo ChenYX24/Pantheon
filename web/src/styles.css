@@ -378,6 +378,11 @@ body,
  * that does not depend on the browser having understood it. */
 html {
   background: var(--vp-bg);
+  /* Pinch zoom is allowed (index.html no longer forbids it: blocking it fails
+     WCAG 1.4.4 for somebody who needs the text larger, and Android honoured
+     the block). What is not wanted is a double-tap on a key or a button read
+     as "zoom in" -- manipulation keeps pinch and drops that. */
+  touch-action: manipulation;
 }
 
 body {
@@ -595,8 +600,8 @@ body {
 /* Sixteen pixels in any field a finger will focus.
  *
  * iOS Safari zooms the page when a focused input's text is smaller than 16px.
- * It has ignored `user-scalable=no` since iOS 10, so the meta tag in index.html
- * does not prevent it — and nothing zooms back afterwards. Every field in this
+ * It has ignored `user-scalable=no` since iOS 10, so no meta tag prevents it
+ * (index.html no longer tries) — and nothing zooms back afterwards. Every field in this
  * panel was 12 or 13px, including the compose box, which is the main way to
  * type on a phone: tapping it magnified the terminal behind it and left it that
  * way.

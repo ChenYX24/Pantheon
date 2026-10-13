@@ -3272,8 +3272,8 @@ browser = await chromium.launch({ headless: true })
     // Every field a finger can focus must be at least 16px.
     //
     // iOS Safari zooms the page when a focused input's text is smaller than
-    // that, and has ignored `user-scalable=no` since iOS 10 — so the meta tag
-    // in index.html does not prevent it, and nothing zooms back afterwards.
+    // that, and has ignored `user-scalable=no` since iOS 10 — so no meta tag
+    // prevents it (index.html no longer tries), and nothing zooms back.
     // Every field here was 12 or 13px, the compose box included, which is the
     // main way to type on a phone.
     await touch.locator('[data-testid="compose-input"]').click().catch(() => {})
