@@ -25821,3 +25821,16 @@ for its cookie, and `decode` wants `application/json`. The refusal for
 reader. The browser probe now gets 403. `TestAWriteWithANullOriginOrAFormBodyIsRefused`
 tests each lock with the other in place, and `TestTheDoorRefusesTheCookieFromANullOrigin`
 the door.
+
+**The 飞书 door was a padding oracle.** With an encrypt key set, the
+webhook AES-CBC-decrypted the body before checking the signature and
+answered with the reason: `decrypt: bad padding` (400), `body: invalid
+character` (400), `bad signature` (401). That distinguishes a good padding
+from a bad one, which is all a padding oracle needs to open a captured
+event block by block. A signed request is now checked before anything is
+decrypted; an unsigned one is decrypted only to see whether it is the
+handshake (the one thing 飞书 does not sign); every refusal says only its
+status text, and the reason goes to the health line and the log where the
+owner reads it. `TestTheWebhookSaysNothingAboutWhyItRefused` sends a bad
+padding, a good padding over non-JSON and an unsigned event, and wants the
+three answers identical; before, all three differed.
