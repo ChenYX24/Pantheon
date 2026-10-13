@@ -689,7 +689,7 @@ export function Sidebar(props: SidebarProps) {
                     )}
                     {s.progress >= 0 && (
                       <span className="tabular inline-flex shrink-0 items-center gap-1" data-testid="session-progress">
-                        <span className="h-1 w-10 overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
+                        <span className="vp-bar h-1 w-10 overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
                           <span className="block h-full" style={{ width: `${s.progress}%`, background: 'var(--vp-accent)' }} />
                         </span>
                         {s.progress}%

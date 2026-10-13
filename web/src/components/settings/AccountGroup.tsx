@@ -100,7 +100,7 @@ function PasswordSection() {
           data-testid="password-submit"
           disabled={busy || !current || !next}
           onClick={() => void submit()}
-          className="rounded-vp bg-accent px-3 py-1.5 text-vp-base font-medium text-white transition-opacity duration-200 ease-vp disabled:opacity-40"
+          className="vp-primary rounded-vp bg-accent px-3 py-1.5 text-vp-base font-medium text-white transition-opacity duration-200 ease-vp disabled:opacity-40"
         >
           {busy ? t('set.working') : t('set.change')}
         </button>

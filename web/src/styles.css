@@ -1481,6 +1481,57 @@ body {
   transition: opacity 200ms var(--vp-ease), filter 200ms var(--vp-ease);
 }
 
+/* Forced colours (Windows High Contrast and its kin).
+ *
+ * The browser replaces every background and most borders with the user's
+ * palette, and "chosen" in this interface is carried almost entirely by a
+ * background: the selected session row is a slightly darker fill, the active
+ * tab is a lifted one, a meter is a coloured bar in a grey track. All of them
+ * flatten to Canvas, so the row you are on, the tab you are on and how full a
+ * bar is stop being visible while every neighbour looks the same.
+ *
+ * Outlines and borders survive, and system colours are what the user chose, so
+ * the answer is shape: an outline on the chosen thing, a border around the
+ * track, Highlight for the part that is filled. This is the one place a
+ * media query holds component styles on purpose -- it redefines no token and
+ * there is no second theme here for it to drift against (red line 5). */
+@media (forced-colors: active) {
+  [aria-current='true'],
+  .vp-tab[aria-selected='true'],
+  .vp-tab[data-active='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .vp-primary {
+    border: 1px solid ButtonText;
+  }
+
+  .vp-bar {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+
+  /* Both the fill of a meter and the segments of the spend mix. Segments are
+     told apart by the Canvas-coloured gap after each one; the legend beside
+     the bar says which is which. */
+  .vp-bar > span {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    border-inline-end: 2px solid Canvas;
+  }
+
+  .vp-spark polyline,
+  .vp-spark path[stroke]:not([stroke='none']) {
+    stroke: CanvasText;
+  }
+
+  .vp-spark polygon,
+  .vp-spark path[fill]:not([fill='none']) {
+    fill: CanvasText;
+  }
+}
+
 /* xterm sizes itself against the element it is given; without an explicit
    height it collapses and renders a single row. */
 .xterm,

@@ -219,3 +219,49 @@ describe('theme tokens', () => {
     }
   })
 })
+
+describe('forced colours', () => {
+  /*
+   * Under forced colours every background is replaced with the user's Canvas,
+   * and "chosen" here is carried by a background: the selected session row,
+   * the active tab, the fill of a meter. With no rule of its own for that
+   * mode the selected row and its neighbours are the same pixels. Outlines and
+   * system colours are what survive, so each thing that says "this one" or
+   * "this much" has to be named in the block.
+   */
+  const block = (() => {
+    const at = stripped.indexOf('@media (forced-colors: active)')
+    return at < 0 ? '' : blockAt(stripped, at).body
+  })()
+
+  it('exists', () => {
+    expect(block.length, 'no @media (forced-colors: active) block').toBeGreaterThan(20)
+  })
+
+  // Each entry is a selector the block has to mention and the property that
+  // makes it visible without a background.
+  const must: [string, string][] = [
+    ["[aria-current='true']", 'outline'],
+    ["aria-selected='true'", 'outline'],
+    ["data-active='true'", 'outline'],
+    ['.vp-primary', 'border'],
+    ['.vp-bar', 'outline'],
+    ['.vp-bar > span', 'background'],
+    ['.vp-spark', 'stroke'],
+  ]
+  for (const [selector, prop] of must) {
+    it(`gives ${selector} a ${prop}`, () => {
+      const re = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^{}]*\\{([^}]*)\\}`)
+      const hit = re.exec(block)
+      expect(hit, `${selector} is not styled under forced colours`).not.toBeNull()
+      expect(hit![1], `${selector} has no ${prop} under forced colours`).toContain(prop)
+    })
+  }
+
+  it('uses system colours only', () => {
+    const colours = [...block.matchAll(/(?:outline|border[a-z-]*|background|stroke|fill):\s*([^;]+);/g)].map((m) => m[1])
+    for (const c of colours) {
+      expect(c, `${c} is not a system colour`).toMatch(/Highlight|ButtonText|CanvasText|Canvas|LinkText/)
+    }
+  })
+})
