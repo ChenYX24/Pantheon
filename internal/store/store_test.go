@@ -283,7 +283,7 @@ func TestMigrationUpgradesAnExistingDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := migrations[0](tx); err != nil {
+	if err := migrations[0].up(tx); err != nil {
 		t.Fatalf("apply v1: %v", err)
 	}
 	if _, err := tx.Exec("PRAGMA user_version = 1"); err != nil {
@@ -886,7 +886,7 @@ func TestMigrationRenamesTheOldAuditEvents(t *testing.T) {
 	if len(migrations) < auditRename {
 		t.Fatalf("there are %d migrations and this test wants v%d", len(migrations), auditRename)
 	}
-	if err := migrations[auditRename-1](tx); err != nil {
+	if err := migrations[auditRename-1].up(tx); err != nil {
 		t.Fatalf("migration: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -1101,7 +1101,7 @@ func TestMigrationV17DropsTheVncTableAndItsPasswords(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < dropVnc-1; i++ {
-		if err := migrations[i](tx); err != nil {
+		if err := migrations[i].up(tx); err != nil {
 			t.Fatalf("apply v%d: %v", i+1, err)
 		}
 	}
@@ -1257,7 +1257,7 @@ func TestExistingBottomTerminalsSurviveTheMove(t *testing.T) {
 	const scratchMigration = 19 // v20
 	prior := scratchMigration
 	for i := 0; i < prior; i++ {
-		if err := migrations[i](tx); err != nil {
+		if err := migrations[i].up(tx); err != nil {
 			t.Fatalf("apply migration %d: %v", i+1, err)
 		}
 	}
@@ -1372,5 +1372,44 @@ func TestOpenersRacingOnAnUpgradeBothMigrate(t *testing.T) {
 				t.Fatalf("round %d: an opener failed: %v", round, err)
 			}
 		}
+	}
+}
+
+// The schema's history, by name, in order. A step is added by appending to
+// migrations and to this list; nothing above the end of it ever changes.
+//
+// Positional numbering is what migrate applies, so two branches that each
+// append a step both call it the same number, and whichever merges second
+// renumbers the other -- after a database somewhere may already have run it
+// under the first number. Both branches editing the end of this list is a
+// merge conflict, which is the moment to notice.
+var migrationHistory = []string{
+	"001-initial-schema", "002-bottom-terminals-as-sessions", "003-auth-sessions-and-audit",
+	"004-webauthn-credential-data", "005-session-exit", "006-note-revisions", "007-audit-event-names",
+	"008-api-tokens", "009-session-rebuild", "010-share-links", "011-token-usage", "012-share-link-board",
+	"013-launch-profiles", "014-vnc-targets", "015-share-link-remark-and-lock", "016-session-events",
+	"017-drop-vnc-targets", "018-global-note", "019-auth-session-origin", "020-scratch-terminals",
+	"021-preview-links", "022-preview-allow-external", "023-share-pages", "024-page-backend",
+	"025-drop-idx-sessions-state", "026-chat", "027-usage-file-reader", "028-session-message-menu",
+	"029-claude-accounts", "030-project-archive", "031-plugins", "032-plugin-frames", "033-plugin-tokens",
+	"034-plugin-access-tokens", "035-session-self-description",
+}
+
+func TestMigrationNamesAreAppendOnly(t *testing.T) {
+	if len(migrations) != len(migrationHistory) {
+		t.Fatalf("%d migrations and %d names in migrationHistory; a step is added to both, at the end", len(migrations), len(migrationHistory))
+	}
+	seen := map[string]bool{}
+	for i, m := range migrations {
+		if m.name != migrationHistory[i] {
+			t.Errorf("step %d is %q, history says %q: a step was renamed, reordered or inserted", i+1, m.name, migrationHistory[i])
+		}
+		if want := fmt.Sprintf("%03d-", i+1); !strings.HasPrefix(m.name, want) {
+			t.Errorf("step %d is named %q; its number is its position, %s", i+1, m.name, want)
+		}
+		if seen[m.name] {
+			t.Errorf("two steps are named %q", m.name)
+		}
+		seen[m.name] = true
 	}
 }

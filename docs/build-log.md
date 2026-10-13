@@ -26324,3 +26324,17 @@ sessions use from loopback, callbacks that verify themselves, the SPA
 bundle, and three recorded as they are rather than endorsed -- passkey
 sign-in (audit 04-F7) and setup before the first account, neither of which
 asks the allowlist.
+
+**Migrations have names, and their history is a list a merge conflicts on.**
+Steps are still applied by position (`schemaVersion = len(migrations)`,
+`user_version` after a step is its position); what changed is that each is
+`{name, up}` with the name `NNN-what-it-does`, the number being that
+position, and `migrate` names the step that failed. Positional numbering is
+why two branches that each append a step collide -- it happened on
+2026-09-16 -- and `TestMigrationNamesAreAppendOnly` lists every name in
+order, so the second branch now meets a conflict in that list at merge
+instead of quietly renumbering a step some database may already have run.
+The comment labels had drifted: v25 to v30 were labelled one higher than
+their position (drop-idx-sessions-state said "v26"), which is the same
+collision's leftover; they match now, and the type's comment says so for
+whoever reads the build log's older entries. No step's body changed.

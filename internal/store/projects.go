@@ -23,7 +23,8 @@ type Project struct {
 	LastActiveAt int64  `json:"lastActiveAt"`
 	CreatedAt    int64  `json:"createdAt"`
 	// ArchivedAt is when the project was hidden; nil for every project in the
-	// sidebar. Its sessions are untouched by archiving -- see v31.
+	// sidebar. Its sessions are untouched by archiving -- see the migration
+	// 030-project-archive.
 	ArchivedAt *int64 `json:"archivedAt"`
 	// ArchivedAuto is true when the idle rule archived it rather than a person.
 	ArchivedAuto bool `json:"archivedAuto"`
