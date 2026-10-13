@@ -25620,4 +25620,12 @@ code of mine.
   every hook token stale. It asks `panel.url` first.
 - `todo`: the panel's pages no longer draw a project's todos; the CLI and
   the docs now say who reads them (plugins, the chat assistant).
+- **The socket directory under `/tmp` was taken as found** (04-F2):
+  `MkdirAll` accepts an existing directory of any owner and mode and
+  follows a symlink, so on a shared machine another account could
+  pre-create `/tmp/vibepanel-<uid>` and the door would dial a socket it
+  put there, with the per-start secret and the caller's name on every
+  request. `ownedPrivateDir` insists on a real directory, this user's,
+  0700, and the door refuses to start otherwise; the pages root's `/tmp`
+  last resort goes through the same check.
 

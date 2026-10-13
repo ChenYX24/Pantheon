@@ -429,9 +429,9 @@ func (s *Server) runPluginProcOnce(ctx context.Context, c pluginCred, pr *plugin
 	var sock, proxySecret string
 	if spec.HTTP != nil {
 		sock = s.pluginSocketPath(c.plugin.ID)
-		if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+		if err := ownedPrivateDir(filepath.Dir(sock)); err != nil {
 			cancel()
-			return err, false
+			return fmt.Errorf("the socket directory: %w", err), false
 		}
 		_ = os.Remove(sock)
 		if proxySecret, err = auth.NewToken(); err != nil {
