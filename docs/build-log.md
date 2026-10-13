@@ -25655,3 +25655,18 @@ so. It now drops that event, logs it, and carries on; a removed plugin's
 worker still stops, through `done`. `TestAnEventWorkerOutlivesAFailedRead`
 makes the plugins table unreadable for one event and expects the next to
 arrive.
+
+**Transactions that read first lost to any concurrent writer.** busy_timeout
+turns a lock collision into a wait, except one: a deferred transaction that
+has read and then tries to write, after another connection committed in
+between, fails with `SQLITE_BUSY_SNAPSHOT` (517) and no busy handler runs.
+Plugin install, plugin caps, adding a plugin or page version and the chat
+handle all read first, and the poller and the hooks are always writing. The
+earlier fixes (`handleMu`, the write-first ordering in `SetSessionState`, the
+WHERE-clause precondition in `SetNoteIfUnchanged`) each closed one path; the
+DSN now says `_txlock=immediate`, so every transaction takes the write lock
+at BEGIN, where the timeout applies. Every transaction in `internal/store`
+writes, so nothing read-only is made to queue.
+`TestAReadThenWriteTransactionWaitsForAWriter` installs a version 1000 times
+beside a tight writer: red in ten runs of ten without the parameter, green
+with it.

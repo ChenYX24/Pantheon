@@ -139,3 +139,55 @@ func TestAPagePublishDoesNotSweepAPluginsFiles(t *testing.T) {
 		t.Errorf("the page's publish swept the plugin's file: %v", err)
 	}
 }
+
+// A transaction that reads before it writes must wait for a concurrent
+// writer, not fail. Under WAL a deferred BEGIN takes a read snapshot at its
+// first SELECT; if another connection commits before the first write, the
+// upgrade fails with SQLITE_BUSY_SNAPSHOT, and SQLite runs no busy handler
+// for that, so busy_timeout does not help. The panel writes constantly (the
+// poller, hooks), so installing a plugin, adding a version or publishing a
+// page lost that race often enough to be measured: 426 of 1000 against a
+// writer committing every ten milliseconds. The DSN's _txlock=immediate makes
+// every transaction take the write lock at BEGIN, where busy_timeout does
+// apply.
+func TestAReadThenWriteTransactionWaitsForAWriter(t *testing.T) {
+	db := openTest(t)
+	ctx := context.Background()
+	owner := pluginOwner(t, db)
+	for _, id := range []string{"target", "noise"} {
+		if _, err := db.CreatePlugin(ctx, id, owner, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.AddPluginVersion(ctx, "target", NewPluginVersion{Manifest: json.RawMessage(`{"plugin":1}`), Hash: "h"}); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_, _ = db.SQL().ExecContext(ctx, `UPDATE plugins SET updated_at = ? WHERE id = 'noise'`, i)
+		}
+	}()
+	failed := 0
+	var first error
+	for i := 0; i < 1000; i++ {
+		if err := db.InstallPluginVersion(ctx, "target", 1, i%2 == 0); err != nil {
+			failed++
+			if first == nil {
+				first = err
+			}
+		}
+	}
+	close(stop)
+	<-done
+	if failed > 0 {
+		t.Fatalf("%d of 1000 installs failed against a concurrent writer; first: %v", failed, first)
+	}
+}

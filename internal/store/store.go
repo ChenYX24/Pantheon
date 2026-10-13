@@ -1316,10 +1316,21 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	// busy_timeout in particular: without it a concurrent writer fails
 	// immediately with SQLITE_BUSY instead of waiting, which shows up as
 	// random save failures under two browser tabs.
+	//
+	// _txlock=immediate because busy_timeout does not cover the other way two
+	// writers collide. A deferred BEGIN whose first statement is a SELECT
+	// holds a read snapshot; if another connection commits before its first
+	// write, the upgrade fails with SQLITE_BUSY_SNAPSHOT and no busy handler
+	// runs. Installing a plugin, adding a version and publishing a page all
+	// read first, and the poller and the hooks are always writing, so those
+	// failed 426 times in 1000 against a ten-millisecond writer. BEGIN
+	// IMMEDIATE takes the write lock up front, where the timeout does apply.
+	// Reads outside a transaction are untouched.
 	dsn := path + "?_pragma=journal_mode(WAL)" +
 		"&_pragma=busy_timeout(5000)" +
 		"&_pragma=foreign_keys(ON)" +
-		"&_pragma=synchronous(NORMAL)"
+		"&_pragma=synchronous(NORMAL)" +
+		"&_txlock=immediate"
 
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
