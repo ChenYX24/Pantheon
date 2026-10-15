@@ -25039,3 +25039,62 @@ also gives managed status precedence over stale release fields. TypeScript,
 dialog checks, and lint on the changed frontend files passed at nice 19. Browser
 checks and the embedded bundle rebuild were not run on this shared host; release
 packaging still needs to rebuild the frontend.
+
+## 2026-10-15 — Avoid idle terminal work and move Home into the header
+
+Normal and fullscreen terminals now share the existing 8px padding. FitAddon
+also reserves 14px for xterm's scrollbar, leaving room for the relative paging
+control at both pointer sizes without changing the grid on alternate-screen
+entry. The normal-buffer scrollbar remains visible. All 10 style tests passed,
+including the padding invariant and the installed FitAddon's gutter calculation.
+Browser checks are left to the Conductor on this shared host.
+
+The terminal layout effect depends on column and row values rather than each
+size reply's object, and fullscreen no longer retriggers it. The existing
+requested-size suppression is unchanged. All 12 terminal replay tests passed;
+the Conductor's terminal check still covers real resize acknowledgements.
+
+Rollover status reads now poll only while the action is busy or the reply is
+asking, waiting or ending. Visibility and action transitions refresh the status;
+equal replies do not update state. The effect drops timers, listeners and late
+responses on cleanup. TypeScript and all 13 rollover tests passed, including
+fake-timer coverage for idle, completion, visibility, transient read failures
+and unmount.
+
+The terminal's home project-link lookup reads on mount and visibility instead
+of polling the full index. Home resources keep their polling intervals and
+explicit refresh API; background reads no longer flash loading, and equal JSON
+replies retain their data object. All callers were checked for loading and
+refresh use. TypeScript and 39 focused hook, polling and home rendering tests
+passed, including cancellation and unchanged error recovery.
+
+Home now sits beside the terminal sidebar's Projects heading, with a short
+translated label and an accessible Pantheon home name. Phones also have a Home
+icon before the project-board link in the main header. The old sidebar row is
+removed; the collapsed rail and home AppShell navigation keep their structure.
+The F1 contract and route placement checks reflect the change.
+
+Final validation ran serially at nice 19 with a 900 MiB Node heap and one Vitest
+worker: TypeScript passed, the four changed test files passed 43 tests, and the
+full suite passed once with 864 tests in 95 files. The navigation, i18n, chrome,
+touch, dialog and shell checks passed 35 tests. Changed-file ESLint passed with
+only the two existing App.tsx Fast Refresh warnings, after fixing a rollover
+ref diagnostic. No Go, embedded bundle build or deployment was needed; browser
+checks remain with the Conductor, including terminal and stress checks.
+
+Conductor review (same day). The browser terminal check gained a fullscreen
+case: entering and leaving a fullscreen program keeps 120×35 with no resize
+request, and the paging control starts right of the text. It fails on the
+previous commit and passes here, with the four existing terminal cases. The
+real tmux/WebSocket stress check reported 0 failures and 0 warnings: 20,000
+lines in 0.8 s and a local keyboard echo of 35 ms after the flood (47 ms
+before this change; one run each, so this is not a measured improvement).
+
+render-check found the phone header 89px past a 320-wide screen (19px in the
+drawer) once Home joined the project-board link and the menu. The board link
+is an icon on phones and the header's gaps narrow there. render-check's update
+section expected upstream check and install controls; it now expects the
+managed line of a Pantheon build and fails if any upstream control appears.
+The same render-check on the pre-change build (6e6addd) has the same two
+clipboard failures (an OSC 52 copy inside tmux) and the same 320-wide phone
+overflow (53px there), so neither comes from this change.

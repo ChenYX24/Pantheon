@@ -1525,7 +1525,14 @@ body {
    So: one number, and it is the slider's own width. `--vp-scrollbar` is set
    here and read by the slider rule below, so the reservation and the thing
    being reserved for cannot drift apart -- which is how they came to be 14 and
-   14 stacked end to end. */
+   14 stacked end to end.
+
+   Normal and fullscreen padding must match. FitAddon subtracts this padding
+   and xterm's 14px scrollbar allowance even while the slider is hidden, so a
+   fullscreen program already has 22px beside its grid: room for the 12px
+   paging control (20px on touch screens) without covering text. Adding
+   padding on alternate-screen entry changed the columns, resized tmux and
+   made the program repaint the whole screen. */
 .xterm {
   --vp-scrollbar: 8px;
   padding-right: var(--vp-scrollbar);
@@ -1546,10 +1553,6 @@ body {
    with the relative paging control; no fabricated transcript position. */
 [data-fullscreen='true'] .xterm .xterm-scrollable-element > .scrollbar {
   display: none;
-}
-
-[data-fullscreen='true'] .xterm {
-  padding-right: 12px;
 }
 
 .vp-terminal-scroll {
@@ -1625,7 +1628,6 @@ body {
 
 @media (pointer: coarse) {
   .vp-terminal-scroll { width: 20px; }
-  [data-fullscreen='true'] .xterm { padding-right: 20px; }
 }
 
 /* The real scrollbar, which is a div rather than a native one.

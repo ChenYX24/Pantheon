@@ -5,6 +5,6 @@ import { useHomeResource } from './useHomeResource'
 const load = (signal: AbortSignal) => homeApi.index(true, signal)
 
 export function usePanelHomeLinks() {
-  const index = useHomeResource(load)
+  const index = useHomeResource(load, false)
   return panelProjectLinks(index.data?.available ? index.data.projects : [])
 }

@@ -124,11 +124,34 @@ describe('who spells the sharing path', () => {
     expect(linking.length).toBeGreaterThan(0)
   })
 
-  it('makes Home reachable from both the sidebar and project workspace', () => {
-    for (const file of ['components/Sidebar.tsx', 'components/ProjectWorkspace.tsx']) {
-      expect(readFileSync(join(SRC, file), 'utf8')).toContain('href={HOME_PATH}')
-    }
+  it('puts Home beside the projects heading and keeps the drawer toggle as the first button', () => {
+    const sidebar = readFileSync(join(SRC, 'components/Sidebar.tsx'), 'utf8')
+    const header = sidebar.match(/<header\b[^>]*>([\s\S]*?)<\/header>/)?.[1] ?? ''
+    const home = header.match(/<a\b[^>]*data-testid="sidebar-home"[^>]*>[\s\S]*?<\/a>/)?.[0] ?? ''
+    expect(home).toContain('href={HOME_PATH}')
+    expect(home).toContain('className="vp-control"')
+    expect(home).toContain("aria-label={t('home.shell.panelHome')}")
+    expect(home).toContain("title={t('home.shell.panelHome')}")
+    expect(home).toContain('<House')
+    expect(home).toContain("t('home.shell.home')")
+    expect(header).toMatch(/\{t\('app.projects'\)\}<\/span>\s*<a\b/)
+    expect(header.match(/<button\b[\s\S]*?<\/button>/)?.[0]).toContain('onClick={props.onToggle}')
+    expect(sidebar.match(/data-testid="sidebar-home"/g)).toHaveLength(1)
+    expect(sidebar).toContain('data-testid="rail-home"')
+    expect(readFileSync(join(SRC, 'components/ProjectWorkspace.tsx'), 'utf8')).toContain('href={HOME_PATH}')
     expect(readFileSync(join(SRC, 'main.tsx'), 'utf8')).toContain("route.kind === 'home'")
+  })
+
+  it('makes Home reachable before the project board when the phone drawer is closed', () => {
+    const app = readFileSync(join(SRC, 'App.tsx'), 'utf8')
+    const header = app.match(/<header\b[^>]*>([\s\S]*?)<\/header>/)?.[1] ?? ''
+    const home = header.match(/\{narrow && \(\s*(<a\b[^>]*data-testid="header-home"[^>]*>[\s\S]*?<\/a>)\s*\)\}/)?.[1] ?? ''
+    expect(home).toContain('href={HOME_PATH}')
+    expect(home).toContain("aria-label={t('home.shell.panelHome')}")
+    expect(home).toContain("title={t('home.shell.panelHome')}")
+    expect(home).toContain('<House')
+    expect(home).not.toContain("{t('home.shell.home')}")
+    expect(header.indexOf('data-testid="header-home"')).toBeLessThan(header.indexOf("t('pm.boardLink')"))
   })
 
   it('is what the panel is handed a page through', () => {

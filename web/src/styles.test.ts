@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { FitAddon } from '@xterm/addon-fit'
+import type { Terminal } from '@xterm/xterm'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 /**
  * Red line 5, as a test rather than a rule people remember.
@@ -20,6 +22,8 @@ const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 
 /** The file with comments removed, so their colons are not read as CSS. */
 const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '')
+
+afterEach(() => vi.unstubAllGlobals())
 
 /** Body of the block whose opening brace follows `from`, by brace counting. */
 function blockAt(source: string, from: number): { body: string; end: number } {
@@ -79,6 +83,40 @@ function declaredProperties(body: string): string[] {
   }
   return props
 }
+
+describe('terminal gutter', () => {
+  const rules = [...stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+  const terminalRules = rules.filter(([, selector]) => /(?:^|[\s,])\.xterm\s*(?:,|$)/.test(selector.trim()))
+
+  it('keeps the same padding in normal and fullscreen mode at both pointer types', () => {
+    const padding = terminalRules.filter(([, , body]) => declaredProperties(body).some((p) => p.startsWith('padding')))
+    expect(padding.map(([, selector]) => selector.trim())).toEqual(['.xterm'])
+    expect(padding[0][2]).toMatch(/--vp-scrollbar:\s*8px;/)
+    expect(padding[0][2]).toMatch(/padding-right:\s*var\(--vp-scrollbar\);/)
+  })
+
+  it.each([12, 20])('leaves room for the %ipx paging control in the fitted grid', (width) => {
+    const controls = rules.filter(([, selector]) => selector.trim() === '.vp-terminal-scroll')
+    expect(controls.some(([, , body]) => new RegExp(`width:\\s*${width}px;`).test(body))).toBe(true)
+    const element = { parentElement: {} }
+    vi.stubGlobal('window', {
+      getComputedStyle: (target: unknown) => ({
+        getPropertyValue: (name: string) => target === element
+          ? name === 'padding-right' ? '8px' : '0px'
+          : name === 'width' ? '822px' : '400px',
+      }),
+    })
+    const fit = new FitAddon()
+    // Use the installed addon's calculation, including its scrollbar allowance.
+    // An exact cell multiple leaves no rounding remainder to hide an overlap.
+    fit.activate({ element, options: { scrollback: 10_000 }, _core: {
+      _renderService: { dimensions: { css: { cell: { width: 8, height: 16 } } } },
+    } } as unknown as Terminal)
+    const cols = fit.proposeDimensions()!.cols
+    expect(cols).toBe(100)
+    expect(822 - cols * 8).toBeGreaterThanOrEqual(width)
+  })
+})
 
 describe('theme blocks', () => {
   it('exist', () => {
