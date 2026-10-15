@@ -27189,3 +27189,30 @@ Git fetch, push or deployment.
 All conflict resolutions are staged. The merge is not committed yet: the task
 requires the tree to compile before a merge commit, and the missing frontend
 dependencies prevent the required TypeScript check.
+
+### 2026-10-16 — S3 review: the frontend, a production copy, the browser
+
+The worktree had no `web/node_modules`; the dependency set is unchanged from
+`ffa2574` (the lock file is identical), so the review linked the main
+checkout's. `tsc -b` passed. The full Vitest suite found one failure, upstream's
+`enter.test.ts`: Pantheon's home chat composer tested `key === 'Enter'` by
+hand. It already skipped composing keys, so this was the rule rather than a
+bug; it now calls `isEnter`. After that the merge was committed, and with the
+fixes below Vitest passed 113 files, 1094 tests.
+
+A copy of the production database (taken through SQLite's backup API, schema
+37, 52 tables) opened with this build went to 42: no table lost, no row count
+changed, ten plugin tables added, five sessions and eleven projects listed, and
+every session has `summary`, `progress` (-1), `labels` and `archive_note`.
+
+Browser checks against the rebuilt binary: `check:terminal` 13 passed,
+`check:stress` 0 FAIL (local echo 49 ms after the flood). `check:plugins` failed
+once on "the empty state is not shown": the page chunk is loaded on demand in
+Pantheon, and the check read visibility the instant the URL changed. It now
+waits for the element; 31 passed. `check:render` stopped at the drawer: on a
+phone the terminal's scroll rail (z-index 12, meant against xterm's 11) was
+compared with the drawer scrim (z-10) because the terminal box made no stacking
+context, so a tap beside the open drawer scrolled the terminal instead of
+closing it. That was Pantheon's own bug, found by upstream's new check; the
+terminal root is now `isolate`. Render then passed 39 with the same two
+clipboard failures it had before the merge.
