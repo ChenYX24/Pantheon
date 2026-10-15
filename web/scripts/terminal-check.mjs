@@ -301,7 +301,8 @@ try {
       return fixture.exposed
     }), [])
     assert.equal(await overlay().textContent(), '')
-    assert.equal(await page.evaluate(() => fixture.term.buffer.active.getLine(1).translateToString(true)), 'Password:')
+    assert.equal(await page.evaluate(() => fixture.term.buffer.active.getLine(1).translateToString(true)), 'Password: ',
+      'only the prompt the server wrote; a written space is content, so trimRight keeps it')
     assert.deepEqual(await sentBytes(), bytesOf('abse'))
   })
 
@@ -322,7 +323,7 @@ try {
     }, input)
     assert.deepEqual(await sentBytes(), bytesOf(input.join('')))
     assert.equal(await overlay().textContent(), '')
-    assert.equal(await page.evaluate(() => fixture.term.buffer.active.getLine(0).translateToString(true)), '$')
+    assert.equal(await page.evaluate(() => fixture.term.buffer.active.getLine(0).translateToString(true)), '$ ')
   })
 
   await check('even a one-character browser paste clears prediction and is sent unchanged', async () => {
