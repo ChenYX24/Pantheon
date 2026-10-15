@@ -52,6 +52,14 @@ import (
 // program that it updates.
 const Repo = "jiangmuran/vibepanel"
 
+// ChannelEnabled is false for Pantheon: upstream binaries do not carry its
+// migrations. Updates belong to the deployment runbook, including rollback,
+// and cannot be enabled by a setting, flag or environment variable.
+const ChannelEnabled = false
+
+// ErrManaged is shared by the HTTP and service upgrade entry points.
+var ErrManaged = errors.New("this build is updated by its deployment runbook, not from upstream vibepanel releases")
+
 // maxArchive bounds what will be pulled down.
 //
 // The release archives are a few megabytes; 128 MiB is far above anything real

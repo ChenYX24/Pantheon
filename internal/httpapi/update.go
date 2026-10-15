@@ -140,7 +140,11 @@ const restartGrace = 3 * time.Minute
 type updateStatus struct {
 	Current  string `json:"current"`
 	Platform string `json:"platform"`
-	// AutoCheck is the setting. Checking is whether a check is in flight now,
+	// Managed builds have no self-update channel, regardless of saved checks
+	// or the auto-check setting left by an earlier binary.
+	Managed bool `json:"managed,omitempty"`
+	// AutoCheck is the effective setting, false without a channel.
+	// Checking is whether a check is in flight now,
 	// so a page that arrives during one can say so rather than "never".
 	AutoCheck bool  `json:"autoCheck"`
 	Checking  bool  `json:"checking"`
@@ -183,8 +187,18 @@ type updateState struct {
 	job      *updateJob
 }
 
+func (s *Server) updateChannelOn() bool {
+	if s.updateChannel != nil {
+		return *s.updateChannel
+	}
+	return selfupdate.ChannelEnabled
+}
+
 // lastCheck is the record, read from the database the first time.
 func (s *Server) lastCheck(ctx context.Context) *checkRecord {
+	if !s.updateChannelOn() {
+		return nil
+	}
 	u := &s.updates
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -202,6 +216,9 @@ func (s *Server) lastCheck(ctx context.Context) *checkRecord {
 
 // autoCheckOn reads the setting. Absent is on; see updateAutoCheckKey.
 func (s *Server) autoCheckOn(ctx context.Context) bool {
+	if !s.updateChannelOn() {
+		return false
+	}
 	v, err := s.DB.GetSetting(ctx, updateAutoCheckKey, "1")
 	return err != nil || v != "0"
 }
@@ -209,6 +226,9 @@ func (s *Server) autoCheckOn(ctx context.Context) bool {
 // checkNow asks GitHub, once, however many callers arrive at the same time,
 // and records the answer.
 func (s *Server) checkNow(ctx context.Context) *checkRecord {
+	if !s.updateChannelOn() {
+		return nil
+	}
 	u := &s.updates
 	u.mu.Lock()
 	if u.inflight != nil {
@@ -316,6 +336,9 @@ func (s *Server) editJob(f func(j *updateJob)) {
 // this panel would update; the background poll does not, because the answer
 // runs sudo and a poll that runs sudo every minute is a journal full of it.
 func (s *Server) statusView(ctx context.Context, rec *checkRecord, probe bool) updateStatus {
+	if !s.updateChannelOn() {
+		return updateStatus{Current: version.Version, Platform: selfupdate.Platform(), Managed: true}
+	}
 	u := &s.updates
 	u.mu.Lock()
 	checking := u.inflight != nil
@@ -404,6 +427,10 @@ func (s *Server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 
 // handlePutUpdateSettings turns the automatic check on or off.
 func (s *Server) handlePutUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.updateChannelOn() {
+		writeErr(w, http.StatusConflict, selfupdate.ErrManaged.Error())
+		return
+	}
 	var req struct {
 		AutoCheck bool `json:"autoCheck"`
 	}
@@ -433,6 +460,10 @@ func (s *Server) handlePutUpdateSettings(w http.ResponseWriter, r *http.Request)
 // page checks again, because what was confirmed is not what would be
 // installed.
 func (s *Server) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if !s.updateChannelOn() {
+		writeErr(w, http.StatusConflict, selfupdate.ErrManaged.Error())
+		return
+	}
 	// The body carries a password only when one is needed, and it is read
 	// before anything else so that it is in memory for the shortest time this
 	// handler can arrange.

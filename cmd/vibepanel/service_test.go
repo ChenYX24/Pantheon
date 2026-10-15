@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jiangmuran/vibepanel/internal/selfupdate"
 )
 
 // The management command is a mapping and nothing else, which is why plan() is
@@ -204,7 +207,7 @@ func TestUpgradeWorksWithNoServiceInstalled(t *testing.T) {
 	// installed — it is what `vibepanel service` offers somebody who ran the
 	// binary from a tarball and never installed a unit.
 	none := detectService("linux", t.TempDir(), t.TempDir(), "1000")
-	steps, err := plan(none, "upgrade", svcOpts{})
+	steps, err := planWithUpdateChannel(none, "upgrade", svcOpts{}, true)
 	if err != nil {
 		t.Fatalf("upgrade with nothing installed: %v", err)
 	}
@@ -231,7 +234,7 @@ func TestUpgradeSpeaksOnStdoutBeforeTheNetwork(t *testing.T) {
 	}
 	old := os.Stdout
 	os.Stdout = w
-	runErr := cmdService([]string{"upgrade", "--dry-run"})
+	runErr := cmdServiceWithUpdateChannel([]string{"upgrade", "--dry-run"}, true)
 	os.Stdout = old
 	w.Close()
 	out, _ := io.ReadAll(r)
@@ -265,8 +268,45 @@ func TestEveryDocumentedServiceCommandIsHandled(t *testing.T) {
 			// own test below.
 			continue
 		}
-		if _, err := plan(tgt, sub, svcOpts{}); err != nil {
+		if _, err := planWithUpdateChannel(tgt, sub, svcOpts{}, true); err != nil {
 			t.Errorf("`vibepanel service %s` is offered in --help and nothing plans it: %v", sub, err)
+		}
+	}
+}
+
+func TestPlanManagedUpgradeHasNoSteps(t *testing.T) {
+	for _, kind := range []svcKind{svcNone, svcUser, svcSystem, svcAgent} {
+		steps, err := plan(svcTarget{Kind: kind}, "upgrade", svcOpts{})
+		if !errors.Is(err, selfupdate.ErrManaged) || len(steps) != 0 {
+			t.Errorf("%s: steps=%v err=%v, want the managed refusal without curl or sh", kind, steps, err)
+		}
+	}
+}
+
+func TestServiceManagedUpgradeRefusesBeforeTheInstaller(t *testing.T) {
+	// A regressed guard must fail this test without fetching a real installer.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "sh"), []byte("#!/bin/sh\nexit 97\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	for _, args := range [][]string{{"upgrade"}, {"upgrade", "--dry-run"}, {"--dry-run", "upgrade"}} {
+		if err := cmdService(args); !errors.Is(err, selfupdate.ErrManaged) {
+			t.Errorf("service %v: %v, want the managed refusal", args, err)
+		}
+	}
+}
+
+func TestPlanNoServicePointsToTheDeploymentRunbook(t *testing.T) {
+	for _, sub := range []string{"status", "start", "stop", "restart", "logs", "uninstall"} {
+		steps, err := plan(svcTarget{Kind: svcNone, Unit: "/missing/vibepanel.service"}, sub, svcOpts{})
+		if err == nil || len(steps) != 0 {
+			t.Fatalf("%s: steps=%v err=%v, want a missing-service explanation", sub, steps, err)
+		}
+		said := err.Error()
+		if !strings.Contains(said, "no vibepanel service is installed") || !strings.Contains(said, "docs/runbook.md") ||
+			strings.Contains(said, "curl") || strings.Contains(said, "install.sh") {
+			t.Errorf("%s: unsafe or incomplete installation hint: %s", sub, said)
 		}
 	}
 }

@@ -2,6 +2,19 @@
 
 What to check when a running deployment misbehaves.
 
+## Pantheon updates
+
+Pantheon is updated through its deployment script and release runbook, including
+rollback. Upstream vibepanel releases do not carry Pantheon's migrations. Use
+that deployment procedure for installation as well when no service is installed;
+do not run the upstream installer over a Pantheon installation.
+
+The update section reports that this build is managed, and `vibepanel service
+upgrade` refuses. This is a compiled policy, not an auto-check preference. An
+older saved upstream release is ignored without changing the database schema.
+The installer and upgrade advice elsewhere in this runbook describes upstream
+builds with a self-update channel.
+
 ## First, always
 
 ```sh

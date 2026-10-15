@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/jiangmuran/vibepanel/internal/selfupdate"
 )
 
 // The management command: everything a person does to a vibepanel install
@@ -236,6 +238,11 @@ const upgradeBanner = "vibepanel: handing over to the installer"
 
 // plan is the whole mapping, in one place, as a pure function.
 func plan(t svcTarget, sub string, o svcOpts) ([]step, error) {
+	return planWithUpdateChannel(t, sub, o, selfupdate.ChannelEnabled)
+}
+
+// Tests enable the upstream path explicitly; the CLI takes the compiled policy.
+func planWithUpdateChannel(t svcTarget, sub string, o svcOpts, updateChannel bool) ([]step, error) {
 	lines := o.Lines
 	if lines <= 0 {
 		lines = 40
@@ -244,6 +251,9 @@ func plan(t svcTarget, sub string, o svcOpts) ([]step, error) {
 	// with no service installed at all, and it is also the one thing that is
 	// identical on every platform, because it hands over to the installer.
 	if sub == "upgrade" {
+		if !updateChannel {
+			return nil, selfupdate.ErrManaged
+		}
 		// The one-liner, run as the one-liner. --yes because the installer
 		// keeps whichever service kind is already installed on a bare re-run,
 		// so there is nothing left to ask, and because a prompt here would be
@@ -253,6 +263,11 @@ func plan(t svcTarget, sub string, o svcOpts) ([]step, error) {
 	}
 	switch t.Kind {
 	case svcNone:
+		if !updateChannel {
+			return nil, fmt.Errorf("no vibepanel service is installed for this account.\n"+
+				"       Looked for %s\n"+
+				"       See docs/runbook.md for deployment instructions", t.Unit)
+		}
 		return nil, fmt.Errorf("no vibepanel service is installed for this account.\n"+
 			"       Looked for %s\n"+
 			"       Install one:  curl -fsSL %s | sh", t.Unit, installURL)
@@ -403,6 +418,10 @@ func serviceUsage(out *os.File) {
 }
 
 func cmdService(args []string) error {
+	return cmdServiceWithUpdateChannel(args, selfupdate.ChannelEnabled)
+}
+
+func cmdServiceWithUpdateChannel(args []string, updateChannel bool) error {
 	// Before the shared flags, which do not know --as. Not in serviceCommands:
 	// nobody types it; the system unit runs it. See prepare.go.
 	if len(args) > 0 && args[0] == "prepare" {
@@ -443,6 +462,9 @@ func cmdService(args []string) error {
 		serviceUsage(os.Stdout)
 		return nil
 	}
+	if sub == "upgrade" && !updateChannel {
+		return selfupdate.ErrManaged
+	}
 
 	uid := strconv.Itoa(os.Getuid())
 	home, err := os.UserHomeDir()
@@ -465,7 +487,7 @@ func cmdService(args []string) error {
 		return fmt.Errorf("unknown command %q (try: vibepanel service --help)", sub)
 	}
 
-	steps, err := plan(t, sub, svcOpts{Lines: *lines, Follow: *follow})
+	steps, err := planWithUpdateChannel(t, sub, svcOpts{Lines: *lines, Follow: *follow}, updateChannel)
 	if err != nil {
 		return err
 	}

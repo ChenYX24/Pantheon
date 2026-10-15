@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -93,12 +94,33 @@ func tarballWith(t *testing.T, body string) []byte {
 	return buf.Bytes()
 }
 
+// Update routes need the real router and cookie lookup, but no terminal or
+// listener. Explicitly opt into upstream behavior so the compiled Pantheon
+// policy is still what an ordinary Server uses.
+func newUpdateTestServer(t *testing.T) *Server {
+	t.Helper()
+	srv := newInProcessTestServer(t)
+	on := true
+	srv.updateChannel = &on
+	srv.sudo = filepath.Join(srv.Cfg.DataDir, "no-sudo-in-tests")
+	srv.upgradeCommand = []string{"/bin/false"}
+	// Initialise before concurrent requests, as building the real router does.
+	srv.Challenges = newChallengeStore()
+	return srv
+}
+
+func updateRequest(t *testing.T, srv *Server, method, path, body string) (int, string) {
+	t.Helper()
+	w := homeRequest(t, srv, method, path, body, true)
+	return w.Code, w.Body.String()
+}
+
 // updatable is a test server that can install: a running version that
 // parses, a writable binary, and stand-ins for the two calls that would
 // otherwise replace and restart the test binary.
-func updatable(t *testing.T, gh *fakeGitHub) (*httptest.Server, *Server, *installLog) {
+func updatable(t *testing.T, gh *fakeGitHub) (*Server, *installLog) {
 	t.Helper()
-	ts, srv := newTestServer(t)
+	srv := newUpdateTestServer(t)
 	was := version.Version
 	version.Version = "v1.0.0"
 	t.Cleanup(func() { version.Version = was })
@@ -117,7 +139,7 @@ func updatable(t *testing.T, gh *fakeGitHub) (*httptest.Server, *Server, *instal
 	srv.restartCmd = func() (*exec.Cmd, error) {
 		return nil, errors.New("not running under systemd in this test")
 	}
-	return ts, srv, log
+	return srv, log
 }
 
 type installLog struct {
@@ -127,9 +149,9 @@ type installLog struct {
 	refuse  error
 }
 
-func status(t *testing.T, ts *httptest.Server) updateStatus {
+func status(t *testing.T, srv *Server) updateStatus {
 	t.Helper()
-	code, body := send(t, ts, http.MethodGet, "/api/update/status", "")
+	code, body := updateRequest(t, srv, http.MethodGet, "/api/update/status", "")
 	if code != http.StatusOK {
 		t.Fatalf("status: %d %s", code, body)
 	}
@@ -141,11 +163,11 @@ func status(t *testing.T, ts *httptest.Server) updateStatus {
 }
 
 // waitJob polls until the job leaves the active stages, and returns it.
-func waitJob(t *testing.T, ts *httptest.Server) *updateJob {
+func waitJob(t *testing.T, srv *Server) *updateJob {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		st := status(t, ts)
+		st := status(t, srv)
 		if st.Job != nil && !st.Job.active() {
 			return st.Job
 		}
@@ -163,9 +185,9 @@ func waitJob(t *testing.T, ts *httptest.Server) *updateJob {
 // and both GETs report it, stage by stage, with the bytes so far.
 func TestAnUpdateIsAJobThePageCanWatch(t *testing.T) {
 	gh := newFakeGitHub(t, "v99.0.0", strings.Repeat("new binary ", 50_000))
-	ts, _, log := updatable(t, gh)
+	srv, log := updatable(t, gh)
 
-	code, body := send(t, ts, http.MethodPost, "/api/update", `{"expected":"v99.0.0"}`)
+	code, body := updateRequest(t, srv, http.MethodPost, "/api/update", `{"expected":"v99.0.0"}`)
 	if code != http.StatusAccepted {
 		t.Fatalf("apply: %d %s", code, body)
 	}
@@ -179,7 +201,7 @@ func TestAnUpdateIsAJobThePageCanWatch(t *testing.T) {
 		t.Errorf("the job answered with is %+v", started.Job)
 	}
 
-	job := waitJob(t, ts)
+	job := waitJob(t, srv)
 	if job.Stage != "installed" {
 		t.Fatalf("job = %+v, want installed (this test's restart stand-in refuses)", job)
 	}
@@ -202,7 +224,7 @@ func TestAnUpdateIsAJobThePageCanWatch(t *testing.T) {
 	}
 
 	// Recorded, with the version, for the activity log.
-	code, body = send(t, ts, http.MethodGet, "/api/settings/audit", "")
+	code, body = updateRequest(t, srv, http.MethodGet, "/api/settings/audit", "")
 	if code != http.StatusOK || !strings.Contains(body, `"update.installed"`) || !strings.Contains(body, "v99.0.0") {
 		t.Errorf("the install is not in the audit log: %d %s", code, body)
 	}
@@ -212,13 +234,13 @@ func TestAnUpdateIsAJobThePageCanWatch(t *testing.T) {
 func TestASecondPressDuringAnUpdateIsRefused(t *testing.T) {
 	gh := newFakeGitHub(t, "v99.0.0", "new")
 	gh.hold = make(chan struct{})
-	ts, _, _ := updatable(t, gh)
+	srv, _ := updatable(t, gh)
 
-	code, body := send(t, ts, http.MethodPost, "/api/update", "")
+	code, body := updateRequest(t, srv, http.MethodPost, "/api/update", "")
 	if code != http.StatusAccepted {
 		t.Fatalf("first apply: %d %s", code, body)
 	}
-	code, body = send(t, ts, http.MethodPost, "/api/update", "")
+	code, body = updateRequest(t, srv, http.MethodPost, "/api/update", "")
 	if code != http.StatusConflict || !strings.Contains(body, `"reason":"busy"`) {
 		t.Errorf("second apply: %d %s, want 409 busy", code, body)
 	}
@@ -226,11 +248,11 @@ func TestASecondPressDuringAnUpdateIsRefused(t *testing.T) {
 		t.Errorf("the refusal does not carry the job the page should be watching: %s", body)
 	}
 	// And the status says so too, for a tab that did not press anything.
-	if st := status(t, ts); st.Job == nil || st.Job.Stage != "downloading" {
+	if st := status(t, srv); st.Job == nil || st.Job.Stage != "downloading" {
 		t.Errorf("status while downloading = %+v", st.Job)
 	}
 	close(gh.hold)
-	if job := waitJob(t, ts); job.Stage != "installed" {
+	if job := waitJob(t, srv); job.Stage != "installed" {
 		t.Errorf("after the hold: %+v", job)
 	}
 }
@@ -243,9 +265,9 @@ func TestASecondPressDuringAnUpdateIsRefused(t *testing.T) {
 // showed; a mismatch is a 409 the page answers by checking again.
 func TestTheVersionConfirmedIsTheVersionInstalled(t *testing.T) {
 	gh := newFakeGitHub(t, "v99.0.0", "new")
-	ts, srv, log := updatable(t, gh)
+	srv, log := updatable(t, gh)
 
-	code, body := send(t, ts, http.MethodPost, "/api/update", `{"expected":"v98.0.0"}`)
+	code, body := updateRequest(t, srv, http.MethodPost, "/api/update", `{"expected":"v98.0.0"}`)
 	if code != http.StatusConflict || !strings.Contains(body, `"reason":"changed"`) {
 		t.Fatalf("a stale expected version: %d %s, want 409 changed", code, body)
 	}
@@ -267,7 +289,7 @@ func TestTheVersionConfirmedIsTheVersionInstalled(t *testing.T) {
 	was := version.Version
 	version.Version = "v99.0.0"
 	defer func() { version.Version = was }()
-	code, body = send(t, ts, http.MethodPost, "/api/update", `{"expected":"v99.0.0"}`)
+	code, body = updateRequest(t, srv, http.MethodPost, "/api/update", `{"expected":"v99.0.0"}`)
 	if code != http.StatusConflict || !strings.Contains(body, "nothing newer") {
 		t.Errorf("up to date: %d %s, want 409 nothing newer", code, body)
 	}
@@ -279,11 +301,11 @@ func TestAFailedUpdateSaysWhichStepFailed(t *testing.T) {
 	t.Run("checksum", func(t *testing.T) {
 		gh := newFakeGitHub(t, "v99.0.0", "new")
 		gh.sum = strings.Repeat("0", 64)
-		ts, _, log := updatable(t, gh)
-		if code, body := send(t, ts, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
+		srv, log := updatable(t, gh)
+		if code, body := updateRequest(t, srv, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
 			t.Fatalf("apply: %d %s", code, body)
 		}
-		job := waitJob(t, ts)
+		job := waitJob(t, srv)
 		if job.Stage != "failed" || job.Reason != "checksum" {
 			t.Errorf("job = %+v, want failed/checksum", job)
 		}
@@ -295,30 +317,30 @@ func TestAFailedUpdateSaysWhichStepFailed(t *testing.T) {
 	})
 	t.Run("verify", func(t *testing.T) {
 		gh := newFakeGitHub(t, "v99.0.0", "new")
-		ts, _, log := updatable(t, gh)
+		srv, log := updatable(t, gh)
 		log.refuse = fmt.Errorf("%w: exec format error", selfupdate.ErrWillNotRun)
-		if code, body := send(t, ts, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
+		if code, body := updateRequest(t, srv, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
 			t.Fatalf("apply: %d %s", code, body)
 		}
-		job := waitJob(t, ts)
+		job := waitJob(t, srv)
 		if job.Stage != "failed" || job.Reason != "verify" || !strings.Contains(job.Error, "exec format") {
 			t.Errorf("job = %+v, want failed/verify with the binary's complaint", job)
 		}
 	})
 	t.Run("install", func(t *testing.T) {
 		gh := newFakeGitHub(t, "v99.0.0", "new")
-		ts, _, log := updatable(t, gh)
+		srv, log := updatable(t, gh)
 		log.refuse = errors.New("rename: read-only file system")
-		if code, body := send(t, ts, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
+		if code, body := updateRequest(t, srv, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
 			t.Fatalf("apply: %d %s", code, body)
 		}
-		if job := waitJob(t, ts); job.Stage != "failed" || job.Reason != "install" {
+		if job := waitJob(t, srv); job.Stage != "failed" || job.Reason != "install" {
 			t.Errorf("job = %+v, want failed/install", job)
 		}
 	})
 	t.Run("network", func(t *testing.T) {
 		gh := newFakeGitHub(t, "v99.0.0", "new")
-		ts, srv, _ := updatable(t, gh)
+		srv, _ := updatable(t, gh)
 		// The release is announced and then the archive is gone: a 404 on
 		// the download, not a failure to reach GitHub.
 		gh.srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -330,26 +352,26 @@ func TestAFailedUpdateSaysWhichStepFailed(t *testing.T) {
 				selfupdate.AssetName("v99.0.0"), gh.srv.URL+"/dl/x")
 		})
 		srv.updates = updateState{}
-		if code, body := send(t, ts, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
+		if code, body := updateRequest(t, srv, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
 			t.Fatalf("apply: %d %s", code, body)
 		}
-		if job := waitJob(t, ts); job.Stage != "failed" || job.Reason != "network" {
+		if job := waitJob(t, srv); job.Stage != "failed" || job.Reason != "network" {
 			t.Errorf("job = %+v, want failed/network", job)
 		}
 	})
 	// A failed job does not stand in the way of the next press.
 	gh := newFakeGitHub(t, "v99.0.0", "new")
-	ts, _, log := updatable(t, gh)
+	srv, log := updatable(t, gh)
 	log.refuse = errors.New("no")
-	send(t, ts, http.MethodPost, "/api/update", "")
-	waitJob(t, ts)
+	updateRequest(t, srv, http.MethodPost, "/api/update", "")
+	waitJob(t, srv)
 	log.mu.Lock()
 	log.refuse = nil
 	log.mu.Unlock()
-	if code, body := send(t, ts, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
+	if code, body := updateRequest(t, srv, http.MethodPost, "/api/update", ""); code != http.StatusAccepted {
 		t.Errorf("after a failure: %d %s, want the next press to run", code, body)
 	}
-	waitJob(t, ts)
+	waitJob(t, srv)
 }
 
 // The panel asks on its own only because a page asked and the answer was
@@ -359,18 +381,18 @@ func TestAFailedUpdateSaysWhichStepFailed(t *testing.T) {
 // count of questions to GitHub is the whole assertion.
 func TestTheStatusEndpointAsksOnItsOwnOnlyWhenTheAnswerIsOld(t *testing.T) {
 	gh := newFakeGitHub(t, "v99.0.0", "new")
-	ts, srv, _ := updatable(t, gh)
+	srv, _ := updatable(t, gh)
 
 	// Nothing checked yet: the first status starts a check in the background
 	// and answers at once.
-	st := status(t, ts)
+	st := status(t, srv)
 	if st.CheckedAt != 0 && st.Version != "" && !st.Checking {
 		t.Errorf("the first status waited for GitHub: %+v", st)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for st.Version == "" && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
-		st = status(t, ts)
+		st = status(t, srv)
 	}
 	if st.Version != "v99.0.0" || !st.Newer || st.CheckedAt == 0 {
 		t.Fatalf("after the background check: %+v", st)
@@ -387,7 +409,7 @@ func TestTheStatusEndpointAsksOnItsOwnOnlyWhenTheAnswerIsOld(t *testing.T) {
 
 	// Fresh: asked again and again, GitHub hears nothing.
 	for range 5 {
-		status(t, ts)
+		status(t, srv)
 	}
 	if n := gh.hits.Load(); n != 1 {
 		t.Errorf("a fresh answer was refreshed: %d hits", n)
@@ -398,7 +420,7 @@ func TestTheStatusEndpointAsksOnItsOwnOnlyWhenTheAnswerIsOld(t *testing.T) {
 	srv.updates.last.At = time.Now().Add(-autoCheckEvery - time.Minute).Unix()
 	srv.updates.mu.Unlock()
 	for range 5 {
-		status(t, ts)
+		status(t, srv)
 	}
 	deadline = time.Now().Add(5 * time.Second)
 	for gh.hits.Load() < 2 && time.Now().Before(deadline) {
@@ -411,13 +433,13 @@ func TestTheStatusEndpointAsksOnItsOwnOnlyWhenTheAnswerIsOld(t *testing.T) {
 	}
 
 	// Off: old again, and nobody asks.
-	if code, body := send(t, ts, http.MethodPut, "/api/update/settings", `{"autoCheck":false}`); code != http.StatusOK {
+	if code, body := updateRequest(t, srv, http.MethodPut, "/api/update/settings", `{"autoCheck":false}`); code != http.StatusOK {
 		t.Fatalf("turning it off: %d %s", code, body)
 	}
 	srv.updates.mu.Lock()
 	srv.updates.last.At = time.Now().Add(-24 * time.Hour).Unix()
 	srv.updates.mu.Unlock()
-	st = status(t, ts)
+	st = status(t, srv)
 	time.Sleep(50 * time.Millisecond)
 	if st.AutoCheck {
 		t.Error("the setting did not turn off")
@@ -431,7 +453,7 @@ func TestTheStatusEndpointAsksOnItsOwnOnlyWhenTheAnswerIsOld(t *testing.T) {
 	}
 	// And the button still works with it off: that is what the setting
 	// leaves you with, not nothing.
-	if code, body := send(t, ts, http.MethodGet, "/api/update", ""); code != http.StatusOK {
+	if code, body := updateRequest(t, srv, http.MethodGet, "/api/update", ""); code != http.StatusOK {
 		t.Errorf("the button with auto-check off: %d %s", code, body)
 	}
 	if n := gh.hits.Load(); n != 3 {
@@ -448,18 +470,18 @@ func TestTheStatusEndpointAsksOnItsOwnOnlyWhenTheAnswerIsOld(t *testing.T) {
 // now rather than what ran when the answer was recorded.
 func TestTheLastCheckOutlivesTheProcess(t *testing.T) {
 	gh := newFakeGitHub(t, "v99.0.0", "new")
-	ts, srv, _ := updatable(t, gh)
-	if code, body := send(t, ts, http.MethodGet, "/api/update", ""); code != http.StatusOK {
+	srv, _ := updatable(t, gh)
+	if code, body := updateRequest(t, srv, http.MethodGet, "/api/update", ""); code != http.StatusOK {
 		t.Fatalf("check: %d %s", code, body)
 	}
-	at := status(t, ts).CheckedAt
+	at := status(t, srv).CheckedAt
 	if at == 0 {
 		t.Fatal("the check was not recorded")
 	}
 
 	// A new process: the in-memory state is gone and the database is not.
 	srv.updates = updateState{}
-	st := status(t, ts)
+	st := status(t, srv)
 	if st.CheckedAt != at || st.Version != "v99.0.0" {
 		t.Errorf("after a restart the record is %+v, want the one written before it", st)
 	}
@@ -470,7 +492,7 @@ func TestTheLastCheckOutlivesTheProcess(t *testing.T) {
 	// And after the upgrade it announced, the same record says "not newer".
 	version.Version = "v99.0.0"
 	srv.updates = updateState{}
-	st = status(t, ts)
+	st = status(t, srv)
 	if st.Newer {
 		t.Errorf("the record still says v99.0.0 is newer than the v99.0.0 that is running")
 	}
@@ -488,13 +510,13 @@ func TestConcurrentChecksAreOneQuestion(t *testing.T) {
 	// questions for eight requests -- single-flight working, with nothing to
 	// fly with. Half a second is the window they have to overlap in.
 	gh.slow = 500 * time.Millisecond
-	ts, _, _ := updatable(t, gh)
+	srv, _ := updatable(t, gh)
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			send(t, ts, http.MethodGet, "/api/update", "")
+			updateRequest(t, srv, http.MethodGet, "/api/update", "")
 		}()
 	}
 	wg.Wait()

@@ -1056,6 +1056,14 @@ rather than a stored one — the moment to test is before saving — and answers
 ### `PUT /api/update/settings`
 ### `POST /api/update`
 
+Pantheon compiles `selfupdate.ChannelEnabled = false`. Both `GET`s return
+`200` with `managed: true`, the running `current` version and `platform`, and
+`autoCheck`, `checking` and `newer` all false. They make no upstream request
+and omit any saved release or job. `PUT` and `POST` return `409`, explaining
+that this build is updated by its deployment runbook. A saved setting cannot
+enable the channel. The behavior below applies only to builds with the channel
+compiled in.
+
 Both `GET`s answer the same object: the running version and platform, what
 GitHub last said and when (`version`, `newer`, `url`, `notes`, `publishedAt`,
 `asset`, `checkedAt`), whether the automatic check is on, and `job` — the apply

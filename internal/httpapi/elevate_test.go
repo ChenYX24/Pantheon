@@ -346,7 +346,6 @@ const (
 )
 
 type sudoRig struct {
-	ts  *httptest.Server
 	srv *Server
 	ran string
 	log string
@@ -356,7 +355,7 @@ type sudoRig struct {
 // sudo is the fake above behaving as `variant` of `impl`.
 func newSudoRig(t *testing.T, impl, variant string) *sudoRig {
 	t.Helper()
-	ts, srv := newTestServer(t)
+	srv := newUpdateTestServer(t)
 	srv.installable = func() error { return fmt.Errorf("%w: /usr/local/bin", selfupdate.ErrNotWritable) }
 	self, err := os.Executable()
 	if err != nil {
@@ -365,7 +364,7 @@ func newSudoRig(t *testing.T, impl, variant string) *sudoRig {
 	srv.sudo = self
 
 	dir := t.TempDir()
-	rig := &sudoRig{ts: ts, srv: srv, ran: filepath.Join(dir, "ran"), log: filepath.Join(dir, "sudo.log")}
+	rig := &sudoRig{srv: srv, ran: filepath.Join(dir, "ran"), log: filepath.Join(dir, "sudo.log")}
 	// The upgrade prints first, like `service upgrade`, and leaves a mark.
 	srv.upgradeCommand = []string{"/bin/sh", "-c", `echo "vibepanel: handing over to the installer"; echo ran >> "$VP_FAKE_RAN"`}
 
@@ -402,7 +401,7 @@ func (r *sudoRig) apply(t *testing.T, password string) applyAnswer {
 	if password != "" {
 		body = `{"password":` + strconv.Quote(password) + `}`
 	}
-	code, raw := send(t, r.ts, http.MethodPost, "/api/update", body)
+	code, raw := updateRequest(t, r.srv, http.MethodPost, "/api/update", body)
 	var a applyAnswer
 	if err := json.Unmarshal([]byte(raw), &a); err != nil {
 		t.Fatalf("apply answered %d with something that is not JSON: %s", code, raw)
@@ -481,9 +480,6 @@ func (r *sudoRig) checkRecords(t *testing.T) {
 	}
 }
 
-// The test server's tmux socket is named after the test, subtests included;
-// tmux.BoundSocketName keeps that name inside sun_path, so these subtest names
-// no longer have to be short to leave tmux room to bind.
 func TestElevatedUpgrade(t *testing.T) {
 	for _, impl := range []string{"classic", "sudo-rs"} {
 		t.Run(impl, func(t *testing.T) {
@@ -648,7 +644,7 @@ func TestAProcessThatCannotGainPrivilegesIsNotOfferedSudo(t *testing.T) {
 	cannotElevate = func() bool { return true }
 	t.Cleanup(func() { cannotElevate = old })
 
-	code, raw := send(t, r.ts, http.MethodGet, "/api/update", "")
+	code, raw := updateRequest(t, r.srv, http.MethodGet, "/api/update", "")
 	var out map[string]any
 	if err := json.Unmarshal([]byte(raw), &out); err != nil || code != http.StatusOK {
 		t.Fatalf("check: %d %s", code, raw)
@@ -668,9 +664,9 @@ func TestAProcessThatCannotGainPrivilegesIsNotOfferedSudo(t *testing.T) {
 // named for the machine: doas where that is what there is, su where there is
 // neither.
 func TestWithoutSudoThePageOffersTheCommandThatExists(t *testing.T) {
-	ts, srv := newTestServer(t)
+	srv := newUpdateTestServer(t)
 	srv.installable = func() error { return fmt.Errorf("%w: /usr/local/bin", selfupdate.ErrNotWritable) }
-	if a := (&sudoRig{ts: ts, srv: srv}).apply(t, "anything"); a.code != http.StatusConflict {
+	if a := (&sudoRig{srv: srv}).apply(t, "anything"); a.code != http.StatusConflict {
 		t.Errorf("no sudo: %d %q, want 409", a.code, a.Error)
 	}
 
@@ -703,7 +699,7 @@ func TestTheCheckSaysWhetherSudoWantsAPassword(t *testing.T) {
 		r := newSudoRig(t, "sudo-rs", "nopasswd")
 		r.srv.installable = func() error { return errors.New("no space left on device") }
 		r.srv.Updater.API = gh.URL
-		code, raw := send(t, r.ts, http.MethodGet, "/api/update", "")
+		code, raw := updateRequest(t, r.srv, http.MethodGet, "/api/update", "")
 		var out map[string]any
 		if err := json.Unmarshal([]byte(raw), &out); err != nil || code != http.StatusOK {
 			t.Fatalf("check: %d %s", code, raw)
@@ -720,7 +716,7 @@ func TestTheCheckSaysWhetherSudoWantsAPassword(t *testing.T) {
 		t.Run(tc.variant, func(t *testing.T) {
 			r := newSudoRig(t, "sudo-rs", tc.variant)
 			r.srv.Updater.API = gh.URL
-			code, raw := send(t, r.ts, http.MethodGet, "/api/update", "")
+			code, raw := updateRequest(t, r.srv, http.MethodGet, "/api/update", "")
 			var out map[string]any
 			if err := json.Unmarshal([]byte(raw), &out); err != nil || code != http.StatusOK {
 				t.Fatalf("check: %d %s", code, raw)
@@ -767,11 +763,11 @@ func TestElevatedUpgradeAgainstRealSudo(t *testing.T) {
 	}
 	userPW, rootPW := os.Getenv("VP_REAL_SUDO_USER_PW"), os.Getenv("VP_REAL_SUDO_ROOT_PW")
 
-	ts, srv := newTestServer(t)
+	srv := newUpdateTestServer(t)
 	srv.installable = func() error { return fmt.Errorf("%w: /usr/local/bin", selfupdate.ErrNotWritable) }
 	srv.sudo = sudo
 	srv.upgradeCommand = []string{"/opt/vp/upgrade"}
-	r := &sudoRig{ts: ts, srv: srv, ran: "/opt/vp/ran"}
+	r := &sudoRig{srv: srv, ran: "/opt/vp/ran"}
 
 	base := r.ranCount(t, 0)
 	ran := func(n int) {
