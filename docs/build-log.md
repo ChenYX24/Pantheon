@@ -25059,3 +25059,10 @@ asking, waiting or ending. Visibility and action transitions refresh the status;
 equal replies do not update state. The effect drops timers, listeners and late
 responses on cleanup. TypeScript and all 12 rollover tests passed, including
 fake-timer coverage for idle, completion, visibility and unmount.
+
+The terminal's home project-link lookup reads on mount and visibility instead
+of polling the full index. Home resources keep their polling intervals and
+explicit refresh API; background reads no longer flash loading, and equal JSON
+replies retain their data object. All callers were checked for loading and
+refresh use. TypeScript and 39 focused hook, polling and home rendering tests
+passed, including cancellation and unchanged error recovery.
