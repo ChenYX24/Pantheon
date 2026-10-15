@@ -10,6 +10,7 @@
     "test": "vitest run",
     "check:render": "node scripts/render-check.mjs",
     "check:stress": "node scripts/stress-check.mjs",
+    "check:terminal": "node scripts/terminal-check.mjs",
     "check:restart": "node scripts/restart-check.mjs",
     "check:scale": "node scripts/scale-check.mjs",
     "check:first-run": "node scripts/first-run-check.mjs",

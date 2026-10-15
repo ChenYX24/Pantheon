@@ -24986,3 +24986,33 @@ validation. Frontend dependencies were installed locally with
 `NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npm ci --ignore-scripts --cache ../.tmp/npm-cache`
 from `web/`; the lockfile is unchanged. An initial tsc attempt before dependencies
 were installed failed, then the installed compiler and full build passed.
+
+## 2026-10-15 — Keep terminal resizes in the output stream's order
+
+A report of overlapping terminal text and lag exposed three independently
+reproducible sizing errors. With the actual TerminalView and xterm parser in a
+browser, a passive 120-column viewer became 118 columns after fitting its
+max-content host; a size notification overtook queued writes and changed where
+their cursor movements landed; and a controller resized its local grid before
+a delayed server acknowledgement, while older output was still in flight.
+
+TerminalReplay now queues server sizes with the bytes they accompany, and
+discards obsolete queued sizes when a snapshot restarts. Showing a cached
+terminal only repaints it. The controlling viewer measures and proposes a size,
+then waits for the ordered server notification to resize xterm. Measurements
+are coalesced within a frame and repeated proposals are suppressed, including
+when an acknowledgement causes the layout effect to run again.
+
+`cd web && npm run check:terminal` exercises the real component and parser in
+an isolated browser, including a delayed acknowledgement and hide/show. The
+three sizing regressions failed before the change and passed afterwards.
+Queue tests cover disposal and a reconnect dropping obsolete size callbacks.
+These checks establish the sizing faults; they do not measure the reporting
+user's network latency or prove that every source of input lag is removed.
+
+Validation: the four browser regressions and 36 targeted unit tests passed,
+as did the changed TypeScript files' lint and `make -j1 build`. The real
+tmux/WebSocket stress check reported zero failures and warnings: 20,000 output
+lines in 0.8 seconds, working scrollback/reconnect, and a local keyboard echo
+of 47 ms after the flood. All checks ran serially in a bounded, low-priority
+user scope with disposable terminal sessions.

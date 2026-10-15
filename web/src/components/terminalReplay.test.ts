@@ -6,6 +6,7 @@ class FakeTerminal implements ReplayTerminal {
   writes: Uint8Array[] = []
   callbacks: Array<() => void> = []
   resets = 0
+  sizes: Array<[number, number]> = []
 
   write(data: Uint8Array, callback: () => void): void {
     this.writes.push(data)
@@ -14,6 +15,10 @@ class FakeTerminal implements ReplayTerminal {
 
   reset(): void {
     this.resets++
+  }
+
+  resize(cols: number, rows: number): void {
+    this.sizes.push([cols, rows])
   }
 
   finish(): void {
@@ -151,6 +156,48 @@ describe('TerminalReplay', () => {
     queue.enqueue(bytes(1), false)
     queue.enqueue(bytes(2), true)
     expect(term.writes).toHaveLength(0)
+  })
+
+  it('applies a resize after preceding output and before following output', () => {
+    const { term, queue } = setup()
+    let applied = false
+    queue.enqueue(bytes(1), false)
+    queue.resize(80, 24, () => { applied = true })
+    queue.enqueue(bytes(2), false)
+    expect(term.sizes).toEqual([])
+    expect(applied).toBe(false)
+    term.finish()
+    expect(term.sizes).toEqual([[80, 24]])
+    expect(applied).toBe(true)
+    expect(term.writes.map((w) => [...w])).toEqual([[1], [2]])
+  })
+
+  it('discards queued sizes and completion callbacks from an obsolete snapshot', () => {
+    const { term, queue, done } = setup()
+    let obsolete = false
+    queue.enqueue(bytes(1), true)
+    queue.resize(40, 10, () => { obsolete = true })
+    queue.restart()
+    queue.resize(120, 35, () => {})
+    term.finish()
+    expect(term.sizes).toEqual([[120, 35]])
+    expect(obsolete).toBe(false)
+    expect(done).toHaveLength(0)
+    queue.enqueue(bytes(2), true)
+    term.finish()
+    expect(done).toHaveLength(1)
+  })
+
+  it('does not resize or call back after disposal', () => {
+    const { term, queue } = setup()
+    let applied = false
+    queue.enqueue(bytes(1), false)
+    queue.resize(80, 24, () => { applied = true })
+    queue.dispose()
+    term.finish()
+    queue.resize(40, 10, () => { applied = true })
+    expect(term.sizes).toEqual([])
+    expect(applied).toBe(false)
   })
 })
 
