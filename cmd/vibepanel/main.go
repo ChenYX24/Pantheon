@@ -121,24 +121,36 @@ func init() {
 			defer stop()
 			return parthenon.Worker(ctx, args[0], nil)
 		},
-		"serve":   cmdServe,
-		"project": cmdProject,
-		"session": cmdSession,
-		"doctor":  cmdDoctor,
-		"hook":    cmdHook,
-		"tune":    cmdTune,
-		"service": cmdService,
-		"account": cmdAccount,
-		"page":    cmdPage,
-		"mcp":     cmdMCP,
-		"version": func([]string) error { fmt.Println("vibepanel", version.String()); return nil },
+		"serve":    cmdServe,
+		"project":  cmdProject,
+		"session":  cmdSession,
+		"doctor":   cmdDoctor,
+		"hook":     cmdHook,
+		"tune":     cmdTune,
+		"service":  cmdService,
+		"account":  cmdAccount,
+		"page":     cmdPage,
+		"plugin":   cmdPlugin,
+		"mcp":      cmdMCP,
+		"status":   cmdStatus,
+		"me":       cmdMe,
+		"note":     cmdNote,
+		"todo":     cmdTodo,
+		"token":    cmdToken,
+		"audit":    cmdAudit,
+		"settings": cmdSettings,
+		"version":  func([]string) error { fmt.Println("vibepanel", version.String()); return nil },
 	}
 }
 
 func run(args []string) error {
 	// Subcommands are matched before flag parsing so that `vibepanel project
 	// add --name x` can have its own flag set rather than fighting the global
-	// one.
+	// one. Two flags are the panel's rather than any command's, and a person
+	// puts them wherever they put them: `--data-dir` and `--tmux-socket`
+	// are lifted out of the arguments first and become the environment the
+	// configuration already reads, so every command sees them.
+	args = liftPanelFlags(args)
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, rest := args[0], args[1:]
 		run, ok := commands[cmd]
@@ -210,6 +222,15 @@ func cmdServe(args []string) error {
 		return err
 	}
 	defer unlock()
+
+	// Where this data directory's panel answers, for the command line
+	// (client.go): the CLI must never mistake another panel on the default
+	// port for this one, and a throwaway data directory with no panel must
+	// fall back to working on the database, not knock on whatever listens.
+	if err := os.WriteFile(panelURLPath(a.cfg.DataDir), []byte(a.cfg.LoopbackURL()+a.cfg.BasePath+"\n"), 0o600); err != nil {
+		logger.Warn("write panel.url", "err", err)
+	}
+	defer os.Remove(panelURLPath(a.cfg.DataDir)) //nolint:errcheck // best effort at exit
 
 	// Expired sign-ins are already refused — AuthSessionByToken filters on
 	// expires_at — so this is housekeeping rather than security. It is done at
@@ -509,11 +530,45 @@ func cmdServe(args []string) error {
 
 	// Shut the HTTP server down, then detach. Detaching is not the same as
 	// killing: every tmux session, and every agent inside it, keeps running.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_ = httpServer.Shutdown(shutdownCtx)
+	stopServing(httpServer, srv, 10*time.Second)
+	mgr.DetachAll()
+	if restarting {
+		fmt.Println("\nrestarting; tmux sessions keep running")
+		return errRestart
+	}
+	fmt.Println("\nstopped; tmux sessions keep running")
+	return nil
+}
 
-	// One last capture of every session, before detaching.
+// stopper is what stopServing needs from the server; an interface so the
+// order and the budgets can be tested without a panel.
+type stopper interface {
+	EndStreams()
+	StopPluginProcesses(context.Context)
+	ArchiveAll(context.Context)
+}
+
+// stopServing ends the HTTP server, the plugin processes and takes the last
+// capture of every pane, each within its own budget.
+//
+// They shared one budget, and an open plugin stream held Shutdown for all of
+// it -- Shutdown waits for requests without cancelling them -- so the two
+// steps after it ran on an expired context: plugin process groups were left
+// behind and the last capture was skipped. EndStreams is what lets Shutdown
+// finish with a frame open.
+func stopServing(httpServer *http.Server, srv stopper, budget time.Duration) {
+	step := func(run func(context.Context)) {
+		ctx, cancel := context.WithTimeout(context.Background(), budget)
+		defer cancel()
+		run(ctx)
+	}
+	httpServer.RegisterOnShutdown(srv.EndStreams)
+	step(func(ctx context.Context) { _ = httpServer.Shutdown(ctx) })
+	// Plugin processes are the panel's children on purpose (docs/plugins.md
+	// §5, rung 3): SIGTERM now, SIGKILL after the grace, before the panel
+	// goes. Sessions are untouched; they were never children.
+	step(srv.StopPluginProcesses)
+	// One last capture of every session, before the caller detaches.
 	//
 	// This is what makes an orderly reboot lossless. systemd stops the unit
 	// first and only then goes on to kill the tmux server, so the panel is the
@@ -523,16 +578,9 @@ func cmdServe(args []string) error {
 	//
 	// After Shutdown so no request is still writing, before DetachAll because
 	// capture-pane talks to tmux and not to our PTY, so the order only matters
-	// for tidiness. Bounded by the same context: a machine going down is not a
-	// place to block forever.
-	srv.ArchiveAll(shutdownCtx)
-	mgr.DetachAll()
-	if restarting {
-		fmt.Println("\nrestarting; tmux sessions keep running")
-		return errRestart
-	}
-	fmt.Println("\nstopped; tmux sessions keep running")
-	return nil
+	// for tidiness. Bounded: a machine going down is not a place to block
+	// forever.
+	step(srv.ArchiveAll)
 }
 
 // startResources builds the memory governor and ticks it once before
@@ -587,10 +635,68 @@ func startResources(ctx context.Context, a *app, srv *httpapi.Server, logger *sl
 
 // ─── project ──────────────────────────────────────────────────────────────
 
-func cmdProject(args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: vibepanel project <add|ls|rm|archive|restore> [args]")
+// liftPanelFlags takes --data-dir and --tmux-socket (either spelling, with
+// = or a following value) out of args and into the environment.
+func liftPanelFlags(args []string) []string {
+	out := make([]string, 0, len(args))
+	lift := map[string]string{"data-dir": "VIBEPANEL_DATA_DIR", "tmux-socket": "VIBEPANEL_TMUX_SOCKET"}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			return append(out, args[i:]...)
+		}
+		name, value, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		env, ok := lift[name]
+		if !ok || !strings.HasPrefix(a, "-") {
+			out = append(out, a)
+			continue
+		}
+		if !hasValue {
+			if i+1 >= len(args) {
+				out = append(out, a)
+				continue
+			}
+			i++
+			value = args[i]
+		}
+		_ = os.Setenv(env, value)
 	}
+	return out
+}
+
+// wantsHelp is the three spellings of "show me the usage".
+func wantsHelp(args []string) bool {
+	return len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help")
+}
+
+const projectUsage = `usage: vibepanel project <ls|add|rename|pin|unpin|order|archive|restore|rm> [args]
+
+  ls                        projects and archived projects
+  add <dir> [--name N]      register a directory
+  rename <project> <name>   a project is an id, a name, a name's start or a directory
+  pin | unpin <project>
+  order <p> <p> … | --auto  manual order, or back to by activity
+  archive | restore | rm <project>
+
+Through the running panel; ls, add, archive, restore and rm work on the
+database directly when it is not running.`
+
+func cmdProject(args []string) error {
+	if wantsHelp(args) {
+		fmt.Println(projectUsage)
+		return nil
+	}
+	if len(args) == 0 {
+		return errors.New(projectUsage)
+	}
+	// Through the running panel first (cli.go): the same handler the browser
+	// uses, audited, every open tab told. The switch below is the offline
+	// path for the subcommands that had one before the panel could be asked.
+	handled, offline, err := projectViaAPI(context.Background(), args[0], args[1:])
+	if handled {
+		return err
+	}
+	args = append([]string{args[0]}, offline...)
 	ctx := context.Background()
 	sub, rest := args[0], args[1:]
 
@@ -740,10 +846,40 @@ func cmdProject(args []string) error {
 
 // ─── session ──────────────────────────────────────────────────────────────
 
+const sessionUsage = `usage: vibepanel session <ls|new|rename|pin|unpin|state|restart|kill|send|screen|info|say|notify|attach|attachments|restore> [args]
+
+  ls                                   every session, with its state
+  new --project <p> [--title T] [-- cmd…]
+  rename <session> <title>             a session is an id, a title, or a title's start
+  pin | unpin <session>
+  state <session> <working|waiting|done>
+  restart <session>                    the same command again, in a new session
+  kill <session>
+  send <session> [text] [--enter]      type into it; text from stdin when none is given
+  screen <session>                     print its pane
+  info <session> summary|progress|labels|clear …   what the session says about itself
+  say <session> <text>                 a line in its messages, pushed by the chat rules
+  notify <session> <text> [--level L] [--choices a,b]   ring every page and phone
+  attach <session> <file> [--caption "..."]   a file into its attachments, and to the phone
+  attachments <session>                its attachments, with where to download them
+  restore                              rebuild the sessions a restart took
+
+Through the running panel; ls, new and kill work on the database and tmux
+directly when it is not running.`
+
 func cmdSession(args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: vibepanel session <new|ls|kill> [args]")
+	if wantsHelp(args) {
+		fmt.Println(sessionUsage)
+		return nil
 	}
+	if len(args) == 0 {
+		return errors.New(sessionUsage)
+	}
+	handled, offline, err := sessionViaAPI(context.Background(), args[0], args[1:])
+	if handled {
+		return err
+	}
+	args = append([]string{args[0]}, offline...)
 	ctx := context.Background()
 	sub, rest := args[0], args[1:]
 
@@ -807,7 +943,7 @@ func cmdSession(args []string) error {
 		if token != "" {
 			token = hooks.ReportToken(token, sid)
 		}
-		env := hooks.SessionEnv(sid, p.ID, a.cfg.LoopbackURL(), token)
+		env := hooks.SessionEnv(sid, p.ID, a.cfg.LoopbackURL()+a.cfg.BasePath, token)
 
 		// The same resolution the HTTP path does, through the same function.
 		// This path has already been the one that drifted — it built its own
@@ -1243,7 +1379,15 @@ func cmdDoctor(args []string) error {
 			// question is whether anything answers there, not whether the
 			// certificate is right -- and probing more strictly than the hook
 			// does would report a problem the hook does not have.
-			probeURL := cfg.LoopbackURL() + "/api/health"
+			// The data directory's own panel, where it said it answers;
+			// the configured loopback only when it did not say. On a
+			// machine with two panels the configured port is the other one,
+			// and this used to report its hook tokens as all stale.
+			probeBase := panelAddress(cfg.DataDir)
+			if probeBase == "" {
+				probeBase = cfg.LoopbackURL()
+			}
+			probeURL := probeBase + "/api/health"
 			probe := &http.Client{
 				Timeout: 3 * time.Second,
 				Transport: &http.Transport{

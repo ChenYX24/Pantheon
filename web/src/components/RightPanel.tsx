@@ -30,6 +30,8 @@ import {
   PANEL_MIN_WIDTH,
   PANEL_TABS,
   clampPanelWidth,
+  extTabParts,
+  isExtTab,
   paneControls,
   panelDensity,
   resizeStep,
@@ -59,6 +61,10 @@ import {
 import { StackedTab } from './StackedTab'
 import { PageLine } from './pages/PageLine'
 import { usePageFor } from './pages/usePages'
+import { PluginFrame } from './plugins/PluginFrame'
+import { pluginIcon } from './plugins/host'
+import type { ExtTabMeta } from './plugins/host'
+import { textIn } from './plugins/screen'
 import { PagePreview } from './pages/PagePreview'
 import { t, useLang, type Key } from '../i18n'
 
@@ -78,9 +84,19 @@ export type { PanelTab }
 // hover, and an aria-label is announced and never seen. A tab whose only name
 // is its glyph is a row of "button, button, button" to a screen reader, which
 // is what lib/names.mjs is watching for.
-const TABS: Record<PanelTab, { icon: typeof Activity; key: Key }> = {
+const TABS: Record<'files' | 'notes', { icon: typeof Activity; key: Key }> = {
   files: { icon: FolderTree, key: 'panel.files' },
   notes: { icon: NotebookPen, key: 'panel.notes' },
+}
+
+/** What the strip draws for a tab: the built-in's glyph and word, or a
+ *  plugin's icon and title (docs/plugins.md §5). */
+function tabMeta(tab: PanelTab, ext: ExtTabMeta[], lang: 'zh' | 'en'): { icon: typeof Activity; label: string } {
+  if (isExtTab(tab)) {
+    const meta = ext.find((x) => x.id === tab)
+    return { icon: pluginIcon(meta?.entry.spec.icon), label: meta ? textIn(meta.entry.spec.title, lang) : tab }
+  }
+  return { icon: TABS[tab].icon, label: t(TABS[tab].key) }
 }
 
 const DROP_LABEL: Record<DropKind, Key> = {
@@ -90,6 +106,12 @@ const DROP_LABEL: Record<DropKind, Key> = {
 }
 
 interface Props {
+  /**
+   * Where it sits. A column beside the terminal on a desktop; a sheet over the
+   * terminal in the tablet tier; the whole screen on a phone, which had no way
+   * to reach files, notes, git, the monitor or tokens at all.
+   */
+  placement?: 'column' | 'sheet' | 'fill'
   project: Project | null
   /** Every session, so the monitor can name what it is measuring. */
   sessions: Session[]
@@ -98,6 +120,8 @@ interface Props {
   /** How the column is divided. Owned and persisted by App; see panes.ts. */
   layout: PaneLayout
   onLayout: (next: PaneLayout) => void
+  /** The panes plugins add, in order after the built-ins. */
+  extTabs: ExtTabMeta[]
   /** Hand the keyboard back to the terminal after a pointer chose a tab. */
   onRefocus: () => void
   width: number
@@ -144,7 +168,9 @@ interface DragState {
 
 export function RightPanel(props: Props) {
   const { project, layout, width } = props
+  const placement = props.placement ?? 'column'
   useLang()
+  const order: PanelTab[] = [...PANEL_TABS, ...props.extTabs.map((x) => x.id)]
 
   const dragFrom = useRef<{ x: number; width: number } | null>(null)
   const [widthDragging, setWidthDragging] = useState(false)
@@ -426,6 +452,27 @@ export function RightPanel(props: Props) {
     // that belongs to no project is exactly the thing to be able to open when
     // none is selected -- which is where somebody writes down what they are
     // about to go and do.
+    const ext = isExtTab(tab) ? props.extTabs.find((x) => x.id === tab) : undefined
+    if (isExtTab(tab)) {
+      // A plugin's pane: its frame fills the pane and no dock below it. The
+      // dock is the panel's own two blocks on the panel's own two tabs; a
+      // plugin's pane is the plugin's.
+      const parts = extTabParts(tab)
+      return ext ? (
+        <PluginFrame
+          key={tab}
+          plugin={ext.entry.plugin}
+          entry={ext.entry.spec.entry}
+          slot="sidepanel.pane"
+          session={props.currentSession?.id ?? null}
+          project={project?.id ?? null}
+          fill
+          testid={`plugin-frame-${parts?.plugin}-${parts?.n}`}
+        />
+      ) : (
+        <p className="px-3 py-4 text-vp-base text-ink-2">{t('plg.frame.noGrant')}</p>
+      )
+    }
     const top =
       tab === 'notes' && notesGlobal ? (
         <Notes key={GLOBAL_NOTE} projectId={GLOBAL_NOTE} socket={props.socket} />
@@ -473,10 +520,17 @@ export function RightPanel(props: Props) {
       // the reveal is what makes the collapse control's chevron read as a
       // direction rather than a decoration — you saw where it came from, so
       // you know where it goes.
-      className="vp-edge-in-right flex shrink-0 border-l border-hairline vp-blur"
-      style={{ width }}
+      data-placement={placement}
+      className={
+        placement === 'sheet'
+          ? 'vp-edge-in-right absolute inset-y-0 right-0 z-30 flex border-l border-hairline shadow-2xl vp-solid'
+          : placement === 'fill'
+            ? 'flex min-h-0 w-full flex-1 vp-solid'
+            : 'vp-edge-in-right flex shrink-0 border-l border-hairline vp-blur'
+      }
+      style={placement === 'sheet' ? { width: `min(${width}px, calc(100% - 3rem))` } : placement === 'fill' ? undefined : { width }}
     >
-      <div
+      {placement === 'column' && <div
         data-testid="panel-resize"
         role="separator"
         aria-orientation="vertical"
@@ -508,7 +562,7 @@ export function RightPanel(props: Props) {
         // elementFromPoint across the grip: offsets 0-3 hit it, 4-7 hit the
         // content. Half the target, and the wrong half.
         className="vp-grip z-10 -mr-1 w-2 cursor-col-resize"
-      />
+      />}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* An opened block takes the whole column, panes and all.
@@ -569,6 +623,8 @@ export function RightPanel(props: Props) {
                   onRefocus={props.onRefocus}
                   onCollapse={props.onCollapse}
                   body={bodyFor}
+                  order={order}
+                  extTabs={props.extTabs}
                   notesGlobal={notesGlobal}
                   onNotesScope={() => setNotesGlobal((v) => !v)}
                 />
@@ -675,6 +731,9 @@ interface PaneProps {
   onCollapse: () => void
   /** The second argument is which way the strip moved, for the half that changes. */
   body: (tab: PanelTab, swapDir?: 'forward' | 'back') => React.ReactNode
+  /** Every tab in strip order: the built-ins, then the plugins' panes. */
+  order: PanelTab[]
+  extTabs: ExtTabMeta[]
   /**
    * Which note the notes tab is on, and how to swap it.
    *
@@ -755,7 +814,7 @@ function Pane(props: PaneProps) {
     tab,
     dir: 'forward',
   })
-  if (swap.tab !== tab) setSwap({ tab, dir: swapDirection(swap.tab, tab) })
+  if (swap.tab !== tab) setSwap({ tab, dir: swapDirection(swap.tab, tab, props.order) })
 
   const over = drag && drag.over?.group === index ? drag.over.kind : null
 
@@ -795,14 +854,15 @@ function Pane(props: PaneProps) {
               style={{ width: marker.width, transform: `translateX(${marker.left}px)` }}
             />
           )}
-          {PANEL_TABS.filter((id) => group.tabs.includes(id)).map((id) => {
+          {props.order.filter((id) => group.tabs.includes(id)).map((id) => {
             // The notes tab has two of everything, because it has two scopes
             // and the strip draws an icon and nothing else. A different glyph,
             // not a different colour: red line 4, and a tint on a 16px icon is
             // not a thing anybody notices anyway.
             const globalNotes = id === 'notes' && props.notesGlobal
-            const Icon = globalNotes ? Globe : TABS[id].icon
-            const label = globalNotes ? t('panel.notesGlobal') : t(TABS[id].key)
+            const meta = tabMeta(id, props.extTabs, lang)
+            const Icon = globalNotes ? Globe : meta.icon
+            const label = globalNotes ? t('panel.notesGlobal') : meta.label
             return (
               <button
                 key={id}
@@ -842,7 +902,7 @@ function Pane(props: PaneProps) {
                     props.onLayout(moveTowards(layout, id, move))
                     return
                   }
-                  const next = tabFromKey(e.key, id)
+                  const next = tabFromKey(e.key, id, props.order)
                   if (!next || !group.tabs.includes(next)) return
                   e.preventDefault()
                   props.onLayout(activate(layout, next))

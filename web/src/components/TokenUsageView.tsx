@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, RefreshCw, X } from 'lucide-react'
 
 import { api } from '../protocol/api'
@@ -19,6 +19,7 @@ import {
   type Metric,
   type Ranked,
 } from './panels/spend'
+import { useDialogFocus } from './useDialogFocus'
 
 /** The range control's positions, in days. */
 const RANGES = [7, 30, 90, 365]
@@ -73,6 +74,7 @@ export function TokenUsageView({
   const [data, setData] = useState<TokenUsage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -100,14 +102,7 @@ export function TokenUsageView({
     }
   }, [days, project, tool])
 
-  // Escape closes, because every other full-screen surface here does.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  useDialogFocus(dialogRef, onClose)
 
   const refresh = async () => {
     setBusy(true)
@@ -126,12 +121,16 @@ export function TokenUsageView({
   return (
     <div className="vp-backdrop absolute inset-0 z-30 flex items-start justify-center overflow-y-auto bg-black/40 px-3 py-6">
       <div
+        ref={dialogRef}
         data-testid="token-view"
         data-vp-modal="tokens"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="vp-tokens-title"
         className="vp-panel-in @container w-full max-w-6xl overflow-hidden rounded-vp-lg border border-hairline bg-surface shadow-xl"
       >
         <header className="flex items-center gap-2 border-b border-hairline px-5 py-3">
-          <h2 className="flex-1 truncate text-vp-lg font-semibold tracking-tight text-ink">
+          <h2 id="vp-tokens-title" className="flex-1 truncate text-vp-lg font-semibold tracking-tight text-ink">
             {t('spend.title')}
           </h2>
           <button

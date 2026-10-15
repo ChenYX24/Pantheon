@@ -57,7 +57,7 @@ export function Spark({
     <svg
       viewBox={`0 0 ${VIEW.w} ${VIEW.h}`}
       preserveAspectRatio="none"
-      className="h-full w-full"
+      className="vp-spark h-full w-full"
       role="img"
       data-testid={testid}
       data-points={values.length}

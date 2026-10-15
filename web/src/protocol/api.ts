@@ -1,4 +1,5 @@
 import { appFetch, appURL } from '../basePath'
+import { t, tKey } from '../i18n'
 import type {
   ApiToken,
   AuditEntry,
@@ -61,13 +62,35 @@ import type {
   ResourcePolicy,
   RolloverStatus,
   ResourcesView,
+  PluginDetail,
+  PluginModule,
+  PluginProcessStatus,
+  PluginRow,
+  PluginSettings,
+  PluginSourceRow,
+  PluginThemeRow,
+  PluginTemplate,
+  PluginAccessToken,
+  PluginDownloadRow,
+  NewPluginResult,
 } from './wire'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await appFetch(path, {
-    ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-  })
+  let res: Response
+  try {
+    res = await appFetch(path, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    })
+  } catch (e) {
+    // A request that never reached the panel rejects with the browser's own
+    // words -- "Failed to fetch", "NetworkError when attempting to fetch
+    // resource.", "Load failed" -- and every caller that shows an error showed
+    // those, in English, in the Chinese panel. An abort is the caller's own
+    // doing and keeps its identity.
+    if (e instanceof DOMException && e.name === 'AbortError') throw e
+    throw new NetworkError()
+  }
   if (!res.ok) {
     // The server always sends {"error": "..."} on failure, but a proxy or a
     // crash can produce something else; fall back to the status rather than
@@ -76,14 +99,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let setupRequired = false
     let needsTrust = ''
     let answersTo: string[] = []
+    let code = ''
+    let retryAfter = 0
     try {
       const body = (await res.json()) as {
         error?: string
         setupRequired?: boolean
         originNeedsTrust?: string
         panelAnswersTo?: string[]
+        code?: string
+        retryAfter?: number
       }
       if (body.error) message = body.error
+      code = body.code ?? ''
+      retryAfter = body.retryAfter ?? 0
       setupRequired = body.setupRequired === true
       needsTrust = body.originNeedsTrust ?? ''
       answersTo = body.panelAnswersTo ?? []
@@ -92,10 +121,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     // Distinguished so the shell can return to the sign-in screen rather than
     // showing a permission error inside a panel the user cannot use.
-    if (res.status === 401) throw new UnauthorizedError(message, setupRequired)
+    if (res.status === 401) throw new UnauthorizedError(message, setupRequired, code)
     // Distinguished for the same reason: it is a question, not a failure, and
     // the only thing that can answer it is the person at the wizard.
     if (needsTrust) throw new OriginNotTrustedError(message, needsTrust, answersTo)
+    if (code) throw new CodedError(message, code, retryAfter)
     throw new Error(message)
   }
   if (res.status === 204) {
@@ -185,6 +215,14 @@ export function blobTypeFor(kind: 'image' | 'pdf', header: string | null): strin
  * Carries what the server currently holds so the caller can show both without
  * a second round trip.
  */
+/** The request never reached the panel: offline, or the panel is down. */
+export class NetworkError extends Error {
+  constructor() {
+    super(t('net.unreachable'))
+    this.name = 'NetworkError'
+  }
+}
+
 export class ConflictError extends Error {
   readonly current: Note
   constructor(message: string, current: Note) {
@@ -244,21 +282,69 @@ export class UpdateRefusedError extends Error {
  * the kind into a sentence; see uploadErrorText.
  */
 export class UploadTransportError extends Error {
-  readonly kind: 'network' | 'aborted' | 'timeout'
-  constructor(kind: 'network' | 'aborted' | 'timeout') {
+  readonly kind: UploadFailure
+  constructor(kind: UploadFailure) {
     super(kind)
     this.name = 'UploadTransportError'
     this.kind = kind
   }
 }
 
+/**
+ * How an upload failed before the panel could say why. `tooLarge` is a 413
+ * that is not the panel's: a proxy in front of it with a smaller body limit
+ * than the panel's 256 MiB. nginx's default is 1 MB, and its answer is an HTML
+ * page, so what reached the person was "413 " and nothing else.
+ */
+export type UploadFailure = 'network' | 'aborted' | 'timeout' | 'tooLarge'
+
+/** A 413 the panel did not send: no JSON reason in the body. */
+export function refusedByProxy(status: number, body: { error?: string } | null): boolean {
+  return status === 413 && body?.error === undefined
+}
+
 export class UnauthorizedError extends Error {
   readonly setupRequired: boolean
-  constructor(message: string, setupRequired: boolean) {
+  readonly code: string
+  constructor(message: string, setupRequired: boolean, code = '') {
     super(message)
     this.name = 'UnauthorizedError'
     this.setupRequired = setupRequired
+    this.code = code
   }
+}
+
+/**
+ * A refusal the server gave a stable code for (internal/httpapi/auth.go, Code*).
+ *
+ * The sentence in `message` is English and is the server's; the code is what
+ * this page translates. See errorText.
+ */
+export class CodedError extends Error {
+  readonly code: string
+  readonly retryAfter: number
+  constructor(message: string, code: string, retryAfter = 0) {
+    super(message)
+    this.name = 'CodedError'
+    this.code = code
+    this.retryAfter = retryAfter
+  }
+}
+
+/**
+ * What to show a person for a failed request: their language when the server
+ * sent a code this build has words for, the server's sentence otherwise.
+ *
+ * Prose is never matched. A reworded error would stop matching and fall back
+ * to English silently, which is the bug this replaced.
+ */
+export function errorText(err: unknown): string {
+  if (err instanceof CodedError || err instanceof UnauthorizedError) {
+    const retry = err instanceof CodedError ? err.retryAfter : 0
+    const own = err.code ? tKey(`auth.err.${err.code}`, { n: retry }) : null
+    if (own) return own
+  }
+  return err instanceof Error ? err.message : String(err)
 }
 
 /**
@@ -323,6 +409,136 @@ export const api = {
   deletePasskey: (id: string) => request<void>(`/api/auth/passkeys/${id}`, { method: 'DELETE' }),
 
   settings: () => request<SettingsInfo>('/api/settings'),
+
+  // ─── plugins (docs/plugins.md) ─────────────────────────────────────────
+  listPlugins: () => request<PluginRow[]>('/api/settings/plugins'),
+  /** The list with every card's detail, in one request: the plugins page's poll. */
+  listPluginDetails: () => request<PluginDetail[]>('/api/settings/plugins?detail=1'),
+  plugin: (id: string) => request<PluginDetail>(`/api/settings/plugins/${encodeURIComponent(id)}`),
+  pluginThemes: () => request<PluginThemeRow[]>('/api/settings/plugin-themes'),
+  pluginTemplates: () => request<PluginTemplate[]>('/api/settings/plugin-templates'),
+  /** Scaffold a plugin from a template, in dev mode, with a project at it (docs/plugins.md §9). */
+  newPlugin: (req: { name: string; template: string; path: string }) =>
+    request<NewPluginResult>('/api/settings/plugin-new', { method: 'POST', body: JSON.stringify(req) }),
+  /** A zip becomes a stored version; nothing runs until it is installed. */
+  addPluginZip: (file: Blob) =>
+    request<{ plugin: PluginDetail; ignored: { path: string; reason: string }[]; created: boolean }>(
+      '/api/settings/plugins',
+      { method: 'POST', body: file, headers: { 'Content-Type': 'application/zip' } },
+    ),
+  /** The same from a directory on the panel's machine, which is also recorded as the draft. */
+  addPluginDir: (path: string) =>
+    request<{ plugin: PluginDetail; ignored: { path: string; reason: string }[]; created: boolean }>(
+      '/api/settings/plugins',
+      { method: 'POST', body: JSON.stringify({ path }) },
+    ),
+  /** The confirmation: the boxes as ticked, and the version to run. */
+  installPlugin: (id: string, caps: string[], version = 0) =>
+    request<{ plugin: PluginDetail; needsSecrets: string[] }>(
+      `/api/settings/plugins/${encodeURIComponent(id)}/install`,
+      { method: 'POST', body: JSON.stringify({ caps, version }) },
+    ),
+  enablePlugin: (id: string) =>
+    request<PluginDetail>(`/api/settings/plugins/${encodeURIComponent(id)}/enable`, { method: 'POST', body: '{}' }),
+  disablePlugin: (id: string) =>
+    request<PluginDetail>(`/api/settings/plugins/${encodeURIComponent(id)}/disable`, { method: 'POST', body: '{}' }),
+  deletePlugin: (id: string) =>
+    request<void>(`/api/settings/plugins/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  setPluginCaps: (id: string, caps: string[]) =>
+    request<PluginDetail>(`/api/settings/plugins/${encodeURIComponent(id)}/caps`, {
+      method: 'PUT',
+      body: JSON.stringify({ caps }),
+    }),
+  pluginSettings: (id: string) =>
+    request<PluginSettings>(`/api/settings/plugins/${encodeURIComponent(id)}/settings`),
+  setPluginSetting: (id: string, key: string, value: unknown) =>
+    request<{ value: unknown }>(
+      `/api/settings/plugins/${encodeURIComponent(id)}/settings/${encodeURIComponent(key)}`,
+      { method: 'PUT', body: JSON.stringify({ value }) },
+    ),
+  resetPluginSetting: (id: string, key: string) =>
+    request<void>(`/api/settings/plugins/${encodeURIComponent(id)}/settings/${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+    }),
+  setPluginSecret: (id: string, name: string, value: string) =>
+    request<void>(`/api/settings/plugins/${encodeURIComponent(id)}/secrets/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    }),
+  deletePluginSecret: (id: string, name: string) =>
+    request<void>(`/api/settings/plugins/${encodeURIComponent(id)}/secrets/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+  /** The installed version as a zip. A plain GET, so an <a download> works. */
+  exportPluginURL: (id: string): `/${string}` => appURL(`/api/settings/plugins/${encodeURIComponent(id)}/export`),
+  /** A grant for the owner's session, for a frame: the cookie only. */
+  mintPluginGrant: (id: string) =>
+    request<{ grant: string; base: string; api: string; expiresAt: number; dev: boolean }>(
+      `/api/settings/plugins/${encodeURIComponent(id)}/grant`,
+      { method: 'POST', body: '{}' },
+    ),
+  /** The plugin's handles for a session and a project, to name them to a frame. */
+  pluginHandles: (id: string, session?: string, project?: string) => {
+    const q = new URLSearchParams()
+    if (session) q.set('session', session)
+    if (project) q.set('project', project)
+    return request<{ session?: string; project?: string }>(
+      `/api/settings/plugins/${encodeURIComponent(id)}/handles?${q.toString()}`,
+    )
+  },
+  setPluginDev: (id: string, dev: boolean, sourceDir = '') =>
+    request<PluginDetail>(`/api/settings/plugins/${encodeURIComponent(id)}/dev`, {
+      method: 'PUT',
+      body: JSON.stringify({ dev, sourceDir }),
+    }),
+  pluginServerLog: (id: string) =>
+    request<{ lines: SharePageServerLogLine[]; dropped: number }>(
+      `/api/settings/plugins/${encodeURIComponent(id)}/server/log`,
+    ),
+  unsandboxed: () => request<{ enabled: boolean }>('/api/settings/plugin-unsandboxed'),
+  setUnsandboxed: (enabled: boolean) =>
+    request<{ enabled: boolean }>('/api/settings/plugin-unsandboxed', { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  pluginModules: () => request<PluginModule[]>('/api/settings/plugin-modules'),
+  pluginProcess: (id: string) =>
+    request<PluginProcessStatus>(`/api/settings/plugins/${encodeURIComponent(id)}/process`),
+  restartPluginProcess: (id: string) =>
+    request<PluginProcessStatus>(`/api/settings/plugins/${encodeURIComponent(id)}/process/restart`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  // The door on the panel's port (docs/plugins.md §5): the owner's tokens and origins.
+  pluginAccessTokens: (id: string) =>
+    request<PluginAccessToken[]>(`/api/settings/plugins/${encodeURIComponent(id)}/tokens`),
+  createPluginAccessToken: (id: string, name: string) =>
+    request<{ token: string; row: PluginAccessToken; mount: string }>(`/api/settings/plugins/${encodeURIComponent(id)}/tokens`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  revokePluginAccessToken: (id: string, tokenId: string) =>
+    request<void>(`/api/settings/plugins/${encodeURIComponent(id)}/tokens/${encodeURIComponent(tokenId)}`, { method: 'DELETE' }),
+  pluginOrigins: (id: string) => request<{ origins: string[] }>(`/api/settings/plugins/${encodeURIComponent(id)}/origins`),
+  setPluginOrigins: (id: string, origins: string[]) =>
+    request<{ origins: string[] }>(`/api/settings/plugins/${encodeURIComponent(id)}/origins`, {
+      method: 'PUT',
+      body: JSON.stringify({ origins }),
+    }),
+  // Declared downloads (docs/plugins.md §5).
+  pluginDownloads: (id: string) =>
+    request<PluginDownloadRow[]>(`/api/settings/plugins/${encodeURIComponent(id)}/downloads`),
+  startPluginDownload: (id: string, name: string) =>
+    request<PluginDownloadRow[]>(`/api/settings/plugins/${encodeURIComponent(id)}/downloads/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  removePluginDownload: (id: string, name: string) =>
+    request<PluginDownloadRow[]>(`/api/settings/plugins/${encodeURIComponent(id)}/downloads/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+  pluginSources: (id: string) =>
+    request<PluginSourceRow[]>(`/api/settings/plugins/${encodeURIComponent(id)}/sources`),
+  /** Cheap: sizes and times, hashed. Asked twice a second while a frame is in dev mode. */
+  pluginFingerprint: (id: string) =>
+    request<{ fingerprint: string }>(`/api/settings/plugins/${encodeURIComponent(id)}/draft/fingerprint`),
 
   audit: () => request<AuditEntry[]>('/api/settings/audit'),
 
@@ -1154,6 +1370,12 @@ export const api = {
           // Now it is done, and the bar says so.
           onProgress?.(1)
           resolve({ paths: body.paths })
+          return
+        }
+        // The panel's own refusals are JSON with a reason; a 413 without one
+        // came from something in front of it. See UploadFailure.
+        if (refusedByProxy(xhr.status, body)) {
+          reject(new UploadTransportError('tooLarge'))
           return
         }
         const message = body?.error ?? `${xhr.status} ${xhr.statusText}`

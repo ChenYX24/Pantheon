@@ -97,8 +97,15 @@ func sharePageCSP(origin, token string, scriptHosts []string, framed bool) strin
 
 // sharePagePermissions turns off the device APIs a page has no use for. A wall
 // asking for the microphone of the television it is on is not a feature.
+//
+// Only names a browser recognises. `bluetooth` was here, and Chromium does not
+// know it as a policy feature: every share page, plugin frame and admin page
+// logged "Unrecognized feature: 'bluetooth'", which is noise in exactly the
+// console somebody opens when a page misbehaves. Web Bluetooth asks the person
+// before it does anything, from a document the sandbox has already given an
+// opaque origin.
 const sharePagePermissions = "camera=(), microphone=(), geolocation=(), usb=(), " +
-	"payment=(), display-capture=(), serial=(), hid=(), bluetooth=()"
+	"payment=(), display-capture=(), serial=(), hid=()"
 
 // registerSharePageRoutes mounts the page files, outside /api.
 //
@@ -149,11 +156,9 @@ func writeGonePage(w http.ResponseWriter, down bool) {
 func (s *Server) handleSharePage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := s.clientIP(r)
-	if s.Auth != nil && !auth.Allowed(ip, s.Auth.Allow) {
-		// The same rule requireShareToken applies, for the same reason: making
-		// a link must not be a way past --allow-from.
-		s.auditFromOutside(ctx, "blocked", "", ip, "address not in the allowlist")
-		writeErr(w, http.StatusForbidden, "not allowed from this address")
+	// The same rule requireShareToken applies, for the same reason: making a
+	// link must not be a way past --allow-from.
+	if s.refuseAddress(ctx, w, r) {
 		return
 	}
 	token := chi.URLParam(r, "token")

@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,7 +99,19 @@ type Client struct {
 	// allocates most of its startup memory in its first second, and whatever
 	// cgroup it is in for that second keeps the charge.
 	AfterCreate func(name string, panePID int, paneID string)
+
+	// logger hears about listing lines that could not be read; nil is
+	// silent. Set with SetLogger, atomically because the poller sets it while
+	// handlers may already be listing.
+	logger atomic.Pointer[slog.Logger]
+	// skipWarned is whether that has been said once already: the poller lists
+	// every two seconds, and a line that cannot be read now will not be
+	// readable on the next tick either.
+	skipWarned atomic.Bool
 }
+
+// SetLogger gives the client somewhere to say what it could not read.
+func (c *Client) SetLogger(l *slog.Logger) { c.logger.Store(l) }
 
 // New returns a Client for the given socket, keeping its config file in dir.
 func New(socket, dir string) *Client {
@@ -264,7 +277,15 @@ func (c *Client) run(ctx context.Context, rest ...string) (string, error) {
 		msg := strings.TrimSpace(stderr.String())
 		switch {
 		case strings.Contains(msg, "no server running"),
-			strings.Contains(msg, "error connecting"):
+			strings.Contains(msg, "error connecting") &&
+				(strings.Contains(msg, "No such file or directory") ||
+					strings.Contains(msg, "Connection refused")):
+			// Nothing there, or a socket left by a server that has gone.
+			// Every other "error connecting" -- Permission denied, a name too
+			// long for sun_path -- is a server that may be running and that
+			// this process cannot reach, and folding those in here made List
+			// report it empty: every session marked vanished and done, and
+			// Has telling restore a live session was gone.
 			return "", ErrNoServer
 		case strings.Contains(msg, "session not found"),
 			strings.Contains(msg, "can't find session"),
@@ -777,8 +798,8 @@ func (c *Client) SocketPath() string {
 // sun_path: 104 bytes on macOS and 108 on Linux, terminator included. tmux
 // resolves the directory first, so on macOS /tmp becomes /private/tmp and a
 // path of 96 characters as written is 104 once resolved. tmux's refusal is
-// "error connecting to <path> (File name too long)", and run() folds that
-// into ErrNoServer, so what a caller sees says nothing about the length. A uid
+// "error connecting to <path> (File name too long)", which run() passes
+// through as it is, so the caller at least sees the reason. A uid
 // is 32 bits, and one from a directory service can use ten digits of it; then
 // the directory is 29 characters and a name can be 74, and 60 leaves 14 more
 // for a TMUX_TMPDIR deeper than /tmp.
@@ -1080,14 +1101,34 @@ func (c *Client) List(ctx context.Context) ([]Info, error) {
 	}
 	lines := strings.Split(out, "\n")
 	infos := make([]Info, 0, len(lines))
+	var first error
 	for _, line := range lines {
 		info, perr := parseInfo(line)
 		if perr != nil {
 			// One malformed line (a pane title containing a newline, say) must
 			// not blind the sidebar to every other session.
+			if first == nil {
+				first = perr
+			}
 			continue
 		}
 		infos = append(infos, info)
+	}
+	if first != nil && len(infos) > 0 {
+		// Some sessions read and some did not: the readable ones are listed,
+		// and the one that was not is named once, in tmux's own words, so a
+		// session that vanished from the sidebar has a line in the log.
+		if l := c.logger.Load(); l != nil && c.skipWarned.CompareAndSwap(false, true) {
+			l.Warn("tmux listing: a line could not be read; that session is missing until it can", "err", first)
+		}
+	}
+	if len(infos) == 0 && first != nil {
+		// tmux answered and nothing it said was a session. That is tmux
+		// refusing the format (parseInfo says how), not an empty server, and
+		// an empty list here is read by the poller as every session having
+		// died: each one marked vanished and done, with an event, a push and
+		// a webhook, on every poll until the two agree again.
+		return nil, first
 	}
 	return infos, nil
 }

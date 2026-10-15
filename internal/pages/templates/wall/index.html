@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <link rel="icon" href="data:,">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Session wall</title>
   <style>
@@ -17,6 +18,7 @@
       --waiting: #f0b429;
       --done: #3fb67a;
       --urgent: #ff5d4a;
+      --crashed: #ff6b5e;
       --vp-live: #3fb67a;
       --vp-waiting: #f0b429;
       --vp-trouble: #ff5d4a;
@@ -75,6 +77,7 @@
     .waiting.urgent .alarm { display: flex; }
     .stat { background: var(--panel); border-radius: clamp(10px, 0.9vw, 20px); padding: clamp(12px, 1.2vw, 28px) clamp(16px, 1.6vw, 36px);
       display: flex; align-items: center; gap: 0.5em; font-size: clamp(16px, 1.5vw, 34px); }
+    .stat[hidden] { display: none; }
     .stat .word { flex: 1; min-width: 0; }
     .stat .word small { display: block; color: var(--muted); font-size: 0.62em; }
     .stat .n { font-size: clamp(36px, 4.2vw, 96px); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
@@ -92,6 +95,7 @@
     }
     .tile.waiting-tile { background: color-mix(in srgb, var(--waiting) 16%, var(--tile)); }
     .tile.done-tile { opacity: 0.72; }
+    .tile.crashed-tile { background: color-mix(in srgb, var(--crashed) 14%, var(--tile)); }
     .tile .top { display: flex; align-items: center; gap: 0.35em; font-size: clamp(12px, min(24cqh, 10.5cqw), 50px); color: var(--c); min-width: 0; }
     .tile .dur { white-space: nowrap; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
     .tile .kind { margin-left: auto; min-width: 0; color: var(--muted); font-size: 0.62em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -154,6 +158,7 @@
         <div class="alarm" id="alarm"></div>
       </div>
       <div class="stat"><span data-shape="working"></span><span class="word">working</span><span class="n" id="working">—</span></div>
+      <div class="stat" id="crashedBox" hidden><span data-shape="crashed"></span><span class="word">crashed</span><span class="n" id="crashed">0</span></div>
       <div class="stat"><span data-shape="done"></span><span class="word">done<small id="doneToday"></small></span><span class="n" id="done">—</span></div>
     </section>
 
@@ -176,17 +181,26 @@
     const $ = (id) => document.getElementById(id)
     const params = { warnAt: 3 }
 
-    // Shape as well as colour: circle working, triangle waiting, check done.
+    // Shape as well as colour: circle working, triangle waiting, check done,
+    // cross crashed. The panel draws the same four.
     const SVG = 'http://www.w3.org/2000/svg'
     const SHAPES = {
       waiting: ['path', { d: 'M12 2.5 L22.5 21 H1.5 Z', fill: 'currentColor' }],
       working: ['circle', { cx: 12, cy: 12, r: 9.5, fill: 'currentColor' }],
       done: ['path', { d: 'M3.5 12.5 L9.5 18.5 L20.5 5.5', fill: 'none', stroke: 'currentColor',
         'stroke-width': 3.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }],
+      crashed: ['path', { d: 'M5 5 L19 19 M19 5 L5 19', fill: 'none', stroke: 'currentColor',
+        'stroke-width': 3.6, 'stroke-linecap': 'round' }],
       alarm: ['path', { d: 'M12 2.5 L22.5 21 H1.5 Z M12 9 V14 M12 17.2 V17.4', fill: 'none', stroke: 'currentColor',
         'stroke-width': 2.4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }],
     }
-    const COLOUR = { waiting: 'var(--waiting)', working: 'var(--working)', done: 'var(--done)' }
+    const COLOUR = { waiting: 'var(--waiting)', working: 'var(--working)', done: 'var(--done)', crashed: 'var(--crashed)' }
+
+    // The state enum has no "crashed": a process that exited non-zero keeps
+    // whatever state it died in, usually done, and is told apart by `exited` and
+    // its status. -1 is a tmux session that vanished, which nobody saw fail.
+    const crashed = (row) => Boolean(row.exited) && row.exitStatus !== 0 && row.exitStatus !== -1
+    const shown = (row) => (crashed(row) ? 'crashed' : row.state)
 
     function shape(state) {
       const [tag, attrs] = SHAPES[state] || SHAPES.done
@@ -231,11 +245,11 @@
 
     // Waiting first and oldest first: the tile that has waited longest is the
     // one somebody should walk over for. Done last, most recent first.
-    const ORDER = { waiting: 0, working: 1, done: 2 }
+    const ORDER = { waiting: 0, crashed: 1, working: 2, done: 3 }
     function sortSessions(rows) {
       return rows.slice().sort((a, b) =>
-        (ORDER[a.state] - ORDER[b.state]) ||
-        (a.state === 'done' ? b.stateChangedAt - a.stateChangedAt : a.stateChangedAt - b.stateChangedAt))
+        (ORDER[shown(a)] - ORDER[shown(b)]) ||
+        (shown(a) === 'done' || shown(a) === 'crashed' ? b.stateChangedAt - a.stateChangedAt : a.stateChangedAt - b.stateChangedAt))
     }
 
     // Pick the column count that gives the most readable tiles in the space
@@ -266,12 +280,13 @@
     }
 
     function tile(row) {
-      const t = el('div', `tile ${row.state}-tile`)
-      t.style.setProperty('--c', COLOUR[row.state] || 'var(--muted)')
+      const st = shown(row)
+      const t = el('div', `tile ${st}-tile`)
+      t.style.setProperty('--c', COLOUR[st] || 'var(--muted)')
       const top = el('div', 'top')
-      top.append(shape(row.state), el('span', 'dur', vp.since(row.stateChangedAt)))
+      top.append(shape(st), el('span', 'dur', vp.since(row.stateChangedAt)))
       // An exited process is worth a word; its exit code is not a name.
-      const exited = row.exited ? ' · exited' : ''
+      const exited = st === 'crashed' ? ` · exited ${row.exitStatus}` : row.exited ? ' · exited' : ''
       const name = vp.name(row)
       // Counts mode sends no names (the default): the kind moves down into the
       // name's place, so the tile still says what it is rather than nothing.
@@ -284,8 +299,8 @@
       const t = el('div', 'tile more')
       t.append(el('div', 'big', `+${hidden.length} more`))
       const top = el('div', 'top')
-      for (const state of ['waiting', 'working', 'done']) {
-        const n = hidden.filter((r) => r.state === state).length
+      for (const state of ['waiting', 'crashed', 'working', 'done']) {
+        const n = hidden.filter((r) => shown(r) === state).length
         if (n) top.append(shape(state), el('span', null, n))
       }
       t.append(top)
@@ -310,8 +325,11 @@
       if (overflow) box.append(moreTile(rows.slice(fits - 1)))
     }
 
-    const WORD = { waiting: 'waiting', working: 'working', done: 'done' }
-    function drawFeed(feed) {
+    const WORD = { waiting: 'waiting', working: 'working', done: 'done', crashed: 'crashed' }
+    // The log records states, and a crash is logged as the move to done. The
+    // newest move into a crashed session's current state is the crash.
+    function drawFeed(feed, sessions) {
+      const dead = new Map(sessions.filter(crashed).map((r) => [r.id, r]))
       const list = $('feed')
       list.replaceChildren()
       const entries = feed ? feed.entries.slice(0, 40) : []
@@ -322,12 +340,15 @@
       for (const e of entries) {
         const li = el('li')
         const name = vp.name(e)
-        const move = `${WORD[e.from] || e.from} → ${WORD[e.to] || e.to}`
+        const row = dead.get(e.sessionId)
+        let to = e.to
+        if (row && row.state === e.to) { to = 'crashed'; dead.delete(e.sessionId) }
+        const move = `${WORD[e.from] || e.from} → ${WORD[to] || to}`
         // forSeconds is how long it spent in the state it just left.
         const after = `after ${vp.fmt.duration(e.forSeconds)}`
         const primary = el('span', 'primary name', name || move)
         const meta = el('span', 'meta', name ? `${move} · ${after}` : after)
-        li.append(shape(e.to), primary, el('span', 'ago', `${vp.since(e.at)} ago`), meta)
+        li.append(shape(to), primary, el('span', 'ago', `${vp.since(e.at)} ago`), meta)
         list.append(li)
       }
     }
@@ -339,9 +360,21 @@
       if (s.remark) bits.push(s.remark)
       vp.text($('sub'), bits.join(' · '))
 
-      vp.text($('waiting'), c.waiting)
-      vp.text($('working'), c.working)
-      vp.text($('done'), c.done)
+      // Crashed sessions are counted on their own and taken out of the state
+      // they died in. Without the rows (a link that lists none) only the
+      // totals are known, and a crash is taken out of done.
+      const n = { waiting: c.waiting, working: c.working, done: c.done, crashed: 0 }
+      if (s.sessions.length === c.sessions) {
+        for (const r of s.sessions.filter(crashed)) { n.crashed++; if (n[r.state] > 0) n[r.state]-- }
+      } else {
+        n.crashed = c.crashed
+        n.done = Math.max(0, c.done - c.crashed)
+      }
+      vp.text($('waiting'), n.waiting)
+      vp.text($('working'), n.working)
+      vp.text($('done'), n.done)
+      vp.text($('crashed'), n.crashed)
+      $('crashedBox').hidden = n.crashed === 0
       vp.text($('doneToday'), `${c.doneToday} today`)
       if (c.waiting > 0 && c.longestWaitAt > 0) {
         $('oldest').replaceChildren('longest wait', el('b', null, vp.since(c.longestWaitAt)))
@@ -353,7 +386,7 @@
       vp.text($('alarm').lastChild, `${params.warnAt} or more waiting`)
 
       drawTiles(s.sessions)
-      drawFeed(s.feed)
+      drawFeed(s.feed, s.sessions)
     }
 
     vp.on('snapshot', draw)

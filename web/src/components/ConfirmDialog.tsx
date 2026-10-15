@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { AlertTriangle, HelpCircle } from 'lucide-react'
 
 import { answerAsk, currentAsk, subscribeAsk, type AskRequest } from './ask'
+import { useDialogFocus } from './useDialogFocus'
 import { safeText } from './text'
 
 /**
@@ -23,6 +24,8 @@ function AskPanel({ request }: { request: AskRequest }) {
   const [value, setValue] = useState(request.field?.value ?? '')
   const cancelRef = useRef<HTMLButtonElement | null>(null)
   const fieldRef = useRef<HTMLInputElement | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  useDialogFocus(dialogRef, () => answerAsk(null))
 
   /**
    * The keyboard starts on the answer that changes nothing.
@@ -53,16 +56,24 @@ function AskPanel({ request }: { request: AskRequest }) {
       // candidate, not answering a question. Confirming there would submit a
       // half-typed name and, worse, teach people that Enter is unsafe here.
       if (e.isComposing || e.keyCode === 229) return
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        answerAsk(null)
-        return
-      }
+      // Escape is useDialogFocus's: it answers only for the topmost dialog,
+      // so a confirmation raised over Settings does not close both.
       if (e.key !== 'Enter') return
-      // preventDefault is what lets Enter mean "confirm" while the focus sits
-      // on cancel. Enter on a focused button generates a click as its default
-      // action; cancelling the default cancels that click, so the two rules --
-      // focus starts safe, Enter confirms -- stop contradicting each other.
+      // A destructive question: Enter presses whichever button has the focus,
+      // as it does everywhere else, and the focus starts on Cancel.
+      //
+      // It used to confirm from anywhere, Cancel included -- preventDefault
+      // swallowed the focused button's own click so that "focus starts safe"
+      // and "Enter confirms" would not contradict each other. Together they
+      // made Enter on a highlighted Cancel kill the session, in all three
+      // engines; the audit tabbed to Cancel, pressed Enter, and lost one.
+      // Focus starting safe only means something if Enter follows it.
+      //
+      // The one exception is the field: typing into it and pressing Enter is
+      // answering, as in a form.
+      if (request.destructive && e.target !== fieldRef.current) return
+      // Not destructive (naming a passkey, say): Enter answers from anywhere,
+      // which is what window.prompt did.
       e.preventDefault()
       answerAsk(value)
     }
@@ -72,7 +83,7 @@ function AskPanel({ request }: { request: AskRequest }) {
     // alternative is a ref holding the value, which is a second copy of one
     // piece of state kept in step by hand -- and the failure it produces is
     // Enter confirming the name as it was one character ago.
-  }, [value])
+  }, [value, request.destructive])
 
   const Icon = request.destructive ? AlertTriangle : HelpCircle
   const tint = request.destructive ? 'var(--vp-state-crashed)' : 'var(--vp-accent)'
@@ -86,6 +97,10 @@ function AskPanel({ request }: { request: AskRequest }) {
       <div
         // Read by focusTerminal: while this is on screen the keyboard belongs
         // to it, and a terminal tab is not allowed to take it away.
+        ref={dialogRef}
+        role={request.destructive ? 'alertdialog' : 'dialog'}
+        aria-modal="true"
+        aria-labelledby="vp-confirm-title"
         data-vp-modal="confirm"
         data-testid="confirm-dialog"
         data-destructive={request.destructive === true}
@@ -98,7 +113,7 @@ function AskPanel({ request }: { request: AskRequest }) {
               that does not arrive. */}
           <Icon size={16} className="mt-0.5 shrink-0" style={{ color: tint }} />
           <div className="min-w-0 flex-1">
-            <p data-testid="confirm-title" className="text-vp-md font-medium text-ink">
+            <p id="vp-confirm-title" data-testid="confirm-title" className="text-vp-md font-medium text-ink">
               {safeText(request.title)}
             </p>
             {request.body && (

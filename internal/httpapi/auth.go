@@ -158,27 +158,9 @@ func (s *Server) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
-		if s.Auth != nil && !auth.Allowed(s.clientIP(r), s.Auth.Allow) {
-			s.auditFromOutside(ctx, "blocked", "", s.clientIP(r), "address not in the allowlist")
-			writeErr(w, http.StatusForbidden, "not allowed from this address")
-			return
-		}
-
-		// A write whose Origin is somewhere else, refused before it reaches a
-		// handler. SameSite=Strict does not cover this: for a cookie, another
-		// port on this host is the same site, so a page served there can POST
-		// here with the session cookie attached.
-		if allowed := s.publicOrigins(r); crossOriginWrite(r, allowed) {
-			s.auditFromOutside(ctx, "blocked", "", s.clientIP(r),
-				"a write from "+r.Header.Get("Origin")+"; this panel answers to "+strings.Join(allowed, " "))
-			// The message names both sides. A bare 403 in a browser console is
-			// what a reverse proxy in front of this looked like from the
-			// outside, and it took a person reporting 「无法创建底部终端」 to
-			// find out: nginx terminates TLS, so the browser is on https and
-			// the panel sees http, and every write looked cross-origin.
-			writeErr(w, http.StatusForbidden,
-				"this panel answers to "+strings.Join(allowed, ", ")+", and that request came from "+
-					r.Header.Get("Origin")+". Set VIBEPANEL_DOMAIN, or add it to VIBEPANEL_PUBLIC_ORIGINS.")
+		// The address, then a write whose Origin is somewhere else, both
+		// refused before a handler runs. refuseBlockedWrite is the one copy.
+		if s.refuseBlockedWrite(ctx, w, r) {
 			return
 		}
 
@@ -210,6 +192,20 @@ func (s *Server) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// crossOriginRefusal is the 403's words, in one place for both guards.
+// Origin: null gets its own: it is a sandboxed page or a redirect from another
+// site, and telling that person to set VIBEPANEL_DOMAIN would send them to
+// change a setting that has nothing to do with it.
+func crossOriginRefusal(r *http.Request, allowed []string) string {
+	origin := r.Header.Get("Origin")
+	if strings.TrimSuffix(origin, "/") == "null" {
+		return "this write came from a sandboxed page or was redirected here from another site (Origin: null), " +
+			"and the panel does not accept those with its cookie"
+	}
+	return "this panel answers to " + strings.Join(allowed, ", ") + ", and that request came from " +
+		origin + ". Set VIBEPANEL_DOMAIN, or add it to VIBEPANEL_PUBLIC_ORIGINS."
+}
+
 // refuseBlockedWrite re-runs the two checks RequireAuth makes ahead of its
 // currentUser lookup, for the auth routes registered outside the
 // authenticated group.
@@ -223,22 +219,61 @@ func (s *Server) RequireAuth(next http.Handler) http.Handler {
 //
 // Same order, same messages, same audit event as the middleware: a second
 // wording for a guard is how the two copies drift.
+//
+// RequireAuth calls this rather than a copy of it, which it used to be.
 func (s *Server) refuseBlockedWrite(ctx context.Context, w http.ResponseWriter, r *http.Request) bool {
-	ip := s.clientIP(r)
-	if s.Auth != nil && !auth.Allowed(ip, s.Auth.Allow) {
-		s.auditFromOutside(ctx, "blocked", "", ip, "address not in the allowlist")
-		writeErr(w, http.StatusForbidden, "not allowed from this address")
+	if s.refuseAddress(ctx, w, r) {
 		return true
 	}
+	// A write whose Origin is somewhere else. SameSite=Strict does not cover
+	// this: for a cookie, another port on this host is the same site, so a
+	// page served there can POST here with the session cookie attached.
 	if allowed := s.publicOrigins(r); crossOriginWrite(r, allowed) {
-		s.auditFromOutside(ctx, "blocked", "", ip,
+		s.auditFromOutside(ctx, "blocked", "", s.clientIP(r),
 			"a write from "+r.Header.Get("Origin")+"; this panel answers to "+strings.Join(allowed, " "))
-		writeErr(w, http.StatusForbidden,
-			"this panel answers to "+strings.Join(allowed, ", ")+", and that request came from "+
-				r.Header.Get("Origin")+". Set VIBEPANEL_DOMAIN, or add it to VIBEPANEL_PUBLIC_ORIGINS.")
+		// The message names both sides. A bare 403 in a browser console is
+		// what a reverse proxy in front of this looked like from the outside,
+		// and it took a person reporting 「无法创建底部终端」 to find out:
+		// nginx terminates TLS, so the browser is on https and the panel sees
+		// http, and every write looked cross-origin.
+		writeErr(w, http.StatusForbidden, crossOriginRefusal(r, allowed))
 		return true
 	}
 	return false
+}
+
+// ─── the address allowlist ────────────────────────────────────────────────
+//
+// --allow-from is enforced per route, not by a firewall, so every surface
+// that answers a request has to ask. It was asked by thirteen hand-copied
+// blocks; one capability route that forgot was AUDIT.md's first finding. These
+// three are the question, and every caller asks through them.
+
+// addressAllowed reports whether the request's address is on --allow-from.
+func (s *Server) addressAllowed(r *http.Request) bool {
+	return s.Auth == nil || auth.Allowed(s.clientIP(r), s.Auth.Allow)
+}
+
+// refuseAddress answers 403 to an address off the allowlist and records it,
+// and reports whether it did.
+func (s *Server) refuseAddress(ctx context.Context, w http.ResponseWriter, r *http.Request) bool {
+	if s.addressAllowed(r) {
+		return false
+	}
+	s.auditFromOutside(ctx, "blocked", "", s.clientIP(r), "address not in the allowlist")
+	writeErr(w, http.StatusForbidden, "not allowed from this address")
+	return true
+}
+
+// refuseAddressQuietly is refuseAddress without the audit row, for the
+// callers that never wrote one: a page's files, where one page load is many
+// requests, and sign-in, which records attempts its own way.
+func (s *Server) refuseAddressQuietly(w http.ResponseWriter, r *http.Request) bool {
+	if s.addressAllowed(r) {
+		return false
+	}
+	writeErr(w, http.StatusForbidden, "not allowed from this address")
+	return true
 }
 
 // stillAuthorized re-runs the checks RequireAuth made, for a request whose
@@ -271,7 +306,7 @@ func (s *Server) refuseBlockedWrite(ctx context.Context, w http.ResponseWriter, 
 // than an argument — both directions have been argued convincingly in this
 // file's history and the arguments were wrong.
 func (s *Server) stillAuthorized(r *http.Request) bool {
-	if s.Auth != nil && !auth.Allowed(s.clientIP(r), s.Auth.Allow) {
+	if !s.addressAllowed(r) {
 		return false
 	}
 	_, ok, _ := s.currentUser(r)
@@ -497,6 +532,16 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := s.clientIP(r)
 
+	// The allowlist first, as on every route. Setup asked the throttle and
+	// the token and never this, so on a panel started with --allow-from and
+	// no account yet, anybody outside it holding the token -- which is
+	// printed to a terminal and a unit's journal -- could make the first
+	// account. Refused with the same audit row as every other address off
+	// the list.
+	if s.refuseAddress(ctx, w, r) {
+		return
+	}
+
 	// The same throttle as sign-in, and this endpoint has the better claim to
 	// it of the two.
 	//
@@ -526,7 +571,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if n > 0 {
 		// Once an account exists this endpoint is closed forever. Leaving it
 		// open would be a second way in that nobody is watching.
-		writeErr(w, http.StatusConflict, "already configured")
+		writeErrCode(w, http.StatusConflict, CodeAlreadyConfigured, "already configured")
 		return
 	}
 
@@ -546,7 +591,7 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 		// is a stranger, and a stranger must not be able to choose how many
 		// rows the audit table grows by.
 		s.auditFromOutside(ctx, "setup.rejected", req.Username, ip, "bad setup token")
-		writeErr(w, http.StatusUnauthorized, "bad setup token")
+		writeErrCode(w, http.StatusUnauthorized, CodeBadSetupToken, "bad setup token")
 		return
 	}
 	// Cleared here rather than at the end, because everything below this line
@@ -625,8 +670,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ip := s.clientIP(r)
 
-	if s.Auth != nil && !auth.Allowed(s.clientIP(r), s.Auth.Allow) {
-		writeErr(w, http.StatusForbidden, "not allowed from this address")
+	if s.refuseAddressQuietly(w, r) {
 		return
 	}
 	if s.throttled(w, ip) {
@@ -641,7 +685,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Every path from here derives a key, so the queue is here rather than
 	// around each call: see passwordSlots.
 	if !acquirePasswordSlot(r.Context()) {
-		writeErr(w, http.StatusServiceUnavailable, "the panel is busy; try again")
+		writeErrCode(w, http.StatusServiceUnavailable, CodeBusy, "the panel is busy; try again")
 		return
 	}
 	defer releasePasswordSlot()
@@ -670,7 +714,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		// exist.
 		auth.DummyVerify(req.Password)
 		s.auditLoginFailure(ctx, req.Username, ip, "unknown user")
-		writeErr(w, http.StatusUnauthorized, "wrong username or password")
+		writeErrCode(w, http.StatusUnauthorized, CodeBadCredentials, "wrong username or password")
 		return
 	}
 	ok, verr := auth.VerifyPassword(req.Password, user.PasswordHash)
@@ -679,7 +723,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		s.auditLoginFailure(ctx, req.Username, ip, "wrong password")
-		writeErr(w, http.StatusUnauthorized, "wrong username or password")
+		writeErrCode(w, http.StatusUnauthorized, CodeBadCredentials, "wrong username or password")
 		return
 	}
 
@@ -706,9 +750,7 @@ func (s *Server) throttled(w http.ResponseWriter, ip string) bool {
 	if !blocked {
 		return false
 	}
-	w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-	writeErr(w, http.StatusTooManyRequests,
-		"too many attempts; try again in "+wait.Round(time.Second).String())
+	writeThrottled(w, wait)
 	return true
 }
 
@@ -834,9 +876,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.Auth != nil {
 		if wait, blocked := s.Auth.Throttle.Delay(ip, time.Now()); blocked {
-			w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-			writeErr(w, http.StatusTooManyRequests,
-				"too many attempts; try again in "+wait.Round(time.Second).String())
+			writeThrottled(w, wait)
 			return
 		}
 	}
@@ -850,7 +890,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	// Two derivations below, the check and the new hash, at 64 MiB each. See
 	// passwordSlots: a session is not a licence to allocate gigabytes.
 	if !acquirePasswordSlot(r.Context()) {
-		writeErr(w, http.StatusServiceUnavailable, "the panel is busy; try again")
+		writeErrCode(w, http.StatusServiceUnavailable, CodeBusy, "the panel is busy; try again")
 		return
 	}
 	defer releasePasswordSlot()
@@ -861,7 +901,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 			s.Auth.Throttle.Fail(ip, time.Now())
 		}
 		s.audit(ctx, "password.change_refused", user.Username, ip, "current password did not match")
-		writeErr(w, http.StatusUnauthorized, "the current password is wrong")
+		writeErrCode(w, http.StatusUnauthorized, CodeWrongCurrentPassword, "the current password is wrong")
 		return
 	}
 	if err := validateCredentials(user.Username, req.Next); err != nil {
@@ -869,7 +909,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Next == req.Current {
-		writeErr(w, http.StatusBadRequest, "the new password is the same as the old one")
+		writeErrCode(w, http.StatusBadRequest, CodeSamePassword, "the new password is the same as the old one")
 		return
 	}
 
@@ -897,4 +937,34 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(ctx, "password.changed", user.Username, ip, "other sessions signed out")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// The error codes the sign-in surface sends beside its English sentence.
+//
+// The sentence is for a log and for a client that does not know the code; the
+// code is what the panel's own page translates. Without one the page showed
+// "wrong username or password" verbatim under a Chinese form, because the
+// only thing it had to go on was prose, and matching prose is how a reworded
+// error becomes an untranslated one again. They are API: a rename is a break.
+// TestAuthRefusalsCarryTheirCode pins each against the wire.
+const (
+	CodeBadCredentials       = "bad_credentials"
+	CodeTooManyAttempts      = "too_many_attempts"
+	CodeBusy                 = "busy"
+	CodeBadSetupToken        = "bad_setup_token"
+	CodeAlreadyConfigured    = "already_configured"
+	CodeWrongCurrentPassword = "wrong_current_password"
+	CodeSamePassword         = "same_password"
+)
+
+// writeThrottled answers a request the sign-in throttle is holding back, with
+// the wait as a number so the page can say it in its own language.
+func writeThrottled(w http.ResponseWriter, wait time.Duration) {
+	secs := int(wait.Seconds()) + 1
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error":      "too many attempts; try again in " + wait.Round(time.Second).String(),
+		"code":       CodeTooManyAttempts,
+		"retryAfter": secs,
+	})
 }

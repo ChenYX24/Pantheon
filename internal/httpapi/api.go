@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"os/exec"
@@ -117,6 +118,24 @@ type Server struct {
 	// zone caches the configured time zone. Not a field to set: read it with
 	// s.loc(ctx), which resolves the setting the first time and remembers.
 	zone zoneCache
+
+	// prt is the plugin frames' in-memory state: the handle salt and the
+	// bus that wakes every open event stream. See pluginruntime.go. psv is
+	// the services': compiled programs, logs, event workers, schedules and
+	// sources. See pluginservice.go. serviceCtx is the context the workers
+	// run under, set by Poll.
+	prt pluginRuntime
+	psv pluginServiceState
+	ppr pluginProcessState
+	// phx is the door on the panel's port: pluginhttp.go.
+	phx pluginHTTPState
+	// pdl is the declared downloads: plugindownload.go.
+	pdl pluginDownloadState
+	// ntc is the per-session rate on say and notify: notices.go.
+	ntc        noticeState
+	serviceCtx context.Context
+	// streams is what EndStreams closes: streams.go.
+	streams streamStop
 
 	// Restart asks the process to stop and be brought back by whatever
 	// supervises it. Nil in tests and in the admin CLI, which is also what the
@@ -462,6 +481,15 @@ func (s *Server) Routes() http.Handler {
 		// An admin page's API: its own credential, its own table, the same
 		// placement as the share routes. See admingrants.go.
 		s.registerAdminAPIRoutes(r)
+		// A plugin frame's API: its own credential, its own table, the same
+		// placement, and which routes answer is the capability table's
+		// decision. See pluginruntime.go and red line 10.
+		s.registerPluginAPIRoutes(r)
+		// Where the internet calls a plugin: verified against the plugin's
+		// declared secret before anything runs. See pluginservice.go.
+		s.registerPluginInboundRoute(r)
+		s.registerPluginHTTPRoute(r)
+		s.registerMeRoutes(r)
 
 		// Everything else needs a session. This panel hands out a writable
 		// terminal; there is no such thing as a harmless unauthenticated
@@ -488,6 +516,9 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/sessions/{id}/restart", s.handleRestartSession)
 			r.Post("/sessions/{id}/rollover", s.handleRollover)
 			r.Get("/sessions/{id}/rollover", s.handleRolloverStatus)
+			s.registerSessionIORoutes(r)
+			s.registerSessionNoticeRoutes(r)
+			s.registerAttachmentRoutes(r)
 			// Plural and id-less on purpose. Restoring after a reboot is a
 			// batch by nature — the whole machine went down, so the whole list
 			// is gone — and a per-id route would have the browser fire two
@@ -522,6 +553,21 @@ func (s *Server) Routes() http.Handler {
 			// here, by somebody signed in. Nothing about a page is editable
 			// through a share token.
 			s.registerPageRoutes(r)
+			// Plugins: installed, granted and enabled from here, by somebody
+			// signed in. Nothing about a plugin is installable through any
+			// other credential, which is what keeps a plugin from installing
+			// plugins. docs/plugins.md §6.
+			s.registerPluginRoutes(r)
+			s.registerPluginDevRoutes(r)
+			s.registerPluginServiceRoutes(r)
+			s.registerPluginProcessRoutes(r)
+			s.registerPluginHTTPOwnerRoutes(r)
+			s.registerPluginDownloadRoutes(r)
+			s.registerPluginModuleRoutes(r)
+			s.registerPluginNewRoutes(r)
+			// A plugin's own routes for the owner: /api/ext/{id}/…, under the
+			// session like everything else here.
+			s.registerPluginExtRoutes(r)
 		})
 
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -577,6 +623,13 @@ func (s *Server) Routes() http.Handler {
 	// A page's admin page: the session mints a grant here, and the grant
 	// serves the page. Before the catch-all for the same reason.
 	s.registerAdminPageRoutes(r)
+	// The enabled plugin themes, as one stylesheet index.html links.
+	s.registerPluginThemeRoute(r)
+	// A plugin frame's files: the grant serves them, sandboxed. Before the
+	// catch-all for the same reason the share routes are.
+	s.registerPluginFrameRoutes(r)
+	// A rung-4 module's files, under the session and the panel-wide switch.
+	s.registerPluginCodeRoute(r)
 
 	r.Handle("/*", webui.HandlerAt(s.Cfg.StaticDir, s.Cfg.BasePath))
 	if s.Cfg.BasePath == "" {
@@ -733,6 +786,8 @@ func (s *Server) snapshot(ctx context.Context) []byte {
 // panels work at all in a second window, where before they simply never
 // updated and the second save overwrote the first.
 func (s *Server) notifyPanel(projectID, kind string) {
+	s.bumpPluginWatchers()
+	s.pluginEventRaised(pluginEvent{Name: map[string]string{"note": "note.changed", "todos": "todo.changed"}[kind], ProjectID: projectID, Kind: kind})
 	if s.Hub == nil {
 		return
 	}
@@ -755,6 +810,9 @@ func (s *Server) notifyPanel(projectID, kind string) {
 }
 
 func (s *Server) notifyState() {
+	// Plugin frames first: their bus is a closed channel and costs nothing
+	// when nobody is listening.
+	s.bumpPluginWatchers()
 	if s.Hub == nil {
 		return
 	}
@@ -768,9 +826,19 @@ func (s *Server) notifyState() {
 		if payload == nil {
 			return nil
 		}
+		// The same test the poller makes. Every hook report calls this, and
+		// most repeat the state already stored: rebuilding and sending the
+		// whole snapshot to every viewer for those was measured at 40 KB/s per
+		// viewer of bytes identical to what each already had.
 		s.snapMu.Lock()
-		s.lastSnapshot = payload
+		changed := !bytes.Equal(payload, s.lastSnapshot)
+		if changed {
+			s.lastSnapshot = payload
+		}
 		s.snapMu.Unlock()
+		if !changed {
+			return nil
+		}
 		return payload
 	})
 }
@@ -1015,6 +1083,15 @@ func (s *Server) HandleKey(sessionID string) {
 	}
 }
 
+// outputTouchEvery is how often a printing session's last_output_at is
+// written. It was once a second, which on the running panel was five commits
+// a second for five busy sessions -- the busiest writer in the database, for
+// a column read only in minutes: the sidebar ranks quietness in sixty-second
+// buckets (quietBucket), the archive compares it for equality, and idle
+// projects are judged in days. Fifteen seconds is a quarter of the smallest
+// of those grains.
+const outputTouchEvery = 15 * time.Second
+
 // HandleSignals records what the PTY pump observed. Wired to
 // session.Manager.OnSignals; runs on the pump goroutine, so it must be quick.
 func (s *Server) HandleSignals(sig session.Signals) {
@@ -1031,7 +1108,7 @@ func (s *Server) HandleSignals(sig session.Signals) {
 		s.outputSeen = map[string]time.Time{}
 	}
 	last := s.outputSeen[sig.SessionID]
-	if now.Sub(last) < time.Second {
+	if now.Sub(last) < outputTouchEvery {
 		s.outMu.Unlock()
 		return
 	}
@@ -1111,6 +1188,13 @@ type stateResponse struct {
 	// install the reporter, or reload the sessions that started before it.
 	HooksInstalled bool `json:"hooksInstalled"`
 
+	// PluginsRev rises on every change to the plugins: an install, an
+	// enable, dev mode, a removal. The list itself is not in the snapshot --
+	// it changes rarely and every viewer gets every snapshot -- but one
+	// integer lets a page re-read the list and the theme sheet the moment
+	// it changes instead of on a timer. docs/plugins.md §5a.
+	PluginsRev uint64 `json:"pluginsRev"`
+
 	// Stale is why the panel has stopped keeping its records up to date, and
 	// empty when it has not. A full disk is the case this was written for: the
 	// terminals keep working, so nothing else on screen looks wrong.
@@ -1170,6 +1254,7 @@ func (s *Server) buildState(ctx context.Context) (stateResponse, error) {
 		Live:            emptyIfNil(s.Manager.LiveIDs()),
 		Fullscreen:      emptyIfNil(fullscreenNow(&s.fullscreen)),
 		Frozen:          emptyIfNil(s.frozenNow()),
+		PluginsRev:      s.prt.pluginsRev.Load(),
 		ProjectOrder:    orderMode(manual),
 		HasProjectOrder: hasOrder,
 		StateGuessed:    s.stateIsGuessed(sessions),
@@ -1443,6 +1528,17 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request, req creat
 	} else if !errors.Is(err, store.ErrNotFound) {
 		s.writeStoreErr(w, err)
 		return
+	}
+	// A directory is one project. A second row at the same path was two
+	// sidebars entries for one place, and `project order` and `session new
+	// --project <name>` then had two of the same name to choose between.
+	if existing, err := s.DB.ListProjects(r.Context()); err == nil {
+		for _, p := range existing {
+			if filepath.Clean(p.Path) == abs {
+				writeErr(w, http.StatusConflict, "that directory is already the project "+p.Name+" ("+p.ID+")")
+				return
+			}
+		}
 	}
 	p, err := s.DB.CreateProject(r.Context(), id.New(), req.Name, abs)
 	if err != nil {
@@ -1759,6 +1855,12 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request, req creat
 		Height: req.Rows,
 	})
 	if err != nil {
+		// tmux may have made it anyway: a request whose context ended while
+		// new-session was in flight kills the client, not what the server
+		// already did, and then no row is ever written for it. The same
+		// cleanup as a failed row below; Kill is a no-op when it is absent,
+		// and the name is this request's own.
+		_ = s.Tmux.Kill(context.WithoutCancel(ctx), tmuxName)
 		if req.resourceEnv != nil {
 			// tmux errors include argv, which contains every -e secret value.
 			writeErr(w, http.StatusInternalServerError, "could not create the resource session")
@@ -1801,6 +1903,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request, req creat
 	if err := s.DB.TouchProject(ctx, p.ID); err != nil {
 		s.Log.Warn("touch project", "project", p.ID, "err", err)
 	}
+	s.pluginEventRaised(pluginEvent{Name: "session.created", SessionID: sid, ProjectID: p.ID})
 
 	// Attach now, not at the next poll. A session can ring the bell within a
 	// second of starting, and the latched-flag read in Attach is what keeps
@@ -1821,6 +1924,12 @@ type patchSessionRequest struct {
 	// RestoreOnBoot asks for this session to be rebuilt without confirmation
 	// the next time the panel starts and finds its tmux session gone.
 	RestoreOnBoot *bool `json:"restoreOnBoot"`
+	// What the session says about itself, settable by the owner too (the
+	// CLI's `session info`); the same fields as a session's own door.
+	Summary  *string  `json:"summary"`
+	Progress *int     `json:"progress"`
+	Labels   []string `json:"labels"`
+	Why      string   `json:"why"`
 }
 
 func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
@@ -1862,6 +1971,19 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.RestoreOnBoot != nil {
 		if err := s.DB.SetSessionRestoreOnBoot(ctx, sid, *req.RestoreOnBoot); err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+	}
+	if req.Summary != nil || req.Progress != nil || req.Labels != nil || req.Why != "" {
+		row, err := s.DB.GetSession(ctx, sid)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		u, _ := currentUserFrom(r)
+		if err := s.applySessionInfo(ctx, row, mePatch{Summary: req.Summary, Progress: req.Progress, Labels: req.Labels, Why: req.Why},
+			u.Username, s.clientIP(r)); err != nil {
 			s.writeStoreErr(w, err)
 			return
 		}
@@ -1916,7 +2038,7 @@ func (s *Server) hookEnv(ctx context.Context, sessionID, projectID string) []str
 	if token != "" {
 		token = hooks.ReportToken(token, sessionID)
 	}
-	return hooks.SessionEnv(sessionID, projectID, s.Cfg.LoopbackURL(), token)
+	return hooks.SessionEnv(sessionID, projectID, s.Cfg.LoopbackURL()+s.Cfg.BasePath, token)
 }
 
 func (s *Server) handleRestartSession(w http.ResponseWriter, r *http.Request) {
@@ -2052,6 +2174,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
+	s.pluginEventRaised(pluginEvent{Name: "session.gone", SessionID: rec.ID, ProjectID: rec.ProjectID})
 	s.notifyState()
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -2063,6 +2186,15 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 const maxBodyBytes = 1 << 20
 
 func decode(w http.ResponseWriter, r *http.Request, dst any) bool {
+	// JSON says so. A form a browser will send from any page without asking
+	// -- text/plain, urlencoded, multipart -- is not a body this panel
+	// accepts, whatever it parses as: a text/plain form whose field name and
+	// value join at the "=" into valid JSON is how a page elsewhere wrote a
+	// project here. Not the guard (crossOriginWrite is); the second lock.
+	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
+		writeErr(w, http.StatusUnsupportedMediaType, "a body here is JSON, sent as Content-Type: application/json")
+		return false
+	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
@@ -2080,6 +2212,13 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+// writeErrCode is writeErr with a stable machine-readable code beside the
+// sentence, for the refusals the panel's own page shows to a person and has to
+// say in their language. See the Code constants in auth.go.
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
 // writeStoreErr answers a failed database call, and remembers that it failed.
@@ -2251,6 +2390,19 @@ const trimInterval = 5 * time.Minute
 // database housekeeping on a timer, which is what this loop already is, and a
 // second lifecycle to start, stop and get wrong buys nothing.
 func (s *Server) Poll(ctx context.Context) {
+	if s.Tmux != nil && s.Log != nil {
+		s.Tmux.SetLogger(s.Log)
+	}
+	// What was stored in the clear before it was sealed: launch profiles'
+	// secret variables and the webhook list. Once, here, because Poll is the
+	// one thing every running panel starts; see store/sealed.go.
+	if s.DB != nil {
+		if n, err := s.DB.ResealPlaintext(ctx, webhooksKey); err != nil {
+			s.Log.Warn("sealing stored secrets", "err", err)
+		} else if n > 0 {
+			s.Log.Info("sealed stored secrets", "rows", n)
+		}
+	}
 	t := time.NewTicker(pollInterval)
 	defer t.Stop()
 	every := s.TrimEvery
@@ -2280,6 +2432,13 @@ func (s *Server) Poll(ctx context.Context) {
 	// events.go: the producer side is a non-blocking send precisely so that
 	// nothing on this goroutine ever waits for that write.
 	go s.drainEvents(ctx)
+	// The plugin services' clock and event workers, for the same reason the
+	// drain is a goroutine of its own: nothing a plugin does runs here.
+	s.serviceCtx = ctx
+	s.ensurePluginWorkers(ctx)
+	s.ensurePluginProcesses(ctx)
+	go s.pluginServiceLoop(ctx)
+	go s.pluginStampLoop(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -2360,14 +2519,24 @@ func (s *Server) markVanished(ctx context.Context, row store.Session) error {
 	if err := s.DB.SetSessionExit(ctx, row.ID, true, store.ExitStatusVanished); err != nil {
 		return err
 	}
+	s.pluginEventRaised(pluginEvent{Name: "session.gone", SessionID: row.ID, ProjectID: row.ProjectID})
 	if row.State == session.StateDone {
 		return nil
 	}
 	return s.setSessionState(ctx, row, session.StateDone, session.SourceHeuristic)
 }
 
+// pollTmuxBudget bounds each tmux call the poller makes. They ran on the
+// service context, which has no deadline, so a tmux server that stopped
+// answering -- stuck in a hook, stopped, swapped out under memory pressure --
+// held the tick, and the tickers sharing its goroutine, for good, and nothing
+// said so: only an error marks the panel stale. A variable for the test.
+var pollTmuxBudget = 5 * time.Second
+
 func (s *Server) pollOnce(ctx context.Context) error {
-	infos, err := s.Tmux.List(ctx)
+	lctx, lcancel := context.WithTimeout(ctx, pollTmuxBudget)
+	infos, err := s.Tmux.List(lctx)
+	lcancel()
 	if err != nil {
 		return err
 	}
@@ -2414,6 +2583,18 @@ func (s *Server) pollOnce(ctx context.Context) error {
 	// in vibepanel.conf -- so nothing in the byte stream says a TUI is running.
 	fullscreen := make([]string, 0, len(rows))
 	now := time.Now()
+	// One session's failed write is that session's, not the tick's. Each of
+	// these returned out of the loop, so a single "database is locked" -- the
+	// hooks and the archive write at the same time as this -- skipped every
+	// session after it that tick and marked the panel stale. The rest still
+	// run; the first failure is still returned, so the panel still says so.
+	var firstErr error
+	fail := func(row store.Session, what string, err error) {
+		if firstErr == nil {
+			firstErr = err
+		}
+		s.Log.Debug("poll", "session", row.ID, "step", what, "err", err)
+	}
 	for _, row := range rows {
 		info, alive := byName[row.TmuxName]
 		if alive && info.AlternateOn {
@@ -2421,7 +2602,7 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		}
 		if !alive {
 			if err := s.markVanished(ctx, row); err != nil {
-				return err
+				fail(row, "vanished", err)
 			}
 			continue
 		}
@@ -2442,37 +2623,34 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		// window flag and the client reaching the server, where the flag was
 		// cleared without the byte ever being forwarded; this tick is what
 		// finds it. Consumed here, so a bell is read once.
-		s.consumeLatchedBell(ctx, row.ID, info)
+		tctx, tcancel := context.WithTimeout(ctx, pollTmuxBudget)
+		s.consumeLatchedBell(tctx, row.ID, info)
 
 		live, attached := s.Manager.Get(row.ID)
 		if !attached {
-			if l, aerr := s.Manager.Attach(ctx, row.ID, row.TmuxName, row.Cols, row.Rows); aerr != nil {
+			// The context bounds the attach's setup (has-session, the history
+			// capture); the attached client itself is not tied to it.
+			if l, aerr := s.Manager.Attach(tctx, row.ID, row.TmuxName, row.Cols, row.Rows); aerr != nil {
 				s.Log.Debug("attach for monitoring", "session", row.ID, "err", aerr)
 			} else {
 				live = l
 			}
 		}
-		// This writes on every tick whether anything changed or not, and so does
-		// the title update below. It was written down as a finding -- `UPDATE
-		// sessions SET cwd = ?, command = ?` has no value comparison, so at the
-		// two dozen sessions this is built for and a two-second tick, twenty-four
-		// writes a second at complete idle, forever, to the disk the projects live
-		// on -- and the premise was wrong. SQLite elides an update that changes
-		// nothing.
+		tcancel()
+		// Only when something changed, and the same for the title below.
 		//
-		// Measured with two instruments that agree, in
-		// TestAnUpdateThatChangesNothingDoesNotWrite: a thousand identical calls
-		// move `PRAGMA data_version` by zero and grow the WAL by zero bytes, while
-		// a thousand that change the row grow it by 4,120,032 -- one page each.
-		// The remaining cost is the statement itself, 10µs, which at twenty-four a
-		// second is a quarter of a millisecond per second.
-		//
-		// So the comparison SetSessionExit and SetSessionState make is not a
-		// convention these two lines break; it is those two needing it for their
-		// own reasons. The guard is left off deliberately. If SQLite ever stops
-		// eliding these the test above fails, and then it is worth adding.
-		if err := s.DB.UpdateSessionRuntime(ctx, row.ID, info.Path, info.Command); err != nil {
-			return err
+		// These wrote on every tick, deliberately: SQLite elides an UPDATE that
+		// changes nothing, so the disk saw none of it, and
+		// TestAnUpdateThatChangesNothingDoesNotWrite still says so. What the
+		// disk does not see the lock does. Each statement takes the database's
+		// one write lock, two per session per tick -- 122 every two seconds on
+		// the running panel -- queued against the hooks, the archive and every
+		// save a person makes, and each one a chance at "database is locked".
+		// The row is already in hand; comparing costs nothing.
+		if info.Path != row.CWD || info.Command != row.Command {
+			if err := s.DB.UpdateSessionRuntime(ctx, row.ID, info.Path, info.Command); err != nil {
+				fail(row, "runtime", err)
+			}
 		}
 		// The title the PTY saw, which is where a tmux-aware program's OSC
 		// arrives. See Live.title: it is not in #{pane_title} and never will
@@ -2481,18 +2659,20 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		if live != nil {
 			ptyTitle = live.Title()
 		}
-		if title := deriveTitle(info, ptyTitle, row.Scratch); title != "" {
+		if title := deriveTitle(info, ptyTitle, row.Scratch); title != "" &&
+			row.TitleSource == store.TitleAuto && session.TruncateTitle(title) != row.Title {
 			// SetSessionTitle with TitleAuto is a no-op once the user has
-			// renamed the tab, so this cannot stomp a manual name.
+			// renamed the tab, so this cannot stomp a manual name; the source
+			// is checked here too only so a renamed tab costs no statement.
 			if err := s.DB.SetSessionTitle(ctx, row.ID, title, store.TitleAuto); err != nil {
-				return err
+				fail(row, "title", err)
 			}
 		}
 		// ExitStatus rather than DeadStatus: a killed process leaves the latter
 		// empty, so an agent the OOM killer took read as "exited with 0".
 		if info.Dead != row.Exited || (info.Dead && info.ExitStatus() != row.ExitStatus) {
 			if err := s.DB.SetSessionExit(ctx, row.ID, info.Dead, info.ExitStatus()); err != nil {
-				return err
+				fail(row, "exit", err)
 			}
 		}
 		// A Codex with no hook reporting: what its own rollout file says. Here,
@@ -2533,7 +2713,8 @@ func (s *Server) pollOnce(ctx context.Context) error {
 				// because this loop is what keeps the panel's idea of every
 				// session current and nothing hung off it may hold it up.
 				if err := s.setSessionState(ctx, row, st, src); err != nil {
-					return err
+					fail(row, "state", err)
+					continue
 				}
 				// On the transition, not on the state. This runs every two
 				// seconds against every session; firing on "is waiting" rather
@@ -2547,7 +2728,7 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		}
 	}
 	s.fullscreen.Store(&fullscreen)
-	return nil
+	return firstErr
 }
 
 // deriveTitle picks the best automatic name for a session.

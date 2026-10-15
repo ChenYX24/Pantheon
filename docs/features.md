@@ -333,6 +333,136 @@ got built, token spend, a phone glance, or a session wall), published, in the
 same `page-…` directories. The addresses on walls keep working, with the same
 detail level, scope, remark and expiry.
 
+## Plugins
+
+Settings → Plugins, or `/plugins`. A plugin is a directory with a
+`plugin.json`, or that directory as a zip, and what it does is one or more
+rungs of a ladder: a **theme** (a stylesheet of the panel's colour tokens and
+nothing else), a **panel** (HTML in a sandboxed frame at a slot), a
+**service** (`server.js` inside the panel), a **process** (a command the panel
+supervises) or an **unsandboxed** module. The design, the capability table and
+what each rung may reach are in [plugins.md](plugins.md); this section is what
+you see.
+
+**Arriving is not installing.** *Install from zip* or *From a directory* reads
+the plugin by the publish rules and stores it. Nothing runs. What opens is the
+install screen: what it is, which rungs, what it may do (one box per
+capability, the two that touch a process in red and first), where it reaches
+(each host, marked *enforced* or *declared*), what it runs, what it keeps. The
+button says *Install* for a theme, *Install and grant* for a panel or service,
+*Run this as you* for a process or module. Untick a box and the plugin does not
+get that capability; it sees what was granted and degrades. The same screen,
+in both languages, is what `vibepanel plugin describe` prints.
+
+**Secrets first.** A plugin that needs a secret (a process's environment, a
+secret-typed setting) is installed disabled until every one is set, in the
+card's *Settings*. A secret is typed once and never read back; the field says
+only whether it is set.
+
+**Settings the panel draws.** A plugin declares its settings as a schema and
+the panel draws the form with its own controls, in your language, in the
+current theme. A redesign of this page moves nothing a plugin wrote.
+
+**A theme joins the toggle.** An enabled plugin theme is in the cycle of the
+theme button on every page (system, light, dark, then each theme), is applied
+before first paint on a reload, and recolours the terminal with everything
+else, because a theme is the tokens the terminal palette is read from.
+
+**A plugin's panes.** A plugin with a `sidepanel.pane` entry is a third tab
+in the side panel's strip, with the icon and title from its manifest, movable
+and stackable like Files and Notes; one with a `settings.section` entry is a
+block at the end of the settings group it names; a `page` entry is a page of
+its own at `/x/<path>`, with the panel's header around it; a `header.item`
+is a small box in the panel's header. Each is the plugin's HTML in a sandboxed
+frame with no cookie and no storage, holding a grant that reaches that
+plugin's own API and nothing else, and it draws the panel through handles:
+it never sees a session's id, and never a path unless you ticked that box.
+What a frame may ask of the panel is a toast (`ui:notify`), to open a session
+(`ui:open`), the panel's own confirm dialog, and its height.
+
+**A plugin's service.** A plugin with a `server.js` runs code inside the
+panel: on the events it subscribes to (a session changing state, created or
+gone, a project archived, a note or checklist changed), on a schedule, and
+when one of its own routes is called -- from its frames, or by you at
+`/api/ext/<id>/…` with the panel's session or an API token. It may declare
+one route the internet can call, behind a secret you store. Each call runs in
+a fresh sandbox with a time budget and a cap on what it returns; its `ctx`
+has exactly the members of the capabilities you granted, so a script can be
+read for what it asks. The card's *Service* block shows its log, how many
+events it dropped because it could not keep up, and each source's last fetch.
+
+**A plugin's process.** A plugin with a `process` runs a command the panel
+supervises -- a bot, a bridge to somewhere, anything already written in
+whatever language -- from the installed version's own directory, with a
+cleared environment plus the secrets it named, its own credential in
+`VIBEPANEL_PLUGIN_URL` (reaching the plugin API, narrowed to the
+capabilities the process declared, and nothing else on the panel) and a
+state directory of its own. The install screen shows the exact command and
+says *Run this as you*. It is restarted with backoff when it fails and
+stopped after ten failures in ten minutes, which the card says; the card's
+*Process* block shows what it printed and restarts it. It is ended when the
+panel stops. Where the sessions run in a scope of their own, the process
+is placed beside them, so a plugin that leaks is measured with the
+sessions rather than with the panel.
+
+**An unsandboxed module.** The one rung the panel cannot limit: a plugin's
+`main.mjs` loaded on the panel's own page as you, for changing how a piece
+of the panel behaves rather than adding beside it. It is off until you turn
+on *Allow unsandboxed plugins* on the plugins page, where the red sentence
+is; the install screen carries the same paragraph and the button says *Run
+this as you*. A module gets a small `host` object -- a stylesheet to inject,
+two places to draw into (beside a session's name, in the header), the live
+state, the panel's API, a toast, a way to open a session -- and may import
+anything else, which is the point and the risk. The card says which panel
+versions it was tested on and goes amber outside them. Two ways back that
+need no working page: `?safe=1` on the address loads no plugin theme and no
+module for that tab, and `vibepanel plugin disable --all` turns every plugin
+and the switch off from a shell.
+
+**Dev mode.** A plugin read from a directory has a *Dev* button on its card:
+on, the directory's `plugin.json` and files are what runs, under the grants
+you already gave that id, and a change to a file reloads every one of its
+frames within a second -- an agent in a session beside it edits and sees. Off,
+the installed version runs again. A draft asking for a capability you have
+not granted runs without it, and the card says so.
+
+**A process on the panel's port.** A plugin's process can be served at
+`/api/plugin-http/<id>/` instead of opening a port: it listens on a unix
+socket the panel names, and the panel does the rest -- who may call (your
+sign-in, a *plugin token* you mint on the card per device and revoke one at
+a time, or the plugin's declared secret; never nobody), which origins may
+call across (your list on the card, exact, Bearer only), the rate limits,
+and the cleaning of every response so nothing a process returns can run as
+a page on the panel. The process sees none of your credentials, only a
+caller name and a per-start secret that proves the request came through
+the panel.
+
+**Declared downloads.** A plugin that needs a model or a native runtime
+declares it with a hash, and the panel fetches it, follows the release
+host's redirects with every hop checked, refuses anything but that hash,
+unpacks it safely under the plugin's assets directory and hands the
+process the path. A required one is fetched when you enable the plugin and
+the process waits for it; an optional one has a *Download* button on the
+card, with the size, the host and the progress, and *Remove* takes it away.
+
+**New plugin** is the start of that loop: a name and a template -- `theme`,
+`pane`, `service`, `process` or `full` -- and the panel scaffolds the
+directory under its data directory (or one you name) with `AGENTS.md`,
+`CLAUDE.md`, the SDK and its types, makes it a git repository, registers it
+as a project called `plugin-<name>` already in dev mode, and opens the
+launch picker for it with the first line typed at the agent's prompt. The
+templates are plugins the panel's tests install and run.
+
+**Upgrading** reads a newer version of the same id and draws the screen again
+with the boxes as you left them and any new line unticked; the old version
+keeps running until you confirm. **Removing** takes the versions, grants,
+settings and secrets with it. Everything is in the activity log under
+`plugin.`.
+
+From a shell, `vibepanel plugin list | init | check | describe | add |
+install --grant … | enable | disable | remove | export | caps` do the same
+things with the same words (`init --dev` is the button), and a grant made that way is audited as the user `cli`.
+
 ## On a phone, in a chat app
 
 A session that wants you can reach you in Telegram, 飞书 or 微信, and you

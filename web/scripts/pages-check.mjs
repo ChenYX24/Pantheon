@@ -835,6 +835,10 @@ setTimeout(() => { try { done('frame', frame.contentDocument ? 'readable' : 'opa
               overflowX: document.documentElement.scrollWidth > innerWidth + 1,
               injected: document.querySelectorAll('img[onerror], h1[style]').length,
               badge: document.querySelector('[data-vp-status]')?.getAttribute('data-vp-status') ?? null,
+              // A session that exited non-zero is a cross and a word of its own, and
+              // is not in the done total: `busy` has crashed rows in it.
+              crashedWord: /crashed/i.test(document.body.innerText),
+              crossShapes: document.querySelectorAll('svg path[d^="M5 5 L19 19"]').length,
             }
           })
           await tab.screenshot({ path: join(SHOTS, `${tpl.id}-${screen}-${fixture}.png`) })
@@ -844,6 +848,10 @@ setTimeout(() => { try { done('frame', frame.contentDocument ? 'readable' : 'opa
           if (report.injected) note('FAIL', where, 'the hostile fixture’s markup became elements')
           if (report.reordered) note('FAIL', where, 'a bidi override from a name reached the screen')
           if (!report.badge) note('FAIL', where, 'no connection badge on screen')
+          if ((tpl.id === 'wall' || tpl.id === 'glance') && fixture === 'busy' &&
+            (!report.crashedWord || report.crossShapes === 0)) {
+            note('FAIL', where, `a session that exited non-zero is not drawn as crashed (word ${report.crashedWord}, crosses ${report.crossShapes})`)
+          }
           if (!errors.length && !report.bad.length && !report.overflowX && !report.injected && !report.reordered &&
             report.badge) pass(where, 'clean')
           await ctx.close()

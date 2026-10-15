@@ -7,6 +7,7 @@ import { t, useLang } from '../i18n'
 import { askConfirm } from './ask'
 import { safeText } from './text'
 import { copyTextInGesture } from '../clipboard'
+import { isEnter } from './enter'
 
 /**
  * Credentials for programs.
@@ -127,7 +128,7 @@ export function ApiTokens() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void create()
+              if (isEnter(e)) void create()
             }}
             placeholder={t('tok.name')}
             data-testid="token-name"

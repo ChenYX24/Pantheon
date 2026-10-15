@@ -34,7 +34,24 @@ export const SHARING_PATH = appURL('/sharing')
 /** The page the chat bridge is set up from: routes.ts is the one place that spells it. */
 export const CHAT_PATH = appURL('/chat')
 
-export type Route = { kind: 'home'; projectId?: string; resources?: true; resourceId?: string } | { kind: 'projects' } | { kind: 'panel' } | { kind: 'sharing' } | { kind: 'chat' }
+/** The page plugins are installed, granted and switched from (docs/plugins.md). */
+export const PLUGINS_PATH = appURL('/plugins')
+
+/**
+ * Where a plugin's `page` slot mounts: `/x/<path>`, the path from its
+ * manifest. A prefix of its own so a plugin can never shadow the panel's
+ * pages, and short because it is typed.
+ */
+export const PLUGIN_PAGE_PREFIX = appURL('/x/')
+
+export type Route =
+  | { kind: 'home'; projectId?: string; resources?: true; resourceId?: string }
+  | { kind: 'projects' }
+  | { kind: 'panel' }
+  | { kind: 'sharing' }
+  | { kind: 'chat' }
+  | { kind: 'plugins' }
+  | { kind: 'plugin-page'; path: string }
 
 export function routeFor(pathname: string): Route {
   if (pathname === HOME_PATH || pathname === `${HOME_PATH}/`) return { kind: 'home' }
@@ -52,6 +69,9 @@ export function routeFor(pathname: string): Route {
   // whatever was typed, and a proxy may add one.
   if (pathname === SHARING_PATH || pathname === `${SHARING_PATH}/`) return { kind: 'sharing' }
   if (pathname === CHAT_PATH || pathname === `${CHAT_PATH}/`) return { kind: 'chat' }
+  if (pathname === PLUGINS_PATH || pathname === `${PLUGINS_PATH}/`) return { kind: 'plugins' }
+  const page = pluginPageOf(pathname)
+  if (page !== null) return { kind: 'plugin-page', path: page }
   return { kind: 'panel' }
 }
 
@@ -108,6 +128,17 @@ export function legacyHomeRedirect(pathname: string, search: string): string | n
   return `${homeProjectLink({ projectId })}?${query}`
 }
 
+/** The manifest path under the plugin-page prefix, or null for anything else. */
+export function pluginPageOf(pathname: string): string | null {
+  if (!pathname.startsWith(PLUGIN_PAGE_PREFIX)) return null
+  const rest = pathname.slice(PLUGIN_PAGE_PREFIX.length).replace(/\/$/, '')
+  return /^[a-z][a-z0-9-]{0,39}$/.test(rest) ? rest : null
+}
+
+export function pluginPagePath(path: string): string {
+  return `${PLUGIN_PAGE_PREFIX}${path}`
+}
+
 /**
  * The one thing the sharing page asks the panel to do: open a share page as
  * its project, with the Preview beside it and an agent in it.
@@ -140,6 +171,25 @@ export function pageToOpen(search: string): { id: string; fresh: boolean } | nul
   // rather than to a request the server records as refused.
   if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) return null
   return { id, fresh: q.get(FRESH_PARAM) === '1' }
+}
+
+export const OPEN_PROJECT_PARAM = 'project'
+
+/**
+ * The address the plugins page hands a new plugin's project over on: the
+ * panel, opening the launch picker for that project with the plugin's first
+ * line typed (docs/plugins.md §9). The same shape as a page's hand-over, for
+ * the same reason: the two roots share only the address.
+ */
+export function panelOpeningProject(projectId: string): string {
+  const q = new URLSearchParams({ [OPEN_PROJECT_PARAM]: projectId })
+  return `${PANEL_PATH}?${q.toString()}`
+}
+
+export function projectToOpen(search: string): string | null {
+  const id = new URLSearchParams(search).get(OPEN_PROJECT_PARAM)
+  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) return null
+  return id
 }
 
 export const OPEN_SESSION_PARAM = 'session'

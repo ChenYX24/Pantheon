@@ -1,8 +1,10 @@
 package tmux
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1953,5 +1955,69 @@ func TestKeysThatLookLikeFlagsAreTypedNotParsed(t *testing.T) {
 	}
 	if !strings.Contains(out, "-R") {
 		t.Fatalf("a dash-leading key was eaten as a flag; pane holds:\n%s", out)
+	}
+}
+
+// A server this process cannot reach is not a server with no sessions.
+// tmux says "error connecting to <socket> (Permission denied)", and run()
+// used to fold every "error connecting" into ErrNoServer: List returned an
+// empty list, the poller marked every session vanished and done, and Has
+// told restore that a running session was gone.
+func TestAServerThatRefusesUsIsNotAnEmptyOne(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root connects through any mode")
+	}
+	c := newTestClient(t)
+	ctx := context.Background()
+	if err := c.EnsureServer(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(ctx, CreateOptions{Name: "vp_denied", Dir: t.TempDir(), Command: []string{"sleep", "600"}, Width: 80, Height: 24}); err != nil {
+		t.Fatal(err)
+	}
+	path := c.SocketPath()
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(path, 0o700) //nolint:errcheck // so Cleanup can kill the server
+	if infos, err := c.List(ctx); err == nil {
+		t.Errorf("List through a socket we may not open = %d sessions and no error; the poller reads that as every session gone", len(infos))
+	}
+	if ok, err := c.Has(ctx, "vp_denied"); err == nil && !ok {
+		t.Error("Has said a running session does not exist because the socket refused us")
+	}
+}
+
+// One line that cannot be read among lines that can: the readable sessions
+// are listed, and the unreadable one is named once in the log, in tmux's own
+// words, rather than vanishing from the sidebar with nothing anywhere saying
+// why.
+func TestAnUnreadableLineIsSkippedAndSaidOnce(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+	if err := c.EnsureServer(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(ctx, CreateOptions{Name: "vp_readable", Dir: t.TempDir(), Command: []string{"sleep", "600"}, Width: 80, Height: 24}); err != nil {
+		t.Fatal(err)
+	}
+	real := c.Bin
+	fake := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = list-sessions ]; then " + real + " \"$@\"; echo 'garbled-line-from-tmux'; exit 0; fi\ndone\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c.Bin = fake
+	defer func() { c.Bin = real }()
+	var log bytes.Buffer
+	c.SetLogger(slog.New(slog.NewTextHandler(&log, nil)))
+	for i := 0; i < 2; i++ {
+		infos, err := c.List(ctx)
+		if err != nil || len(infos) != 1 || infos[0].Name != "vp_readable" {
+			t.Fatalf("List: %+v %v", infos, err)
+		}
+	}
+	if n := strings.Count(log.String(), "garbled-line-from-tmux"); n != 1 {
+		t.Errorf("the unreadable line was logged %d times, want once with its text:\n%s", n, log.String())
 	}
 }

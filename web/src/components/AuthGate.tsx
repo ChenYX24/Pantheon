@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 
 import { t, useLang } from '../i18n'
-import { api, OriginNotTrustedError } from '../protocol/api'
+import { api, errorText, OriginNotTrustedError } from '../protocol/api'
 import {
   decodeRequestOptions,
   encodeAssertion,
@@ -324,7 +324,7 @@ function AuthForm({ state, onDone }: { state: AuthState; onDone: () => void }) {
       if (err instanceof DOMException && err.name === 'NotAllowedError') {
         setError(null)
       } else {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(errorText(err))
       }
     } finally {
       setBusy(false)
@@ -343,7 +343,7 @@ function AuthForm({ state, onDone }: { state: AuthState; onDone: () => void }) {
       // Not an error on the way to the screen: a question, and the form is
       // kept exactly as it is so answering it costs nothing typed twice.
       if (err instanceof OriginNotTrustedError) setAskOrigin(err)
-      else setError(err instanceof Error ? err.message : String(err))
+      else setError(errorText(err))
     } finally {
       setBusy(false)
     }
@@ -362,7 +362,7 @@ function AuthForm({ state, onDone }: { state: AuthState; onDone: () => void }) {
       setPassword('')
       onDone()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorText(err))
     } finally {
       setBusy(false)
     }
@@ -447,7 +447,7 @@ function AuthForm({ state, onDone }: { state: AuthState; onDone: () => void }) {
               disabled={busy}
               onClick={() => void runSetup(true)}
               data-testid="origin-trust-add"
-              className="vp-press flex items-center justify-center gap-2 rounded-vp bg-accent px-4 py-2.5 text-vp-md font-medium text-accent-ink shadow-sm disabled:opacity-50"
+              className="vp-press vp-primary flex items-center justify-center gap-2 rounded-vp bg-accent px-4 py-2.5 text-vp-md font-medium text-accent-ink shadow-sm disabled:opacity-50"
             >
               {busy ? t('auth.working') : t('auth.originAdd')}
             </button>
@@ -561,7 +561,7 @@ function AuthForm({ state, onDone }: { state: AuthState; onDone: () => void }) {
           type="submit"
           disabled={busy}
           data-testid="auth-submit"
-          className="vp-press mt-4 flex w-full items-center justify-center gap-2 rounded-vp bg-accent px-4 py-2.5 text-vp-md font-medium text-accent-ink shadow-sm disabled:opacity-50"
+          className="vp-press vp-primary mt-4 flex w-full items-center justify-center gap-2 rounded-vp bg-accent px-4 py-2.5 text-vp-md font-medium text-accent-ink shadow-sm disabled:opacity-50"
         >
           {busy ? (
             <Loader2 size={14} className="animate-spin" />

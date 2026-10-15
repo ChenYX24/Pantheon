@@ -1,6 +1,7 @@
 import type { SharePageParam, ShareParamValue } from '../../protocol/wire'
 import { t, useLang } from '../../i18n'
 import { safeText } from '../text'
+import { pageLabel } from './labels'
 import { paramValue } from './usePages'
 
 const INPUT =
@@ -33,7 +34,7 @@ export function ParamsForm({
       {specs.map((spec) => {
         const id = `${idPrefix}-${spec.key}`
         const value = paramValue(spec, values)
-        const label = safeText(spec.label || spec.key)
+        const label = safeText(pageLabel(spec.label || spec.key))
         return (
           <div key={spec.key} className="min-w-0">
             <label htmlFor={id} className="mb-1 block text-vp-sm text-ink-3">

@@ -3632,3 +3632,98 @@ func TestAHookReportedWaitingFiresTheWebhook(t *testing.T) {
 		t.Errorf("webhook hits = %d after a poll, want 1", n)
 	}
 }
+
+// A report that changes nothing sends nothing. Every hook report calls
+// notifyState, and most repeat the state already stored; each rebuilt the
+// whole snapshot and sent it to every viewer, identical to what each had.
+// The poller already compared; this path did not. A change still goes out.
+func TestARepeatedReportDoesNotRebroadcastTheSnapshot(t *testing.T) {
+	ts, srv := newTestServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(ts.URL, "http")+"/ws", wsDialOptions(t, ts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	states := make(chan struct{}, 64)
+	go func() {
+		for {
+			typ, data, rerr := c.Read(ctx)
+			if rerr != nil {
+				return
+			}
+			var msg ws.ServerMessage
+			if typ == websocket.MessageText && json.Unmarshal(data, &msg) == nil && msg.Type == ws.MsgState {
+				states <- struct{}{}
+			}
+		}
+	}()
+	count := func(within time.Duration) int {
+		n, deadline := 0, time.After(within)
+		for {
+			select {
+			case <-states:
+				n++
+			case <-deadline:
+				return n
+			}
+		}
+	}
+	srv.notifyState() // the first one is news to the hub
+	count(500 * time.Millisecond)
+	for i := 0; i < 10; i++ {
+		srv.notifyState()
+		time.Sleep(100 * time.Millisecond) // past the hub's coalescing window
+	}
+	if n := count(300 * time.Millisecond); n != 0 {
+		t.Errorf("ten reports that changed nothing sent %d snapshots", n)
+	}
+	postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"news"}`)
+	if n := count(time.Second); n == 0 {
+		t.Error("a real change was not sent")
+	}
+}
+
+// A printing session's last_output_at is written at most every
+// outputTouchEvery, not every second: at one a second it was the busiest
+// writer in the database, for a column nothing reads more finely than a
+// minute.
+func TestOutputIsStampedAtMostEveryFifteenSeconds(t *testing.T) {
+	ts, srv := newTestServer(t)
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"stamped"}`)
+	sess := postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	stamp := func() int64 {
+		var at int64
+		if err := srv.DB.SQL().QueryRow(`SELECT last_output_at FROM sessions WHERE id = ?`, sess.ID).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	setPrevious := func(ago time.Duration) {
+		srv.outMu.Lock()
+		if srv.outputSeen == nil {
+			srv.outputSeen = map[string]time.Time{}
+		}
+		srv.outputSeen[sess.ID] = time.Now().Add(-ago)
+		srv.outMu.Unlock()
+		if _, err := srv.DB.SQL().Exec(`UPDATE sessions SET last_output_at = 1 WHERE id = ?`, sess.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setPrevious(2 * time.Second)
+	srv.HandleSignals(session.Signals{SessionID: sess.ID, Visible: true})
+	time.Sleep(300 * time.Millisecond)
+	if got := stamp(); got != 1 {
+		t.Errorf("output two seconds after the last stamp was written (%d)", got)
+	}
+	setPrevious(outputTouchEvery + time.Second)
+	srv.HandleSignals(session.Signals{SessionID: sess.ID, Visible: true})
+	deadline := time.Now().Add(3 * time.Second)
+	for stamp() == 1 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if stamp() == 1 {
+		t.Error("output past the interval was never stamped")
+	}
+}

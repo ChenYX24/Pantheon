@@ -112,16 +112,7 @@ const clockTicks = 100
 // A pid that has gone is simply absent from the result rather than reported as
 // zero -- zero is a real reading and "the session died" is not.
 func (t *TreeSampler) Sample(paneOf map[string]int) map[string]Usage {
-	stats := readProcTable()
 	now := time.Now()
-
-	children := make(map[int][]int, len(stats))
-	for pid, st := range stats {
-		if st.ppid != pid {
-			children[st.ppid] = append(children[st.ppid], pid)
-		}
-	}
-
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -137,6 +128,19 @@ func (t *TreeSampler) Sample(paneOf map[string]int) map[string]Usage {
 			}
 		}
 		return out
+	}
+
+	// The table is read only once the cache has said no. It was read first,
+	// on every call: a whole walk of /proc -- 7 ms and 1.8 MB measured on a
+	// box with a few hundred processes -- to then answer from the cache,
+	// once a second per share link watching it. Under the lock, so two
+	// callers arriving together walk it once between them.
+	stats := readProcTable()
+	children := make(map[int][]int, len(stats))
+	for pid, st := range stats {
+		if st.ppid != pid {
+			children[st.ppid] = append(children[st.ppid], pid)
+		}
 	}
 
 	elapsed := now.Sub(t.prevAt).Seconds()
@@ -407,7 +411,10 @@ func ReadProc(pid int) (Proc, bool) {
 // ClockTicks is USER_HZ; see clockTicks.
 const ClockTicks = clockTicks
 
-func readProcTable() map[int]procStat {
+// readProcTable is a variable so a test can count the walks.
+var readProcTable = readProcTableOS
+
+func readProcTableOS() map[int]procStat {
 	dir, err := os.Open("/proc")
 	if err != nil {
 		return nil

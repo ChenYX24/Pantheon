@@ -17,7 +17,10 @@ import { t, useLang } from '../../i18n'
 export function MobileKeyBar({
   onSend,
   onPaste,
+  oneRow = false,
 }: {
+  /** Only the primary row: the screen is short, or the keyboard is up. */
+  oneRow?: boolean
   onSend: (bytes: string) => void
   /** For the answers that end in a return.
    *
@@ -108,6 +111,7 @@ export function MobileKeyBar({
 
       {/* Everything else. This one may scroll: losing sight of "~" costs far
           less than losing sight of Escape. */}
+      {!oneRow && (
       <div
         data-testid="key-row-secondary"
         className="flex items-center gap-1 overflow-x-auto"
@@ -148,6 +152,7 @@ export function MobileKeyBar({
           <Key key={c} label={c} onPress={() => sendChar(c)} />
         ))}
       </div>
+      )}
     </div>
   )
 }

@@ -88,14 +88,28 @@ func (a *Adapter) serve(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &probe)
 	plain := raw
 	encrypted := probe.Encrypt != ""
+	verified := false
 	switch {
 	case encrypted && a.encryptKey == "":
 		a.refuse(w, http.StatusBadRequest, errors.New("webhook: an encrypted event arrived but no encrypt key is configured"))
 		return
 	case encrypted:
+		// The signature before the decryption, whenever there is one: only
+		// the handshake comes unsigned. Decrypting first, and saying how it
+		// failed, made this door a padding oracle for anybody holding a
+		// captured event; now an unsigned body is decrypted only to see
+		// whether it is the handshake, and every failure on the way reads
+		// the same from outside.
+		if signed(r.Header) {
+			if !a.signatureOK(r.Header, raw) {
+				a.refuse(w, http.StatusUnauthorized, errors.New("webhook: bad signature"))
+				return
+			}
+			verified = true
+		}
 		plain, err = decrypt(a.encryptKey, probe.Encrypt)
 		if err != nil {
-			a.refuse(w, http.StatusBadRequest, fmt.Errorf("webhook: %w", err))
+			a.refuse(w, http.StatusUnauthorized, fmt.Errorf("webhook: %w", err))
 			return
 		}
 	case a.encryptKey != "":
@@ -104,7 +118,13 @@ func (a *Adapter) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	var ev envelopeIn
 	if err := json.Unmarshal(plain, &ev); err != nil {
-		a.refuse(w, http.StatusBadRequest, fmt.Errorf("webhook: body: %w", err))
+		status := http.StatusBadRequest
+		if encrypted {
+			// The same answer a bad padding gets, or the two would tell
+			// a caller which one it hit.
+			status = http.StatusUnauthorized
+		}
+		a.refuse(w, status, fmt.Errorf("webhook: body: %w", err))
 		return
 	}
 	if ev.Type == "url_verification" {
@@ -115,7 +135,7 @@ func (a *Adapter) serve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"challenge": ev.Challenge})
 		return
 	}
-	if encrypted && !a.signatureOK(r.Header, raw) {
+	if encrypted && !verified && !a.signatureOK(r.Header, raw) {
 		a.refuse(w, http.StatusUnauthorized, errors.New("webhook: bad signature"))
 		return
 	}
@@ -176,7 +196,11 @@ func (a *Adapter) refuse(w http.ResponseWriter, status int, err error) {
 		writeJSON(w, map[string]any{})
 		return
 	}
-	http.Error(w, err.Error(), status)
+	// The reason goes to the health line and the log above, not to the
+	// caller: this door is unauthenticated, and a refusal that says which
+	// check failed is an oracle (decrypt: bad padding against body: invalid
+	// JSON was exactly that).
+	http.Error(w, http.StatusText(status), status)
 }
 
 // refuseEvery is how often a refused request is reported; see refuse.
@@ -189,6 +213,11 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 func (a *Adapter) tokenOK(got string) bool {
 	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(a.verifyToken)) == 1
+}
+
+// signed reports whether a request carries 飞书's signature headers at all.
+func signed(h http.Header) bool {
+	return h.Get("X-Lark-Signature") != "" || h.Get("X-Lark-Request-Timestamp") != "" || h.Get("X-Lark-Request-Nonce") != ""
 }
 
 // signatureOK checks X-Lark-Signature over the raw body.

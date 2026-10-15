@@ -12,8 +12,13 @@ web:                  ## Build the frontend into internal/webui/dist
 	cd web && npm run build
 
 .PHONY: test
+# Thirty minutes a package, not go's ten. internal/httpapi takes about two
+# minutes here and took 500 s on the release runner (two cores, -race) at
+# v1.28.0; the audit's tests pushed it past 600 s and v1.29.0's first build
+# died in "panic: test timed out" with nothing wrong. A ceiling for a hung
+# test, not a target: the package itself is the thing to make cheaper.
 test:                 ## Go tests with the race detector, plus frontend units
-	go test -race ./...
+	go test -race -timeout 30m ./...
 	cd web && npm run test
 
 .PHONY: lint
@@ -73,6 +78,10 @@ pages-check: build    ## Share pages: the sandbox from inside a page, the editin
 .PHONY: chat-check
 chat-check: build     ## The Chat page: every adapter's card, rules, keys, the doors, layout at three widths
 	cd web && npm run check:chat
+
+.PHONY: plugins-check
+plugins-check: build  ## Plugins: arrive, the install screen in both languages, grants withheld, settings, the theme, layout at three widths
+	cd web && npm run check:plugins
 
 .PHONY: resources-check
 resources-check: build ## The Resources tab and a session that really runs out of memory

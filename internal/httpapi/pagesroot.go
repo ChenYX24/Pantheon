@@ -74,7 +74,15 @@ func ResolvePagesRoot(ctx context.Context, db *store.DB, cfg config.Config) (out
 			return out
 		}
 	}
-	try(filepath.Join(os.TempDir(), "vibepanel-pages-"+strconv.Itoa(os.Getuid())), "fallback")
+	// The last resort is under /tmp, which everybody can write: it counts
+	// only as a directory this user made and nobody else can enter, or
+	// another account could plant the files the owner later publishes.
+	last := filepath.Join(os.TempDir(), "vibepanel-pages-"+strconv.Itoa(os.Getuid()))
+	if err := ownedPrivateDir(last); err != nil {
+		problems = append(problems, fmt.Sprintf("%s: %v", last, err))
+		return out
+	}
+	try(last, "fallback")
 	return out
 }
 

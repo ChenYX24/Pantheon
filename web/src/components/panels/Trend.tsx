@@ -46,7 +46,7 @@ export function Trend({
   const line = values.map((v, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
   return (
     <svg
-      className="min-w-0 flex-1"
+      className="vp-spark min-w-0 flex-1"
       style={{ height }}
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"

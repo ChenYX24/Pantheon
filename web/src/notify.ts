@@ -1,5 +1,5 @@
 import { appStorage, appURL } from './basePath'
-import type { ArchivedProject, ResourceAlert, Session } from './protocol/wire'
+import type { ArchivedProject, ResourceAlert, Session, SessionNotice } from './protocol/wire'
 import { t } from './i18n'
 import { sessionLabel } from './components/label'
 import { formatBytes } from './components/bytes'
@@ -207,4 +207,27 @@ export function notifyOnResourceAlert(alert: ResourceAlert | null, sessions: Ses
       }),
     )
     .catch(() => {})
+}
+
+/**
+ * A session spoke up (`vibepanel me notify`). The toast is the page's; this
+ * is the notification for a page that is not in front, with the session to
+ * open on click, as a waiting session's is.
+ */
+export function notifyOnNotice(n: SessionNotice, focused: boolean) {
+  if (n.level === 'say' || focused) return
+  if (!notifyEnabled() || !notifySupported() || Notification.permission !== 'granted') return
+  void navigator.serviceWorker.ready
+    .then((reg) =>
+      reg.showNotification(n.title || t('notify.noticeTitle'), {
+        body: n.text,
+        icon: appURL('/icon-192.png'),
+        badge: appURL('/icon-192.png'),
+        tag: `vibepanel-notice-${n.sessionId}`,
+        data: { sessionId: n.sessionId },
+      }),
+    )
+    .catch(() => {
+      /* a page without a worker is one without notifications */
+    })
 }

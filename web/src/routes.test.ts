@@ -6,10 +6,15 @@ import {
   CHAT_PATH,
   HOME_PATH,
   PANEL_PATH,
+  PLUGINS_PATH,
+  pluginPageOf,
+  pluginPagePath,
   SHARING_PATH,
   pageToOpen,
   panelOpeningPage,
+  panelOpeningProject,
   panelOpeningSession,
+  projectToOpen,
   routeFor,
   sessionToOpen,
 } from './routes'
@@ -51,6 +56,22 @@ describe('what the address bar decides', () => {
     expect(routeFor(`${CHAT_PATH}/abc`)).toEqual({ kind: 'panel' })
   })
 
+  it('builds the plugins page for its path and not by prefix', () => {
+    expect(routeFor(PLUGINS_PATH)).toEqual({ kind: 'plugins' })
+    expect(routeFor(`${PLUGINS_PATH}/`)).toEqual({ kind: 'plugins' })
+    expect(routeFor(`${PLUGINS_PATH}x`)).toEqual({ kind: 'panel' })
+    expect(routeFor(`${PLUGINS_PATH}/abc`)).toEqual({ kind: 'panel' })
+  })
+
+  it("builds a plugin's page under its prefix and refuses anything else there", () => {
+    expect(routeFor(pluginPagePath('standup'))).toEqual({ kind: 'plugin-page', path: 'standup' })
+    expect(routeFor(`${pluginPagePath('standup')}/`)).toEqual({ kind: 'plugin-page', path: 'standup' })
+    expect(routeFor('/x/')).toEqual({ kind: 'panel' })
+    expect(routeFor('/x/Stand Up')).toEqual({ kind: 'panel' })
+    expect(routeFor('/x/a/b')).toEqual({ kind: 'panel' })
+    expect(pluginPageOf('/xray')).toBeNull()
+  })
+
   it('does not match the sharing page by prefix', () => {
     // `/sharing` and `/share/<token>` share five letters, and `/sharingx` is
     // nothing at all; a prefix match would build the wrong root for both.
@@ -67,6 +88,17 @@ describe('a chat card opening a session', () => {
     expect(sessionToOpen('')).toBeNull()
     expect(sessionToOpen('?session=')).toBeNull()
     expect(sessionToOpen('?session=../x')).toBeNull()
+  })
+})
+
+describe('handing a new plugin project over to the panel', () => {
+  it('round-trips the project id and refuses what is not one', () => {
+    const to = panelOpeningProject('pr_abc-DEF_1')
+    expect(to.startsWith(PANEL_PATH)).toBe(true)
+    expect(projectToOpen(new URL(to, 'http://x').search)).toBe('pr_abc-DEF_1')
+    expect(projectToOpen('')).toBeNull()
+    expect(projectToOpen('?project=')).toBeNull()
+    expect(projectToOpen('?project=../x')).toBeNull()
   })
 })
 

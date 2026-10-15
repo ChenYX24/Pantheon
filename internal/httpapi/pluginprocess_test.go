@@ -1,0 +1,441 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/jiangmuran/vibepanel/internal/store"
+)
+
+// A process plugin whose command is whatever the test puts in cmd.sh.
+// The process declares the first capability only; the plugin as a whole
+// asks for all of them, so a token's narrowing can be seen.
+func processManifest(caps []string) string {
+	raw, _ := json.Marshal(caps)
+	own := "[]"
+	if len(caps) > 0 {
+		b, _ := json.Marshal(caps[:1])
+		own = string(b)
+	}
+	return `{
+  "plugin": 1, "id": "proc", "name": {"en": "Proc"}, "version": "1.0.0",
+  "process": {"command": ["sh", "cmd.sh"], "capabilities": ` + own + `, "env": ["GREETING"]},
+  "capabilities": ` + string(raw) + `
+}`
+}
+
+func installProcess(t *testing.T, ts *httptest.Server, srv *Server, caps []string, script string) {
+	t.Helper()
+	status, body := postZip(t, ts, pluginZip(t, processManifest(caps), map[string]string{"cmd.sh": script}))
+	if status != http.StatusCreated {
+		t.Fatalf("add: %d %s", status, body)
+	}
+	raw, _ := json.Marshal(caps)
+	if status, body := doJSON(t, ts, http.MethodPost, "/api/settings/plugins/proc/install", `{"caps": `+string(raw)+`}`); status != http.StatusOK {
+		t.Fatalf("install: %d %s", status, body)
+	}
+	if status, _ := doJSON(t, ts, http.MethodPut, "/api/settings/plugins/proc/secrets/GREETING", `{"value": "hello-from-the-owner"}`); status != http.StatusNoContent {
+		t.Fatalf("secret: %d", status)
+	}
+	if status, body := doJSON(t, ts, http.MethodPost, "/api/settings/plugins/proc/enable", `{}`); status != http.StatusOK {
+		t.Fatalf("enable: %d %s", status, body)
+	}
+	srv.serviceCtx = t.Context()
+	srv.ensurePluginProcesses(t.Context())
+}
+
+func processStatus(t *testing.T, ts *httptest.Server) pluginProcessStatus {
+	t.Helper()
+	_, body := doJSON(t, ts, http.MethodGet, "/api/settings/plugins/proc/process", "")
+	var out pluginProcessStatus
+	_ = json.Unmarshal(body, &out)
+	return out
+}
+
+func waitFor(t *testing.T, what string, ms int, pred func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Duration(ms) * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if pred() {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s did not happen in %dms", what, ms)
+}
+
+// The process starts from the version's checked-out directory with a
+// cleared environment, its token, its state directory and the secret it
+// declared; its output lands in the ring; the token reaches the v1 API
+// narrowed to the process's own list.
+func TestAProcessStartsWithItsTokenAndSecret(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installProcess(t, ts, srv, []string{"read:panel", "read:notes"},
+		"echo greeting=$GREETING; echo state=$VIBEPANEL_PLUGIN_STATE; echo url=$VIBEPANEL_PLUGIN_URL > $VIBEPANEL_PLUGIN_STATE/url; echo pwd=$PWD; env | grep -c VIBEPANEL; sleep 60")
+	// Wait for what the script prints, not for Running: the status says
+	// running the instant the process is spawned, and its first lines arrive
+	// through the output pump a moment later. On one CPU that moment is
+	// most of the time (29 of 30 runs under taskset -c 0 read an empty ring).
+	waitFor(t, "the process to print", 5000, func() bool {
+		st := processStatus(t, ts)
+		return st.Running && strings.Contains(st.Output, "pwd=")
+	})
+	st := processStatus(t, ts)
+	if !strings.Contains(st.Output, "greeting=hello-from-the-owner") {
+		t.Errorf("the secret did not reach the environment:\n%s", st.Output)
+	}
+	stateDir := filepath.Join(srv.Cfg.DataDir, "plugins", "proc", "state")
+	if !strings.Contains(st.Output, "state="+stateDir) {
+		t.Errorf("state dir:\n%s", st.Output)
+	}
+	if !strings.Contains(st.Output, "pwd="+filepath.Join(srv.Cfg.DataDir, "plugins", "proc", "v1")) {
+		t.Errorf("not started from the checked-out version:\n%s", st.Output)
+	}
+	if _, err := os.Stat(filepath.Join(srv.Cfg.DataDir, "plugins", "proc", "v1", "cmd.sh")); err != nil {
+		t.Errorf("the version was not checked out: %v", err)
+	}
+	// The token in the environment is a credential on the plugin API and
+	// nowhere else, holding read:panel (declared by the process) and not
+	// read:notes (granted, but not in the process's list).
+	raw, err := os.ReadFile(filepath.Join(stateDir, "url"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := strings.TrimSpace(strings.TrimPrefix(string(raw), "url="))
+	api := url[strings.Index(url, "/api/"):]
+	status, body := anonJSON(t, ts, http.MethodGet, api+"view", "")
+	if status != http.StatusOK || !strings.Contains(string(body), `"caps":["read:panel"]`) {
+		t.Errorf("the token's view: %d %s", status, body)
+	}
+	if status, _ := anonJSON(t, ts, http.MethodGet, api+"projects/0123456789abcdef/notes", ""); status != http.StatusForbidden {
+		t.Errorf("read:notes through a process token that did not declare it: %d", status)
+	}
+	token := strings.TrimSuffix(strings.TrimPrefix(api, "/api/plugin/"), "/v1/")
+	client := anonymousClient(t)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/state", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	res, _ := client.Do(req)
+	if res != nil {
+		res.Body.Close()
+		if res.StatusCode != http.StatusUnauthorized {
+			t.Errorf("a process token as a bearer on the panel: %d", res.StatusCode)
+		}
+	}
+	// Disabling stops it and ends the token.
+	doJSON(t, ts, http.MethodPost, "/api/settings/plugins/proc/disable", `{}`)
+	waitFor(t, "the process to stop", 8000, func() bool { return !processStatus(t, ts).Running })
+	if status, _ := anonJSON(t, ts, http.MethodGet, api+"me", ""); status != http.StatusUnauthorized {
+		t.Errorf("the token after disabling: %d", status)
+	}
+}
+
+// A process that crashes in a loop is restarted with backoff and stopped at
+// the cap, audited; the owner's restart clears the stop.
+func TestACrashLoopIsStoppedAndReported(t *testing.T) {
+	ts, srv := newTestServer(t)
+	srv.ppr.restartMin, srv.ppr.restartMax, srv.ppr.failureCap = 5*time.Millisecond, 20*time.Millisecond, 4
+	installProcess(t, ts, srv, nil, "echo failing; exit 3")
+	waitFor(t, "the cap", 5000, func() bool { return processStatus(t, ts).Stopped })
+	st := processStatus(t, ts)
+	if st.Running || !strings.Contains(st.StopWhy, "crashed 4 times") || st.LastExit != "exited 3" {
+		t.Errorf("after the cap: %+v", st)
+	}
+	_, body := doJSON(t, ts, http.MethodGet, "/api/settings/audit", "")
+	if !strings.Contains(string(body), `"plugin.crashed"`) {
+		t.Errorf("not audited: %s", body)
+	}
+	// Fix the script (a new version), restart: it runs again.
+	status, body := postZip(t, ts, pluginZip(t, processManifest(nil), map[string]string{"cmd.sh": "echo fixed; sleep 60"}))
+	if status != http.StatusOK {
+		t.Fatalf("new version: %d %s", status, body)
+	}
+	doJSON(t, ts, http.MethodPost, "/api/settings/plugins/proc/install", `{"caps": []}`)
+	status, body = doJSON(t, ts, http.MethodPost, "/api/settings/plugins/proc/process/restart", `{}`)
+	if status != http.StatusOK {
+		t.Fatalf("restart: %d %s", status, body)
+	}
+	waitFor(t, "the fixed process", 5000, func() bool {
+		st := processStatus(t, ts)
+		return st.Running && strings.Contains(st.Output, "fixed")
+	})
+}
+
+// A process that never exits is ended at shutdown, and one that prints in a
+// loop fills a ring and not the panel.
+func TestAProcessIsEndedAtShutdownAndItsOutputIsBounded(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installProcess(t, ts, srv, nil, "trap '' TERM; i=0; while :; do i=$((i+1)); echo line $i xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done")
+	waitFor(t, "output", 5000, func() bool { return len(processStatus(t, ts).Output) > 10000 })
+	time.Sleep(200 * time.Millisecond)
+	st := processStatus(t, ts)
+	// Bounded, and the newest bytes: the ring holds the tail, whose last
+	// line is whatever arrived last and may be cut mid-word.
+	if len(st.Output) > pluginOutputRing+1 || !strings.Contains(st.Output, "line ") {
+		t.Errorf("ring is %d bytes", len(st.Output))
+	}
+	pid := st.PID
+	start := time.Now()
+	srv.StopPluginProcesses(t.Context())
+	if time.Since(start) > pluginStopGrace+3*time.Second {
+		t.Errorf("shutdown took %v", time.Since(start))
+	}
+	// The process ignored SIGTERM; the SIGKILL after the grace ended it.
+	waitFor(t, "the process to be gone", 3000, func() bool {
+		return syscallKillProbe(pid) != nil
+	})
+	if _, err := os.Stat(filepath.Join(srv.Cfg.DataDir, "plugins", "proc", "state")); err != nil {
+		t.Errorf("the state directory was not made: %v", err)
+	}
+}
+
+// The three red capabilities: a plugin with them restarts, ends, starts and
+// types into sessions through the panel's own handlers, by handle, and one
+// without them is refused.
+func TestTheRedCapabilitiesReachSessionsByHandle(t *testing.T) {
+	ts, srv := newTestServer(t)
+	dir := t.TempDir()
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+dir+`","name":"controlled"}`)
+	g := installPane(t, ts, []string{"read:panel", "sessions:create", "sessions:input", "sessions:control"})
+	ph := srv.pluginHandle(t.Context(), "pane", project.ID)
+	status, body := anonJSON(t, ts, http.MethodPost, g.API+"sessions", `{"project": "`+ph+`", "title": "from a plugin", "command": ["sleep", "60"]}`)
+	if status != http.StatusCreated {
+		t.Fatalf("create: %d %s", status, body)
+	}
+	var made pluginViewSession
+	_ = json.Unmarshal(body, &made)
+	if len(made.ID) != 16 || made.ProjectID != ph || made.Name != "from a plugin" {
+		t.Errorf("made = %+v", made)
+	}
+	if strings.Contains(string(body), project.ID) {
+		t.Error("the answer carried the real project id")
+	}
+	sessions, _ := srv.DB.ListSessions(t.Context())
+	if len(sessions) != 1 || sessions[0].Title != "from a plugin" {
+		t.Fatalf("sessions = %+v", sessions)
+	}
+	if status, _ := anonJSON(t, ts, http.MethodPost, g.API+"sessions/"+made.ID+"/input", `{"text": "echo hi", "submit": true}`); status != http.StatusNoContent {
+		t.Errorf("input: %d", status)
+	}
+	if status, _ := anonJSON(t, ts, http.MethodPost, g.API+"sessions/"+made.ID+"/restart", ""); status == http.StatusForbidden || status == http.StatusUnauthorized {
+		t.Errorf("restart with sessions:control: %d", status)
+	}
+	if status, _ := anonJSON(t, ts, http.MethodDelete, g.API+"sessions/"+made.ID, ""); status != http.StatusNoContent {
+		t.Errorf("delete: %d", status)
+	}
+	if sessions, _ := srv.DB.ListSessions(t.Context()); len(sessions) != 0 {
+		t.Errorf("the session was not ended: %+v", sessions)
+	}
+	_, body = doJSON(t, ts, http.MethodGet, "/api/settings/audit", "")
+	if !strings.Contains(string(body), `"plugin.input"`) {
+		t.Errorf("input not audited: %s", body)
+	}
+	// Untick the red ones: refused.
+	doJSON(t, ts, http.MethodPut, "/api/settings/plugins/pane/caps", `{"caps": ["read:panel"]}`)
+	if status, _ := anonJSON(t, ts, http.MethodPost, g.API+"sessions", `{"project": "`+ph+`", "command": ["sleep", "60"]}`); status != http.StatusForbidden {
+		t.Errorf("create without sessions:create: %d", status)
+	}
+}
+
+// syscallKillProbe is kill -0: nil while the process exists.
+func syscallKillProbe(pid int) error {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return p.Signal(syscall.Signal(0))
+}
+
+// A secret the owner saves after the process started reaches it: the
+// process is restarted with the new environment, because a running
+// process cannot see a value that arrived after its start, and "I set the
+// token and nothing changed" is the confusion this removes.
+func TestAChangedSecretRestartsTheProcess(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installProcess(t, ts, srv, []string{"read:panel"}, "echo greeting=$GREETING; sleep 60")
+	waitFor(t, "the first start", 5000, func() bool {
+		st := processStatus(t, ts)
+		return st.Running && strings.Contains(st.Output, "greeting=hello-from-the-owner")
+	})
+	first := processStatus(t, ts).PID
+	if status, _ := doJSON(t, ts, http.MethodPut, "/api/settings/plugins/proc/secrets/GREETING", `{"value": "changed"}`); status != http.StatusNoContent {
+		t.Fatalf("secret: %d", status)
+	}
+	waitFor(t, "the restart with the new value", 8000, func() bool {
+		st := processStatus(t, ts)
+		return st.Running && st.PID != first && strings.Contains(st.Output, "greeting=changed")
+	})
+	// Nothing changed: nothing restarts. Reconcile again and the pid holds.
+	pid := processStatus(t, ts).PID
+	srv.ensurePluginProcesses(t.Context())
+	time.Sleep(200 * time.Millisecond)
+	if st := processStatus(t, ts); st.PID != pid {
+		t.Errorf("a reconcile with nothing changed restarted the process: %d → %d", pid, st.PID)
+	}
+}
+
+// `vibepanel plugin disable` writes the database and exits; the running
+// panel notices through the stamp and ends the process, rather than at its
+// next restart. The first reading is a baseline, so a panel that starts
+// with plugins in place does not "notice" them as a change.
+func TestAChangeMadeFromTheShellReachesTheRunningPanel(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installProcess(t, ts, srv, []string{"read:panel"}, "sleep 60")
+	waitFor(t, "the process", 5000, func() bool { return processStatus(t, ts).Running })
+	srv.pluginStampOnce(t.Context()) // the baseline
+	srv.pluginStampOnce(t.Context())
+	if !processStatus(t, ts).Running {
+		t.Fatal("a reading with nothing changed stopped the process")
+	}
+	// What the CLI does: the row, directly.
+	if err := srv.DB.SetPluginEnabled(t.Context(), "proc", false); err != nil {
+		t.Fatal(err)
+	}
+	srv.pluginStampOnce(t.Context())
+	waitFor(t, "the process to be ended", 8000, func() bool { return !processStatus(t, ts).Running })
+}
+
+// childOf reads the pid a test's script wrote into its state directory.
+func childOf(t *testing.T, srv *Server) int {
+	t.Helper()
+	var pid int
+	waitFor(t, "the child's pid", 5000, func() bool {
+		raw, err := os.ReadFile(filepath.Join(srv.Cfg.DataDir, "plugins", "proc", "state", "child"))
+		if err != nil {
+			return false
+		}
+		pid, err = strconv.Atoi(strings.TrimSpace(string(raw)))
+		return err == nil && pid > 0
+	})
+	// A test that fails here would otherwise leave its child running for
+	// ten minutes; the pid is the one the script wrote, nothing else's.
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	return pid
+}
+
+// A process whose leader exits while something it started still holds its
+// output is seen to exit. The supervisor read stdout to EOF before Wait,
+// and EOF needs every holder of the pipe gone: one background child kept
+// the card saying "running" with a dead pid, the restart never came, and
+// the child lived on holding the socket the next start wanted.
+func TestALeaderThatExitsIsSeenToExitThoughItsChildLives(t *testing.T) {
+	ts, srv := newTestServer(t)
+	srv.ppr.restartMin, srv.ppr.restartMax = time.Hour, time.Hour
+	installProcess(t, ts, srv, nil, `sleep 600 & echo $! > "$VIBEPANEL_PLUGIN_STATE/child"; echo started; exit 7`)
+	child := childOf(t, srv)
+	waitFor(t, "the exit to be noticed", int(pluginStopGrace.Milliseconds())+5000, func() bool {
+		return processStatus(t, ts).LastExit == "exited 7"
+	})
+	waitFor(t, "the orphaned child to be ended", 3000, func() bool {
+		return syscallKillProbe(child) != nil
+	})
+}
+
+// Stopping ends the whole group, including a member that ignores SIGTERM.
+// The kill after the grace went to the leader alone, and the leader is the
+// one that had already obeyed.
+func TestStoppingEndsAChildThatIgnoresTerm(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installProcess(t, ts, srv, nil, `(trap '' TERM; exec sleep 600) & echo $! > "$VIBEPANEL_PLUGIN_STATE/child"; echo started; wait`)
+	child := childOf(t, srv)
+	waitFor(t, "running", 5000, func() bool { return processStatus(t, ts).Running })
+	srv.StopPluginProcesses(t.Context())
+	waitFor(t, "the child that ignored TERM to be ended", 3000, func() bool {
+		return syscallKillProbe(child) != nil
+	})
+}
+
+// An ending process cleans up only what was its own. It deleted every token
+// of its plugin, after it had already told the restart it was done: a
+// restart that had minted the next process's token in between had it
+// deleted, and every API call from the new process answered 401 until its
+// own next restart. The row inserted here stands for that next token.
+func TestAnEndingProcessDeletesOnlyItsOwnToken(t *testing.T) {
+	ts, srv := newTestServer(t)
+	installProcess(t, ts, srv, nil, "echo started; sleep 600")
+	waitFor(t, "running", 5000, func() bool { return processStatus(t, ts).Running })
+	if _, err := srv.DB.SQL().Exec(`INSERT INTO plugin_tokens (token_hash, plugin_id, created_at) VALUES (x'00ff', 'proc', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	srv.StopPluginProcesses(t.Context())
+	var n int
+	if err := srv.DB.SQL().QueryRow(`SELECT COUNT(*) FROM plugin_tokens WHERE token_hash = x'00ff'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Error("the ending process deleted a token that was not its own")
+	}
+	if err := srv.DB.SQL().QueryRow(`SELECT COUNT(*) FROM plugin_tokens WHERE plugin_id = 'proc' AND token_hash != x'00ff'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("the ending process left its own token behind (%d)", n)
+	}
+}
+
+// A stop that lands while the process is being started stops it. stop set
+// the flag and cancelled the previous run's context, and the start went on
+// to Start the process anyway: running, with nothing that would ever end it
+// short of its own exit, behind a record that said stopped.
+func TestAStopDuringStartStopsTheProcess(t *testing.T) {
+	ts, srv := newTestServer(t)
+	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	srv.ppr.lookPath = func(name string) (string, error) {
+		once.Do(func() { close(reached) })
+		<-release
+		return exec.LookPath(name)
+	}
+	installProcess(t, ts, srv, nil, `echo $$ > "$VIBEPANEL_PLUGIN_STATE/child"; exec sleep 600`)
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the start never reached lookPath")
+	}
+	srv.ppr.mu.Lock()
+	pr := srv.ppr.procs["proc"]
+	srv.ppr.mu.Unlock()
+	if pr == nil {
+		t.Fatal("no process record")
+	}
+	srv.stopPluginProc(pr, "stopped by the test")
+	close(release)
+	// Either it is never started, or it is ended at once; what it may not do
+	// is run. The script writes its pid first thing, so a second is plenty to
+	// see one that got going.
+	time.Sleep(time.Second)
+	raw, err := os.ReadFile(filepath.Join(srv.Cfg.DataDir, "plugins", "proc", "state", "child"))
+	if err != nil {
+		return // never started
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(raw)))
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	waitFor(t, "the process started after the stop to be ended", 3000, func() bool {
+		return syscallKillProbe(pid) != nil
+	})
+}
+
+// After a run that lasted, the next crash restarts after the shortest wait,
+// not wherever an old string of crashes had pushed the backoff. It doubled
+// on every failure and only a manual restart reset it.
+func TestALongRunStartsTheBackoffOver(t *testing.T) {
+	ts, srv := newTestServer(t)
+	srv.ppr.restartMin, srv.ppr.restartMax, srv.ppr.failureCap = 20*time.Millisecond, 10*time.Second, 100
+	srv.ppr.healthyRun = 100 * time.Millisecond
+	installProcess(t, ts, srv, nil, "sleep 0.2; exit 1")
+	waitFor(t, "three restarts", 5000, func() bool { return processStatus(t, ts).Restarts >= 3 })
+	_, body := doJSON(t, ts, http.MethodGet, "/api/settings/plugins/proc/server/log", "")
+	if strings.Contains(string(body), "restarting in 40ms") || strings.Contains(string(body), "restarting in 80ms") ||
+		!strings.Contains(string(body), "restarting in 20ms") {
+		t.Errorf("every run lasted past healthyRun, so every restart should wait the minimum: %s", body)
+	}
+}

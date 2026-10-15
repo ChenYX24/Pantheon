@@ -383,6 +383,71 @@ If that fails, GET retains the error and any new session id for recovery.
 ### `PATCH /api/sessions/{id}`
 ### `DELETE /api/sessions/{id}`
 ### `POST /api/sessions/{id}/restart`
+### `GET /api/me/v1`
+### `PATCH /api/me/v1`
+
+A session's own door (`docs/cli.md`, `vibepanel me`). The credential is
+the session's derived token -- `VIBEPANEL_TOKEN` in its environment, the
+same one its state reporter uses -- as a Bearer, with the session's id in
+`X-Vibepanel-Session`; it names that one session and reaches this prefix
+and nothing else, and there is no target parameter. `GET` answers what the
+session may know about itself: `{id, project, title, state, summary,
+progress, labels, pinned, exited}`. `PATCH` takes any of `title`, `state`
+(with an optional `why`, kept as a notice the chat card shows), `summary`
+(120 characters), `progress` (0-100, -1 clears), `labels` (at most five of
+24 characters), and answers the same view. Audited `session.info`; a token
+that is not the named session's is `me.rejected`.
+
+### `POST /api/me/v1/say`
+### `POST /api/me/v1/notify`
+### `POST /api/sessions/{id}/say`
+### `POST /api/sessions/{id}/notify`
+
+A session speaking, through its own door or the owner's. `say {text}`
+(1000 characters) is a line in the session's messages: the chat card shows
+it as the last thing the session said and the routes push it by their
+rules; every open page gets a quiet toast. 204. `notify {text, level,
+choices}` is an explicit call for attention: a toast and a browser
+notification on every open page, and a card on every paired contact
+whatever the session's state (muted contacts excepted, and in quiet hours
+only an `ask`), with up to four choices of twelve characters as buttons; a
+pressed choice is typed into the session. `level` is `info`, `warn` or
+`ask`; choices make it `ask`. Answers `{contacts}`, how many were sent to.
+Rate: 60 says and 6 notices a minute per session; 429 with `Retry-After`
+after. Audited `session.said` and `session.notified` with byte counts, not
+words.
+
+### `POST /api/me/v1/send`
+### `POST /api/sessions/{id}/attach`
+### `GET /api/sessions/{id}/attachments`
+### `GET /api/sessions/{id}/attachments/{name}`
+
+A file a session sends, or the owner attaches to it: multipart with `file`
+and an optional `caption` (200 characters), 16 MiB a file, a hundred an
+hour per session, the newest twenty kept under
+`<data>/sessions/{id}/attachments/`. Answers `{name, bytes, size, url,
+at, contacts}`: the name as kept (letters, digits, dots, dashes; a second
+of the same name is numbered, never a replacement), where the signed-in
+owner downloads it, and how many paired contacts got it -- an image as a
+photo, anything else as a card with the link. Every open page gets a
+`notice` with `level: "file"` and the `url`. The download route is under
+the session cookie: images, audio, video and text inline with `nosniff`,
+everything else -- HTML and SVG included -- as a download under
+`Content-Security-Policy: sandbox`. Audited `session.sent` with the name
+and the byte count.
+
+### `GET /api/sessions/{id}/screen`
+
+`{text}`: the session's pane as text, what `vibepanel session screen`
+prints. 409 while the pane cannot be read.
+
+### `POST /api/sessions/{id}/input`
+
+`{text, submit}`: pastes `text` (at most 64 KiB) into the session and,
+with `submit`, presses Enter. 204. Audited `session.input` with the byte
+count. What `vibepanel session send` uses; the terminal's own channel is
+the WebSocket.
+
 ### `POST /api/sessions/restore`
 
 ```sh
@@ -1832,6 +1897,390 @@ parameters moved.
 
 `POST /api/settings/shares` takes the same `pageId` and `params`.
 
+## Plugins
+
+Installing, granting, enabling and removing plugins: `docs/plugins.md`. Every
+route is behind the ordinary session. Nothing here is reachable with a share
+token, an admin grant, a chat tools token or a plugin's own credential, which
+is what keeps a plugin from installing plugins.
+
+### `GET /api/settings/plugins`
+
+Every plugin, as the list draws it: the row (`id`, `enabled`,
+`installedVersion`, `sourceDir`, `dev`), the manifest's `name`, `version`,
+`description`, `author` and `rungs`, what is `granted` and what the manifest
+`wanted`, each `secrets` entry with whether it is `set`, `latestVersion`, the
+`problems` the card says in both languages, and `theme` when the plugin has
+one.
+`?detail=1` answers the same list as `PluginDetail` rows (the screen, the
+versions, the settings), so the plugins page's five-second poll is one
+request rather than one per card.
+
+### `POST /api/settings/plugins`
+
+A plugin arrives. With `Content-Type: application/zip` the body is the
+archive (at most 21 MiB); with `application/json` the body is
+`{"path": "/dir"}`, a directory on this machine, which is also recorded as
+the plugin's draft directory. Either is read by the publish rules
+(`internal/plugins.ReadArchive`, `ReadDir`): every path checked, every file
+sniffed, every entry the manifest names present, the theme linted, every
+limit an error. The result is stored as the first version of a new plugin
+(`201`) or the next version of an existing one (`200`); a bundle identical to
+the newest version stores nothing. **Nothing is installed or enabled**: the
+answer carries `plugin` (the detail below, with the install screen) and
+`ignored`, and the install route is the confirmation. Audited as
+`plugin.imported`.
+
+### `GET /api/settings/plugin-themes`
+
+The enabled plugins' themes: `[{plugin, attr, name, scheme}]`, for the theme
+picker. `attr` is the `data-theme` value, `ext-<id>`.
+
+### `GET /api/settings/plugins/{pluginID}`
+
+The row plus the decoded `manifest`, `versions` (newest first), the
+`screen` — `internal/plugins.Describe` over the newest version against the
+current grants — what this build `dropped` from the stored manifest, and the
+`settings` the panel draws (`fields` from the schema, `values` with defaults
+filled; a secret's value is `true`/`false` for set). `404` for an unknown id.
+
+### `POST /api/settings/plugins/{pluginID}/install`
+
+The confirmation. `{"version": N, "caps": [...]}`: `version` defaults to the
+newest; `caps` is exactly the boxes the owner left ticked, and a name the
+manifest never asked for is `400`. Records the grants, makes the version the
+one that runs, and enables the plugin when every secret it needs is set —
+otherwise it is installed disabled and the answer's `needsSecrets` lists what
+to fill. `409` when the manifest needs a newer panel. Audited as
+`plugin.installed` the first time and `plugin.updated` after.
+
+### `POST /api/settings/plugins/{pluginID}/enable`
+### `POST /api/settings/plugins/{pluginID}/disable`
+
+The switch. Enabling a plugin that has not been installed, or whose secrets
+are not all set, is `409` saying which. Audited `plugin.enabled` /
+`plugin.disabled`.
+
+### `DELETE /api/settings/plugins/{pluginID}`
+
+Removes the plugin, its versions, grants, settings and secrets. `204`.
+Audited `plugin.removed`.
+
+### `PUT /api/settings/plugins/{pluginID}/caps`
+
+`{"caps": [...]}` replaces the grant decision, under the same rule as
+install. Audited `plugin.permissions_changed`.
+
+### `GET /api/settings/plugins/{pluginID}/settings`
+### `PUT /api/settings/plugins/{pluginID}/settings/{key}`
+### `DELETE /api/settings/plugins/{pluginID}/settings/{key}`
+
+The settings the manifest declares, drawn by the panel. `PUT` takes
+`{"value": …}`, checked against the field (`400` naming the field otherwise);
+`DELETE` puts a field back to its default. A `secret` field is set through
+the secrets routes, by its upper-case name. Audited `plugin.settings_changed`
+with the key, never the value.
+
+### `PUT /api/settings/plugins/{pluginID}/secrets/{name}`
+### `DELETE /api/settings/plugins/{pluginID}/secrets/{name}`
+
+`{"value": "…"}` stores a secret the manifest names (a process's `env`, an
+inbound route's secret, a secret-typed setting, a `${secret:NAME}` in a
+source), sealed under `secrets.key`. Never read back through any route.
+Audited `plugin.secret_set` / `plugin.secret_deleted`, by name.
+
+### `GET /api/settings/plugins/{pluginID}/export`
+
+The installed version (or `?version=N`) as a zip with `plugin.json` at the
+top, the same archive `POST /api/settings/plugins` reads.
+
+### `POST /api/settings/plugins/{pluginID}/grant`
+
+Mints a **plugin grant** for the owner's session, for the panel to mount a
+frame with: `201 {"grant", "base", "api", "expiresAt", "dev"}`. The session
+cookie only — a bearer token has no session to bind to — and only for a
+plugin that is enabled or in dev mode. A grant lives eight hours and dies
+with the session that minted it; what it may reach is read from the plugin's
+grants at every request, so a box unticked is withdrawn from every open frame
+at once. `docs/plugins.md` §5.
+
+### `GET /api/settings/plugins/{pluginID}/handles`
+
+`?session=&project=` → the plugin's handles for those ids, for the panel to
+name them to a frame. A plugin never sees the panel's ids: a handle is
+`HMAC(salt + plugin id, id)`, stable for one plugin and different between
+plugins.
+
+### `PUT /api/settings/plugins/{pluginID}/dev`
+
+`{"dev": bool, "sourceDir": "/dir"}` switches dev mode: the draft directory's
+manifest and files are what the plugin's frames run, under the grants already
+given to this id. The directory's `plugin.json` must parse and name this
+plugin. Audited `plugin.dev`.
+
+### `GET /api/settings/plugins/{pluginID}/draft/fingerprint`
+
+Sizes and times of the draft directory, hashed: what the panel polls twice
+a second while a frame is in dev mode, reloading it when two readings agree
+on something new.
+
+## A plugin's own API
+
+`/api/plugin/{cred}/v1/`, reachable with a plugin grant (and, once the
+process rung exists, a plugin token) and nothing else; a grant presented
+anywhere else is an unknown string. **Which routes answer is decided by the
+capability table** (`internal/plugins/caps.go`, red line 10): a route named
+by a capability answers `403 {"error", "cap"}` to a credential without it,
+and a route named by none is open to every credential. Every id in a
+response is the plugin's handle. CORS is `*`, never credentials — the
+credential is in the path.
+
+### `GET /api/plugin/{cred}/v1/me`
+### `GET /api/plugin/{cred}/v1/settings`
+
+Open to every credential. `me` is the plugin's identity, the capabilities
+granted and its settings' values; `settings` is the values alone. A
+secret-typed setting is `true`/`false` for set, never a value.
+
+### `GET /api/plugin/{cred}/v1/data`
+### `PUT /api/plugin/{cred}/v1/data/{key}`
+### `POST /api/plugin/{cred}/v1/data/{key}/increment`
+### `POST /api/plugin/{cred}/v1/data/{key}/append`
+### `DELETE /api/plugin/{cred}/v1/data/{key}`
+
+The plugin's own data, declared in its manifest with the share page's
+vocabulary and checked by the same code (`docs/page-backend.md` §2). Open to
+every credential. The `live` namespace for the installed version, `draft`
+in dev mode.
+
+### `GET /api/plugin/{cred}/v1/view`
+### `GET /api/plugin/{cred}/v1/events`
+
+`read:panel` (or `read:paths`). The view: `{v, at, plugin, caps, projects,
+sessions}`, a restated struct that embeds nothing — `cwd`, `command` and a
+project's `path` are `""` without `read:paths`. `events` is a server-sent
+stream carrying a `view` event within the panel's coalesce window of any
+change, a comment every 25 seconds, and `revoked` when the credential stops
+resolving.
+Also `event: settings` with `{values}` as `v1/settings` answers them: on
+connect, and whenever the owner changes one.
+
+### `GET /api/plugin/{cred}/v1/projects/{h}/notes`
+### `PUT /api/plugin/{cred}/v1/projects/{h}/notes`
+
+`read:notes` / `write:notes`. `PUT` takes `{"content", "baseRev"?}` and
+answers `409` when the note changed elsewhere.
+
+### `GET /api/plugin/{cred}/v1/projects/{h}/todos`
+### `POST /api/plugin/{cred}/v1/projects/{h}/todos`
+### `PATCH /api/plugin/{cred}/v1/todos/{h}`
+### `DELETE /api/plugin/{cred}/v1/todos/{h}`
+
+`read:todos` / `write:todos`. The same shapes as the panel's own routes, by
+handle.
+
+### `PATCH /api/plugin/{cred}/v1/sessions/{h}/state`
+
+`write:state`. `{"state": "working" | "waiting" | "done"}`, recorded as a
+manual mark like the sidebar's.
+
+### `GET /api/plugin/{cred}/v1/sessions/{h}/screen`
+
+`read:terminal`. `{"text"}`: the pane's visible screen, as text.
+
+### `GET /api/plugin/{cred}/v1/x/*`
+### `POST /api/plugin/{cred}/v1/x/*`
+### `PUT /api/plugin/{cred}/v1/x/*`
+### `PATCH /api/plugin/{cred}/v1/x/*`
+### `DELETE /api/plugin/{cred}/v1/x/*`
+
+The plugin's own routes, declared in `server.routes` and run by its
+`server.js` (`docs/plugins.md` §5, rung 2): `GET /digest` in the manifest is
+`GET …/v1/x/digest` here. Open to every credential of that plugin; what the
+handler does is under the capabilities the plugin was granted. The body is
+JSON of at most 64 KiB; the answer is `{"result"}`; four handlers run at a
+time per plugin and a fifth waits up to the 500 ms budget. `404` for a
+route the manifest does not declare or a function `server.js` does not
+define.
+
+### `GET /api/ext/{pluginID}/*`
+### `POST /api/ext/{pluginID}/*`
+### `PUT /api/ext/{pluginID}/*`
+### `PATCH /api/ext/{pluginID}/*`
+### `DELETE /api/ext/{pluginID}/*`
+
+The same routes for the owner, under the session like every settings route:
+the panel's UI, a `curl` with an API token, another of the owner's scripts.
+`req.caller` is `"owner"` here and `"frame"` above. `409` for a plugin that
+is not enabled.
+
+### `POST /api/plugin-hook/{pluginID}/{path}`
+
+A plugin's inbound route, when its manifest declares one: the one door the
+internet reaches. Open at the panel and verified here before any of the
+plugin's code runs, against the secret the owner stored under the declared
+name, as `Authorization: Bearer <secret>` or `X-Signature-256: sha256=<hex
+HMAC of the body>` (GitHub's shape). Sixty calls a minute per plugin; a
+failed check is `401` and audited `plugin.inbound_rejected`; `404` for a
+plugin with no such route. The handler is `onInbound(req, ctx)`.
+
+### `GET /api/settings/plugins/{pluginID}/server/log`
+
+The plugin's server log: the last 200 lines (`ctx.log` as `info`, failures
+as `error`), and how many events were `dropped` because the plugin could
+not keep up.
+
+### `GET /api/settings/plugins/{pluginID}/sources`
+
+Each source the manifest declares: its host, whether `net:<host>` is
+granted, and the last fetch's `ok`, `fetchedAt`, `status` and `error`. Never
+a secret value.
+
+### `POST /api/plugin/{cred}/v1/sessions/{h}/restart`
+### `DELETE /api/plugin/{cred}/v1/sessions/{h}`
+
+`sessions:control`. The panel's own restart and kill handlers, by handle,
+audited as the plugin.
+
+### `POST /api/plugin/{cred}/v1/sessions`
+
+`sessions:create`, in red on the install screen. `{"project": h, "title",
+"command": [...]}` starts a program in that project through the panel's own
+create handler; `201` with the new session as the view shows it.
+
+### `POST /api/plugin/{cred}/v1/sessions/{h}/input`
+
+`sessions:input`, in red on the install screen. `{"text", "submit"}` pastes
+into the pane and presses Enter when asked -- the two tmux calls the chat
+bridge makes. Every use is audited `plugin.input` with the byte count.
+
+### `GET /api/plugin-http/{pluginID}`
+### `GET /api/plugin-http/{pluginID}/*`
+### `HEAD /api/plugin-http/{pluginID}`
+### `HEAD /api/plugin-http/{pluginID}/*`
+### `POST /api/plugin-http/{pluginID}`
+### `POST /api/plugin-http/{pluginID}/*`
+### `PUT /api/plugin-http/{pluginID}`
+### `PUT /api/plugin-http/{pluginID}/*`
+### `PATCH /api/plugin-http/{pluginID}`
+### `PATCH /api/plugin-http/{pluginID}/*`
+### `DELETE /api/plugin-http/{pluginID}`
+### `DELETE /api/plugin-http/{pluginID}/*`
+### `OPTIONS /api/plugin-http/{pluginID}`
+### `OPTIONS /api/plugin-http/{pluginID}/*`
+
+A process on the panel's port (`docs/plugins.md` §5, rung 3): those seven
+methods, proxied to the unix socket the plugin's process listens on. Open at the
+router so a cross-origin preflight can be answered, and then one of three
+credentials is required, as `process.http.auth` declares -- `owner` (the
+session or an API token), `token` (a plugin access token minted on the
+card) or `hmac` (the plugin's declared secret, bearer or `X-Signature-256`
+as the inbound door) -- and there is no anonymous mode. Across origins only
+an origin on the owner's list is answered, exact match, and only a Bearer
+counts: the cookie is never a credential across origins. The cookie and the
+Authorization header never reach the process; it gets `X-Vibepanel-Caller`
+(`owner:<user>`, `token:<name>`, `hmac`) and `X-Vibepanel-Proxy`, a
+per-start secret it checks, so a request that did not come through the
+panel is one it refuses. The response loses `Set-Cookie` and any policy
+headers, gains `nosniff`, and anything but JSON, an event stream, text, a
+raster image, audio, video or a byte stream is served under
+`Content-Security-Policy: sandbox` as an attachment. Rate limits: 600 a
+minute per plugin, 120 per caller, 32 in flight, 8 open streams; bodies up
+to `maxBody`, 16 MiB at most; a stream ends after `idleTimeout` of silence.
+404 for a plugin with no door; 503 while its process is not running.
+
+### `GET /api/settings/plugins/{pluginID}/tokens`
+### `POST /api/settings/plugins/{pluginID}/tokens`
+### `DELETE /api/settings/plugins/{pluginID}/tokens/{tokenID}`
+
+The owner's plugin access tokens for one plugin's door. `POST {name}`
+mints one and answers `{token, row, mount}`; the token is shown once and
+the row keeps its hash, name, creation, last use and revocation. A token
+reaches `/api/plugin-http/{pluginID}/` and nothing else on the panel.
+Audited `plugin.token_created` and `plugin.token_revoked`.
+
+### `GET /api/settings/plugins/{pluginID}/origins`
+### `PUT /api/settings/plugins/{pluginID}/origins`
+
+The owner's list of origins that may call the plugin's door across
+origins: `{origins: ["https://host[:port]", …]}`, exact, at most 20. A
+loopback entry (`127.0.0.1`, `localhost`, `[::1]`) may name port `0` for
+any port, for a WebView inside an app that serves its page from whatever
+port was free; port 0 anywhere else is refused. The plugin's manifest
+cannot declare these; that right is the owner's. Audited
+`plugin.origins_changed`.
+
+### `GET /api/settings/plugins/{pluginID}/downloads`
+### `POST /api/settings/plugins/{pluginID}/downloads/{name}`
+### `DELETE /api/settings/plugins/{pluginID}/downloads/{name}`
+
+The plugin's declared downloads (`docs/plugins.md` §5): one row per
+declaration with its label, size, host, hash, whether it is on disk and
+verified, and a running job's state and bytes. `POST` starts one (202; 200
+when it is already there; 409 while it runs): the panel fetches the URL
+through the guard with up to five redirects, each hop checked, streams it
+to a temporary file with the digest computed on the way, refuses anything
+but the manifest's sha256, unpacks it with every entry kept under
+`<data>/plugins/{id}/assets/{name}/` and no links, and only then renames it
+into place. A required download starts at enable and the process waits
+for it (`waitingFor` on the process status); an optional one waits for the
+button. `DELETE` cancels a running job and removes the directory. Audited
+`plugin.download`, `plugin.download_ready`, `plugin.download_failed`,
+`plugin.download_removed`.
+
+### `GET /api/settings/plugins/{pluginID}/process`
+### `POST /api/settings/plugins/{pluginID}/process/restart`
+
+A plugin's supervised process: whether it is `running`, its `pid`, `since`,
+`restarts`, whether the supervisor `stopped` it and `stopWhy`, the
+`lastExit`, the last 64 KiB of `output`, the `command` and whether its first
+word is `onPath`. Restart ends it and brings it straight back, clearing a
+stop; audited `plugin.process_restarted`. The supervisor restarts a failing
+process with backoff from a second to a minute and stops it after ten
+failures in ten minutes, audited `plugin.crashed`.
+
+### `GET /api/settings/plugin-unsandboxed`
+### `PUT /api/settings/plugin-unsandboxed`
+
+The panel-wide switch for rung-4 modules (`docs/plugins.md` §7): `{"enabled":
+bool}`, off by default. Nothing under `/plugin-code/` is served while it is
+off. Audited `plugins.unsandboxed`.
+
+### `GET /api/settings/plugin-templates`
+
+The templates `New plugin` offers: `[{id, rungs}]`, lowest rung first.
+
+### `POST /api/settings/plugin-new`
+
+`{name, template, path?}`. Scaffolds a plugin from the template into `path`
+(an empty or missing directory; the default is
+`<data dir>/plugins/dev/plugin-<slug>`), with `AGENTS.md`, `CLAUDE.md`,
+`README.md`, the SDK and its types, makes it a git repository, stores the
+directory as a version, turns **dev mode** on, and finds or makes the
+project at that directory, called `plugin-<slug>`. 201 with
+`{plugin, projectId, dir}`; 409 when a plugin of that id exists; 400 for a
+non-empty directory or an unknown template. Audited `plugin.created`. The
+plugins page hands `projectId` to the panel, which opens the launch picker
+with the first line typed. Not under `/settings/plugins/`: every word there
+is a valid plugin id.
+
+### `GET /api/settings/plugin-modules`
+
+The modules the panel's page loads: `[{plugin, url, name, tested, within}]`
+-- empty while the switch is off, so a page that never asks about the switch
+loads nothing. `within` is whether this panel is inside the range the
+module says it was tested on. The files themselves are at
+`/plugin-code/{pluginID}/<file>`, outside the API, under the session and
+the switch, from the installed version only and never from a draft.
+
+### `GET /api/plugin/{cred}/v1/resources`
+### `GET /api/plugin/{cred}/v1/usage`
+### `GET /api/plugin/{cred}/v1/projects/{h}/git`
+
+`read:resources`, `read:usage`, `read:git`. The machine reading without its
+disk path; each session's process tree by handle; a repository's counts and
+branch, never a path, a subject or a sha.
+
 ## Authentication
 
 ### `POST /api/auth/setup`
@@ -1911,11 +2360,13 @@ features until somebody asked for a plugin system.
    goroutine the poller never waits for — so a harness that wants to *act*
    holds a token from (1) and calls back.
 
-That composition is the plugin system. There is no in-process one, and
-[docs/plugins.md](plugins.md) is the argument for why: every capability such a
-runtime would grant is one this token already has, and the parts it could add
-that the token cannot — code on the panel's own origin, a synchronous veto in
-the poller's path — are the two that must not exist.
+That composition is still the supported way to attach a harness, and it is
+the shape a *process* plugin takes: [docs/plugins.md](plugins.md) is the
+design for plugins — themes, sandboxed panels, `server.js` services,
+supervised processes — none of which is built yet. A plugin holds a grant or
+a plugin token on its own prefix rather than an API token, and the one thing
+that document keeps from the earlier argument is that nothing a plugin does
+may wait on the poller: there is no veto.
 
 ## What is not here
 

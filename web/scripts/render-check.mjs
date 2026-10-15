@@ -2278,6 +2278,193 @@ browser = await chromium.launch({ headless: true })
     if (over > 1) note('FAIL', `layout/${label}`, `page scrolls horizontally by ${over}px`)
     await page.screenshot({ path: join(SHOTS, `${label}.png`) })
   }
+  // ── a session started from the picker is the one shown ──────────────────
+  // It was selected only when a page handed over a prompt: starting a shell
+  // from the picker added a row and left you on the session you were in, on
+  // an iPad and on a laptop alike.
+  {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await sleep(600)
+    const before = new Set(((await (await authed('/api/state')).json()).sessions ?? []).map((x) => x.id))
+    await page.locator('[data-testid="project-new-shell"]').first().click()
+    const offered = await page.waitForSelector('[data-testid="launch-picker"]', { timeout: 5000 }).then(() => true).catch(() => false)
+    if (!offered) {
+      note('FAIL', 'launch', 'the new-session button offered no launch picker')
+    } else {
+      await page.locator('[data-testid="launch-option"]', { hasText: 'Shell' }).first().click()
+      let made = null
+      for (let i = 0; i < 40 && !made; i++) {
+        await sleep(250)
+        made = ((await (await authed('/api/state')).json()).sessions ?? []).find((x) => !before.has(x.id) && !x.scratch)
+      }
+      await sleep(1200)
+      const shown = await page.locator('[data-testid="session-row"][aria-current="true"]').getAttribute('data-session-id').catch(() => null)
+      if (!made) note('FAIL', 'launch', 'picking Shell made no session')
+      else if (shown !== made.id) note('FAIL', 'launch', `a session started from the picker was not the one shown (shown ${shown}, made ${made.id})`)
+      else note('PASS', 'launch', 'a session started from the picker is the one shown')
+      if (made) await authed(`/api/sessions/${made.id}`, { method: 'DELETE' }).catch(() => {})
+      await sleep(800)
+    }
+  }
+
+  // ── a lost connection says so ────────────────────────────────────────────
+  // It used to be a 6px dot at the end of the header going hollow, and
+  // nothing else: the session states, the terminal and the compose box went
+  // on looking live, and on a phone the open drawer covered the dot. Past the
+  // grace there is a strip that says it, the states and the terminal are drawn
+  // as the last known ones, and the drawer carries the strip itself.
+  {
+    const ctx = page.context()
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await sleep(800)
+    await ctx.setOffline(true)
+    await sleep(1000)
+    if (await page.locator('[data-testid="disconnected"]').isVisible().catch(() => false)) {
+      note('FAIL', 'disconnect', 'the strip is up within a second; a laptop waking would flash it every time')
+    }
+    let shown = false
+    for (let i = 0; i < 40; i++) {
+      if (await page.locator('[data-testid="disconnected"]').first().isVisible().catch(() => false)) { shown = true; break }
+      await sleep(250)
+    }
+    if (!shown) note('FAIL', 'disconnect', 'ten seconds offline and nothing says the panel is not connected')
+    if ((await page.locator('[data-disconnected="true"]').count()) < 2) {
+      note('FAIL', 'disconnect', 'the terminal and the session list still look live while disconnected')
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
+    await sleep(800)
+    const menu = page.locator('[data-testid="menu-button"]')
+    if (await menu.isVisible().catch(() => false)) {
+      await menu.click()
+      await sleep(500)
+      if (!(await page.locator('[data-testid="sidebar"] [data-testid="disconnected"]').isVisible().catch(() => false))) {
+        note('FAIL', 'disconnect', 'the phone drawer covers the header and says nothing about the connection')
+      }
+      // The scrim, right of the 288px drawer.
+      await page.mouse.click(370, 400).catch(() => {})
+      await sleep(400)
+    } else {
+      note('FAIL', 'disconnect', 'no menu button at phone width to open the drawer with')
+    }
+    await ctx.setOffline(false)
+    let back = false
+    for (let i = 0; i < 60; i++) {
+      if (!(await page.locator('[data-testid="disconnected"]').first().isVisible().catch(() => false))) { back = true; break }
+      await sleep(250)
+    }
+    if (!back) note('FAIL', 'disconnect', 'the strip stayed up after the connection came back')
+    else note('PASS', 'disconnect', 'said after the grace, in the drawer too, and gone on reconnect')
+  }
+
+  // ── the keyboard can choose a session ────────────────────────────────────
+  // A row was a div with a click handler: no keyboard could choose a session,
+  // and from inside a terminal -- which keeps Tab, rightly -- it could not
+  // even leave. Ctrl+Shift+Down switches from inside the terminal,
+  // Ctrl+Shift+Left leaves it for the list, the arrows move, Enter chooses,
+  // F2 renames.
+  {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await sleep(600)
+    const cur = () => page.locator('[data-testid="session-row"][aria-current="true"]').getAttribute('data-session-id').catch(() => null)
+    await page.locator('[data-testid="terminal-area"] .xterm').first().click().catch(() => {})
+    await sleep(300)
+    const start = await cur()
+    await page.keyboard.press('Control+Shift+ArrowDown')
+    await sleep(800)
+    if ((await cur()) === start) note('FAIL', 'keyboard', 'Ctrl+Shift+Down inside a terminal did not move to the next session')
+    await page.keyboard.press('Control+Shift+ArrowLeft')
+    await sleep(400)
+    const left = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))
+    if (left !== 'session-row') note('FAIL', 'keyboard', `Ctrl+Shift+Left left the focus on ${left}, not the session list`)
+    await page.keyboard.press('ArrowDown')
+    await sleep(200)
+    const to = await page.evaluate(() => document.activeElement?.getAttribute('data-session-id'))
+    await page.keyboard.press('Enter')
+    await sleep(600)
+    if (!to || (await cur()) !== to) note('FAIL', 'keyboard', 'Enter on a focused session row did not choose it')
+    if (to) {
+      await page.locator(`[data-testid="session-row"][data-session-id="${to}"]`).focus()
+      await page.keyboard.press('F2')
+      await sleep(300)
+      if ((await page.locator(`[data-testid="session-row"][data-session-id="${to}"] input`).count()) !== 1) {
+        note('FAIL', 'keyboard', 'F2 on a focused session row did not start a rename')
+      }
+      await page.keyboard.press('Escape')
+      await sleep(200)
+    }
+  }
+
+  // ── the tablet tier and the phone's way to the side panel ───────────────
+  // From 768 up there was one layout, three columns, and an iPad mini in
+  // portrait was left a ~215px terminal. Between 768 and 1100 the side panel
+  // is a sheet over the terminal, opened from the header toggle; on a phone,
+  // where it and the bottom strip had no way in at all, the drawer opens it.
+  {
+    await page.setViewportSize({ width: 900, height: 800 })
+    await sleep(900)
+    const columns = await page.locator('[data-testid="right-panel"]').count()
+    const term = await page.locator('[data-testid="terminal-area"]').boundingBox().catch(() => null)
+    if (columns !== 0) note('FAIL', 'tablet', 'the side panel is a third column at 900px')
+    if (!term || term.width < 500) note('FAIL', 'tablet', `the terminal is ${term ? Math.round(term.width) : 0}px wide at 900px`)
+    await page.locator('[data-testid="right-show"]').click()
+    await sleep(600)
+    const placed = await page.getAttribute('[data-testid="right-panel"]', 'data-placement').catch(() => null)
+    if (placed !== 'sheet') note('FAIL', 'tablet', `the header toggle opened the side panel as ${placed}, not a sheet`)
+    await page.locator('[data-testid="sheet-scrim"]').click({ position: { x: 20, y: 400 } }).catch(() => {})
+    await sleep(500)
+    if ((await page.locator('[data-testid="right-panel"]').count()) !== 0) note('FAIL', 'tablet', 'the sheet did not close from its scrim')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await sleep(900)
+    for (const [entry, sheet, inner, close] of [
+      ['open-panel-sheet', 'panel-sheet', 'right-panel', 'panel-collapse'],
+      ['open-terminals-sheet', 'terminals-sheet', 'bottom-terminals', 'bottom-collapse'],
+    ]) {
+      await page.locator('[data-testid="menu-button"]').click()
+      await sleep(500)
+      const offered = await page.locator(`[data-testid="${entry}"]`).isVisible().catch(() => false)
+      if (!offered) {
+        note('FAIL', 'phone-panel', `the drawer has no ${entry}`)
+        await page.mouse.click(370, 400).catch(() => {})
+        continue
+      }
+      await page.locator(`[data-testid="${entry}"]`).click()
+      await sleep(700)
+      if (!(await page.locator(`[data-testid="${sheet}"] [data-testid="${inner}"]`).isVisible().catch(() => false))) {
+        note('FAIL', 'phone-panel', `${entry} did not show ${inner}`)
+      }
+      await page.locator(`[data-testid="${sheet}"] [data-testid="${close}"]`).click().catch(() => {})
+      await sleep(500)
+      if (await page.locator(`[data-testid="${sheet}"]`).isVisible().catch(() => false)) {
+        note('FAIL', 'phone-panel', `${sheet} did not close`)
+      }
+    }
+  }
+
+  // ── a short phone keeps its terminal ─────────────────────────────────────
+  // The compose box and two rows of keys were 105-153px whatever the screen,
+  // and a phone in landscape or with its keyboard up came out with a 0px
+  // terminal. The keys give way now: one row when short, none when a sliver.
+  // Chromium shrinks the layout with the viewport, which is what Chrome on
+  // Android does under interactive-widget=resizes-content; the iOS half (the
+  // layout staying tall under the keyboard) is keyBarFit's unit test.
+  // Under 768 wide, because this context has a mouse: a real landscape phone
+  // reaches the same narrow layout through (pointer: coarse).
+  for (const [w, h, rows] of [[390, 844, 2], [740, 390, 1], [390, 420, 1], [560, 300, 0]]) {
+    await page.setViewportSize({ width: w, height: h })
+    await sleep(700)
+    const term = await page.locator('[data-testid="terminal-area"]').boundingBox().catch(() => null)
+    const primary = await page.locator('[data-testid="key-row-primary"]').count()
+    const secondary = await page.locator('[data-testid="key-row-secondary"]').count()
+    const shown = primary === 0 ? 0 : secondary === 0 ? 1 : 2
+    if (!term || term.height < 80) {
+      note('FAIL', 'phone-fit', `${w}x${h}: the terminal is ${term ? Math.round(term.height) : 0}px tall`)
+    }
+    if (shown !== rows) note('FAIL', 'phone-fit', `${w}x${h}: ${shown} rows of keys, expected ${rows}`)
+    const over = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)
+    if (over > 1) note('FAIL', 'phone-fit', `${w}x${h}: the page is ${over}px taller than the screen`)
+  }
+
   // ── the phone layout ─────────────────────────────────────────────────────
   // Not a squeezed desktop: typing into a raw terminal is unusable with an
   // input method, so input arrives through a compose box and a bar of the keys
@@ -2331,6 +2518,39 @@ browser = await chromium.launch({ headless: true })
     // The box must clear, or the next command is appended to the last one.
     if ((await compose.inputValue()) !== '') {
       note('FAIL', 'mobile', 'the compose box kept its text after sending')
+    }
+
+    // ...and must not clear when nothing was sent. It did: typed offline,
+    // sent, the box emptied, and after the reconnect the words were in no
+    // pane. The socket is closed here by taking the network away, which is
+    // what a phone in a lift does.
+    {
+      const ctx = page.context()
+      await ctx.setOffline(true)
+      for (let i = 0; i < 40; i++) {
+        if ((await page.getAttribute('[data-testid="connection"]', 'data-status').catch(() => 'open')) !== 'open') break
+        await sleep(250)
+      }
+      await compose.fill('echo SENT_WHILE_OFFLINE')
+      // Enter rather than the button: past the grace the button is off (see
+      // the disconnected step below), and Enter is the road that still tries.
+      await compose.press('Enter')
+      await sleep(400)
+      if ((await compose.inputValue()) !== 'echo SENT_WHILE_OFFLINE') {
+        note('FAIL', 'mobile', 'a send made while disconnected cleared the compose box')
+      }
+      if (!(await page.locator('[data-testid="compose-unsent"]').isVisible().catch(() => false))) {
+        note('FAIL', 'mobile', 'a send made while disconnected said nothing')
+      }
+      await ctx.setOffline(false)
+      for (let i = 0; i < 60; i++) {
+        if ((await page.getAttribute('[data-testid="connection"]', 'data-status').catch(() => '')) === 'open') break
+        await sleep(250)
+      }
+      // Not resent on its own: whether it still makes sense is the person's
+      // call. Cleared here so the steps below start from an empty box.
+      await compose.fill('')
+      await sleep(300)
     }
 
     // What is in the box belongs to the session it was typed for.
@@ -2669,6 +2889,66 @@ browser = await chromium.launch({ headless: true })
         'touch emulation did not take; the reachability check below is measuring a mouse')
     }
 
+    // The drawer arrives rather than appears. Sampled frame by frame from the
+    // click, because the end state is the same with and without the motion and
+    // a screenshot after the fact cannot tell them apart: the first frame must
+    // be off to the left, the last must be at the edge, and the scrim must
+    // start transparent. Then again with reduced motion, where the first frame
+    // is already the last.
+    {
+      const sampleDrawer = () =>
+        touch.evaluate(async () => {
+          const out = []
+          document.querySelector('[data-testid="menu-button"]').click()
+          await new Promise((resolve) => {
+            let n = 0
+            const tick = () => {
+              const el = document.querySelector('[data-testid="sidebar"][data-overlay="true"]')
+              const scrim = document.querySelector('[data-testid="drawer-scrim"]')
+              if (el) {
+                out.push({
+                  left: Math.round(el.getBoundingClientRect().left),
+                  scrim: scrim ? Number(getComputedStyle(scrim).opacity) : 1,
+                })
+              }
+              if (++n < 40) requestAnimationFrame(tick)
+              else resolve()
+            }
+            requestAnimationFrame(tick)
+          })
+          return out
+        })
+      const closeDrawer = async () => {
+        await touch.locator('[data-testid="drawer-scrim"]').click({ position: { x: 370, y: 400 } })
+        await touch.waitForSelector('[data-testid="sidebar"][data-overlay="true"]', { state: 'detached', timeout: 3000 })
+          .catch(() => {})
+        await sleep(300)
+      }
+      const moving = await sampleDrawer()
+      if (moving.length < 5) {
+        note('FAIL', 'drawer', `the drawer produced ${moving.length} frames after the menu button`)
+      } else {
+        const first = moving[0]
+        const last = moving[moving.length - 1]
+        const ordered = moving.every((s, i) => i === 0 || s.left >= moving[i - 1].left)
+        if (first.left > -100) note('FAIL', 'drawer', `the drawer's first frame is at x=${first.left}; it did not slide in`)
+        else if (last.left !== 0) note('FAIL', 'drawer', `the drawer ended at x=${last.left}, not at the edge`)
+        else if (!ordered) note('FAIL', 'drawer', `the drawer moved backwards: ${moving.map((s) => s.left).join(',')}`)
+        else if (first.scrim > 0.5) note('FAIL', 'drawer', `the scrim's first frame is ${first.scrim} opaque; it popped in`)
+        else note('PASS', 'drawer', `the drawer slides from x=${first.left} to the edge and the scrim fades in`)
+      }
+      await closeDrawer()
+      await touch.emulateMedia({ reducedMotion: 'reduce' })
+      const still = await sampleDrawer()
+      if (still.length === 0 || still[0].left !== 0 || still[0].scrim < 0.99) {
+        note('FAIL', 'drawer', `with reduced motion the first frame is ${JSON.stringify(still[0])}; it should already be open`)
+      } else {
+        note('PASS', 'drawer', 'with reduced motion the drawer is open on the first frame')
+      }
+      await closeDrawer()
+      await touch.emulateMedia({ reducedMotion: 'no-preference' })
+    }
+
     await touch.locator('header button[title^="Projects"]').click()
     await sleep(800)
     const touchRow = touch
@@ -2871,7 +3151,24 @@ browser = await chromium.launch({ headless: true })
             note('FAIL', 'projects', 'the confirmation opens with the focus on the destructive button')
           }
           await page.screenshot({ path: join(SHOTS, 'confirm.png') })
-          await page.locator('[data-testid="confirm-yes"]').click()
+          // Enter presses what has the focus. It used to confirm from
+          // anywhere, so Enter on the highlighted Cancel removed the project
+          // -- in all three engines.
+          await page.keyboard.press('Enter')
+          await sleep(600)
+          if (await page.locator('[data-testid="confirm-dialog"]').isVisible().catch(() => false)) {
+            note('FAIL', 'projects', 'Enter on the focused Cancel left the confirmation open')
+          }
+          if (!(await listProjects()).some((x) => x.id === doomedProject.id)) {
+            note('FAIL', 'projects', 'Enter on the focused Cancel removed the project')
+            throw new Error('cancel confirmed')
+          }
+          await remove.click()
+          await page.waitForSelector('[data-testid="confirm-dialog"]', { timeout: 5000 })
+          // And on the destructive button, it confirms: the keyboard can still
+          // say yes, it just has to aim.
+          await page.locator('[data-testid="confirm-yes"]').focus()
+          await page.keyboard.press('Enter')
           await sleep(1500)
 
           const after = await listProjects()
@@ -2975,8 +3272,8 @@ browser = await chromium.launch({ headless: true })
     // Every field a finger can focus must be at least 16px.
     //
     // iOS Safari zooms the page when a focused input's text is smaller than
-    // that, and has ignored `user-scalable=no` since iOS 10 — so the meta tag
-    // in index.html does not prevent it, and nothing zooms back afterwards.
+    // that, and has ignored `user-scalable=no` since iOS 10 — so no meta tag
+    // prevents it (index.html no longer tries), and nothing zooms back.
     // Every field here was 12 or 13px, the compose box included, which is the
     // main way to type on a phone.
     await touch.locator('[data-testid="compose-input"]').click().catch(() => {})
@@ -3533,6 +3830,38 @@ browser = await chromium.launch({ headless: true })
   }
 
   // ── what a first-time visitor actually sees ──────────────────────────────
+  // ── a browser that cannot run the panel is told so ──────────────────────
+  // The boot dot used to spin forever: too old an engine, or a bundle it
+  // could not parse, and nothing said why. index.html checks in a classic
+  // script and says it in place of the dot.
+  {
+    const oldCtx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1024, height: 768 } })
+    await oldCtx.addInitScript(() => {
+      const real = CSS.supports.bind(CSS)
+      CSS.supports = (...a) => (String(a[0]).includes('container-type') ? false : real(...a))
+    })
+    const old = await oldCtx.newPage()
+    await old.goto(BASE, { waitUntil: 'load' })
+    await sleep(2500)
+    const said = await old.locator('[data-testid="boot-unsupported"]').isVisible().catch(() => false)
+    const drew = await old.locator('[data-testid="auth-username"], [data-testid="sidebar"]').count()
+    if (!said) note('FAIL', 'boot', 'a browser without container queries is not told it is too old')
+    if (drew > 0) note('FAIL', 'boot', 'the app started over the too-old message in a browser that cannot lay it out')
+    await oldCtx.close()
+
+    const brokenCtx = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1024, height: 768 } })
+    await brokenCtx.route(/\/assets\/index-[^/]*\.js$/, (r) =>
+      r.fulfill({ status: 200, contentType: 'text/javascript', body: 'this is not javascript (' }))
+    const broken = await brokenCtx.newPage()
+    await broken.goto(BASE, { waitUntil: 'load' })
+    await sleep(2500)
+    if (!(await broken.locator('[data-testid="boot-failed"] button').isVisible().catch(() => false))) {
+      note('FAIL', 'boot', 'a bundle that does not parse leaves the loading dot spinning with nothing said')
+    }
+    await brokenCtx.close()
+    if (said && drew === 0) note('PASS', 'boot', 'too old and failed to start are both said, in place of the dot')
+  }
+
   // Everything above runs in a context that has been clicking panels open for
   // several minutes. A new browser has no localStorage, and that is the state
   // every real user starts in — the one state the harness had never measured.
@@ -3846,6 +4175,33 @@ browser = await chromium.launch({ headless: true })
         'offer and no notification on Android, where the Notification constructor is refused')
     } else {
       note('PASS', 'pwa', 'the manifest is complete and the service worker registers')
+
+      // A write goes to the network, not through the worker. An upload
+      // through it had its progress measured to the worker -- instant -- and
+      // every failure, a proxy's 413 included, read as the worker's doing.
+      // Asked of a page the worker actually controls, or it proves nothing.
+      if (!(await pwa.evaluate(() => navigator.serviceWorker.controller !== null))) {
+        await pwa.reload({ waitUntil: 'networkidle' })
+      }
+      const controlled = await pwa.evaluate(() => navigator.serviceWorker.controller !== null)
+      if (!controlled) {
+        note('FAIL', 'pwa', 'the service worker never took control of the page, so what it intercepts cannot be checked')
+      } else {
+        const [write] = await Promise.all([
+          pwa.waitForResponse((r) => r.url().includes('/upload?path=') && r.request().method() === 'POST'),
+          pwa.evaluate(() => fetch('/api/projects/none/upload?path=', { method: 'POST', body: 'x' }).catch(() => null)),
+        ])
+        const [read] = await Promise.all([
+          pwa.waitForResponse((r) => r.url().endsWith('/api/health')),
+          pwa.evaluate(() => fetch('/api/health').catch(() => null)),
+        ])
+        if (write.fromServiceWorker()) {
+          note('FAIL', 'pwa', 'a POST went through the service worker; uploads report progress to it and not to the server')
+        }
+        if (!read.fromServiceWorker()) {
+          note('WARN', 'pwa', 'a GET did not go through the service worker either; its fetch handler is what installability asks for')
+        }
+      }
     }
     await pwaCtx.close()
   }
@@ -4310,7 +4666,15 @@ browser = await chromium.launch({ headless: true })
     if (crash.label?.startsWith('Exited')) break
     await sleep(500)
   }
-  const clean = await glyphOf('quits')
+  // Waited for as well. Only the crash was, and the clean exit is a second
+  // session the poller reaches on its own schedule: read once straight after
+  // the first, it was still the "Working" glyph on a slow tick -- one failure
+  // in a full run with nothing in that run touching exits.
+  let clean = await glyphOf('quits')
+  for (let i = 0; i < 40 && !clean.label?.startsWith('Exited'); i++) {
+    await sleep(500)
+    clean = await glyphOf('quits')
+  }
   const running = await glyphOf('scratchpad')
 
   if (crash?.label !== 'Exited with status 3') {
@@ -4582,6 +4946,77 @@ browser = await chromium.launch({ headless: true })
   } else {
     await openSettings.click()
     await sleep(900)
+
+    // ── dialog focus ───────────────────────────────────────────────────────
+    //
+    // Tab stays inside, Escape closes from anywhere inside, and the keyboard
+    // goes back to the control that opened the dialog. All three were missing
+    // in every engine: Tab walked into the page behind, and closing left the
+    // focus on <body>.
+    {
+      const inside = (sel) =>
+        page.evaluate((q) => document.querySelector(q)?.contains(document.activeElement) === true, sel)
+      const onOpener = (testid) =>
+        page.evaluate((id) => document.activeElement === document.querySelector(`[data-testid="${id}"]`), testid)
+      let escaped = 0
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press('Tab')
+        if (!(await inside('[data-testid="settings"]'))) escaped++
+      }
+      if (escaped) note('FAIL', 'dialog-focus', `Tab left the settings dialog ${escaped} times in 30 presses`)
+      // Backwards too, from the first element.
+      let escapedBack = 0
+      for (let i = 0; i < 30; i++) {
+        await page.keyboard.press('Shift+Tab')
+        if (!(await inside('[data-testid="settings"]'))) escapedBack++
+      }
+      if (escapedBack) note('FAIL', 'dialog-focus', `Shift+Tab left the settings dialog ${escapedBack} times in 30 presses`)
+      // Escape from inside the body, not from the rail.
+      await page.locator('[data-testid="settings-body"] button:visible, [data-testid="settings-body"] input:visible').first().focus()
+      await page.keyboard.press('Escape')
+      await sleep(400)
+      if ((await page.locator('[data-testid="settings"]').count()) !== 0) {
+        note('FAIL', 'dialog-focus', 'Escape with the focus inside the settings body did not close it')
+      } else if (!(await onOpener('settings-open'))) {
+        note('FAIL', 'dialog-focus', 'closing the settings did not return the focus to the gear')
+      } else {
+        note('PASS', 'dialog-focus', 'settings: Tab contained both ways, Escape closes, focus back on the gear')
+      }
+      await openSettings.click()
+      await sleep(900)
+
+      // The directory picker, from the sidebar's add button.
+      const add = page.locator('[data-testid="add-project"]:visible').first()
+      if (await add.count()) {
+        // The settings dialog is covering the sidebar's button.
+        await page.locator('[data-testid="settings-close"]').click()
+        await sleep(400)
+        await add.focus()
+        await add.click()
+        await page.waitForSelector('[data-testid="dir-picker"]', { timeout: 5000 }).catch(() => {})
+        await sleep(500)
+        let out = 0
+        for (let i = 0; i < 30; i++) {
+          await page.keyboard.press('Tab')
+          if (!(await inside('[data-testid="dir-picker"]'))) out++
+        }
+        if (out) note('FAIL', 'dialog-focus', `Tab left the directory picker ${out} times in 30 presses`)
+        await page.keyboard.press('Escape')
+        await sleep(400)
+        const gone = (await page.locator('[data-testid="dir-picker"]').count()) === 0
+        const back = await page.evaluate(
+          () => document.activeElement === document.querySelector('[data-testid="add-project"]:not([hidden])') ||
+            document.activeElement?.getAttribute('data-testid') === 'add-project',
+        )
+        if (!gone) note('FAIL', 'dialog-focus', 'Escape did not close the directory picker')
+        else if (!back) note('FAIL', 'dialog-focus', 'closing the directory picker did not return the focus to the add button')
+        else if (!out) note('PASS', 'dialog-focus', 'directory picker: Tab contained, Escape closes, focus back on the add button')
+        await openSettings.click()
+        await sleep(900)
+      } else {
+        note('FAIL', 'dialog-focus', 'no add-project control to open the directory picker from')
+      }
+    }
 
     // ── settings ───────────────────────────────────────────────────────────
     //

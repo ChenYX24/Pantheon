@@ -55,6 +55,25 @@ var openRoutes = map[string]string{
 	// -- and the handler hands the request over and nothing else. 404 for a
 	// kind that is not a running webhook adapter; see chat.go.
 	"/api/chat/hooks/{kind}": "an IM's callback; the adapter verifies the signature and token itself",
+	// A plugin's inbound route: the internet calls it, and the handler
+	// verifies the body against the plugin's declared secret before any of
+	// the plugin's code runs. 404 for a plugin with no inbound route.
+	"/api/plugin-hook/{pluginID}/{path}": "a plugin's inbound route; verified against its declared secret before anything runs",
+	// A process on the panel's port (pluginhttp.go). Open at the router so
+	// the handler can answer a cross-origin preflight, which carries no
+	// credential; the handler then requires one of three -- the owner's
+	// session or API token, a plugin access token, or the plugin's HMAC
+	// secret -- and there is no anonymous mode. 404 for a plugin that
+	// declares no door.
+	// A session's own door (me.go): the agent inside a session, with the
+	// derived token its environment holds, saying what it is up to. The
+	// middleware requires that token for exactly the session named.
+	"/api/me/v1":                    "a session's own door; the middleware requires the session's derived token",
+	"/api/me/v1/say":                "the same door: a line for the phone",
+	"/api/me/v1/notify":             "the same door: a call for attention",
+	"/api/me/v1/send":               "the same door: a file",
+	"/api/plugin-http/{pluginID}":   "a plugin process's door; the handler requires the owner, a plugin token or the HMAC secret",
+	"/api/plugin-http/{pluginID}/*": "the same, under the mount",
 	// A directory preview, and the reason is measured rather than chosen.
 	//
 	// The page is served with `Content-Security-Policy: sandbox`, which is what
@@ -1045,5 +1064,225 @@ func TestLogoutAndPasswordRefuseACrossPortOrigin(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusNoContent {
 		t.Errorf("same-origin logout = %d, want 204", res.StatusCode)
+	}
+}
+
+// One address cannot fill the ceremony store and lock everyone else out of
+// passkey sign-in. The global cap made a flood cheap and also made it a
+// lockout: 4096 anonymous begins, a second of curl, and nobody signed in with
+// a passkey for three minutes.
+func TestOneAddressCannotTakeEveryPasskeyCeremony(t *testing.T) {
+	ts, srv := newTestServer(t)
+	nets, err := auth.ParseCIDRs([]string{"127.0.0.1/32", "::1/128"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Auth.TrustedProxies = nets
+	srv.Cfg.Domain = "panel.example"
+	srv.Cfg.TLSMode = "off"
+	client := anonymousClient(t)
+	begin := func(from string) int {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/auth/passkey/login/begin", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", from)
+		req.Header.Set("X-Forwarded-Proto", "https")
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	refused := 0
+	for i := 0; i < maxChallengesPerAddress+10; i++ {
+		if begin("198.51.100.9") == http.StatusTooManyRequests {
+			refused++
+		}
+	}
+	if refused != 10 {
+		t.Errorf("%d of %d begins from one address refused, want the 10 past %d", refused, maxChallengesPerAddress+10, maxChallengesPerAddress)
+	}
+	if status := begin("192.0.2.44"); status != http.StatusOK {
+		t.Errorf("another address after the flood: %d", status)
+	}
+}
+
+// The sign-in surface's refusals carry a code beside the sentence, because the
+// page translates the code. Without it "wrong username or password" appeared
+// verbatim under a Chinese form. Each case is one refusal a person can meet.
+func TestAuthRefusalsCarryTheirCode(t *testing.T) {
+	post := func(t *testing.T, c *http.Client, url, body string) (int, map[string]any) {
+		t.Helper()
+		res, err := c.Post(url, "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatalf("POST %s: %v", url, err)
+		}
+		defer res.Body.Close()
+		var m map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&m)
+		return res.StatusCode, m
+	}
+
+	t.Run("wrong password then throttled", func(t *testing.T) {
+		ts, _ := newTestServer(t)
+		c := anonymousClient(t)
+		_, m := post(t, c, ts.URL+"/api/auth/login", `{"username":"tester","password":"nope"}`)
+		if m["code"] != CodeBadCredentials {
+			t.Errorf("wrong password code = %v, want %s", m["code"], CodeBadCredentials)
+		}
+		var throttled map[string]any
+		for i := 0; i < 20 && throttled == nil; i++ {
+			if status, m := post(t, c, ts.URL+"/api/auth/login", `{"username":"tester","password":"nope"}`); status == http.StatusTooManyRequests {
+				throttled = m
+			}
+		}
+		if throttled == nil {
+			t.Fatal("never throttled")
+		}
+		if throttled["code"] != CodeTooManyAttempts {
+			t.Errorf("throttled code = %v, want %s", throttled["code"], CodeTooManyAttempts)
+		}
+		if n, _ := throttled["retryAfter"].(float64); n < 1 {
+			t.Errorf("throttled retryAfter = %v, want a number of seconds", throttled["retryAfter"])
+		}
+	})
+
+	t.Run("unknown user", func(t *testing.T) {
+		ts, _ := newTestServer(t)
+		_, m := post(t, anonymousClient(t), ts.URL+"/api/auth/login", `{"username":"nobody","password":"nope"}`)
+		if m["code"] != CodeBadCredentials {
+			t.Errorf("unknown user code = %v, want %s", m["code"], CodeBadCredentials)
+		}
+	})
+
+	t.Run("setup", func(t *testing.T) {
+		ts, _ := newUnconfiguredServer(t)
+		_, m := post(t, anonymousClient(t), ts.URL+"/api/auth/setup",
+			`{"token":"not-the-token","username":"owner","password":"a sufficiently long password"}`)
+		if m["code"] != CodeBadSetupToken {
+			t.Errorf("bad token code = %v, want %s", m["code"], CodeBadSetupToken)
+		}
+		ts2, _ := newTestServer(t)
+		_, m = post(t, anonymousClient(t), ts2.URL+"/api/auth/setup",
+			`{"token":"test-setup-token","username":"second","password":"another long password"}`)
+		if m["code"] != CodeAlreadyConfigured {
+			t.Errorf("second setup code = %v, want %s", m["code"], CodeAlreadyConfigured)
+		}
+	})
+
+	t.Run("changing the password", func(t *testing.T) {
+		ts, _ := newTestServer(t)
+		c := ts.Client()
+		_, m := post(t, c, ts.URL+"/api/auth/password", `{"current":"wrong one","next":"a brand new long password"}`)
+		if m["code"] != CodeWrongCurrentPassword {
+			t.Errorf("wrong current code = %v, want %s", m["code"], CodeWrongCurrentPassword)
+		}
+	})
+}
+
+// beyondTheAllowlist are the routes --allow-from does not apply to, each for
+// a stated reason. Every other route answers 403 to an address off the list.
+//
+// The check was thirteen hand-copied blocks, and a capability route that
+// forgot it was the first finding of the first audit; it is three helpers now
+// (refuseAddress and its two neighbours), and this walk is what makes
+// forgetting them a failing test rather than a finding. Adding a route here
+// is the decision, said out loud.
+var beyondTheAllowlist = map[string]string{
+	"/api/health":     "a probe, and it says nothing",
+	"/api/auth/state": "tells a sign-in page which doors exist, and nothing else",
+	// The callers below are agents inside sessions, on this machine. The
+	// allowlist is about browsers; a panel restricted to a LAN that left
+	// loopback off the list must not stop hearing from its own sessions.
+	"/api/hook/state":                            "a session's state report, from loopback, under its own token",
+	"/api/me/v1":                                 "a session's own door, from loopback, under its derived token",
+	"/api/me/v1/say":                             "the same door",
+	"/api/me/v1/notify":                          "the same door",
+	"/api/me/v1/send":                            "the same door",
+	"/api/chat/tools/projects":                   "the chat assistant's tools, a child of the panel, under a per-process token",
+	"/api/chat/tools/sessions":                   "the same",
+	"/api/chat/tools/system":                     "the same",
+	"/api/chat/tools/usage":                      "the same",
+	"/api/chat/tools/sessions/{handle}/messages": "the same",
+	"/api/chat/tools/sessions/{handle}/screen":   "the same",
+	// Called by services on the internet, which verify themselves.
+	"/api/chat/hooks/{kind}":             "an IM's callback; the adapter verifies its signature",
+	"/api/plugin-hook/{pluginID}/{path}": "a plugin's inbound route; verified against its secret",
+	// Recorded as they are, not endorsed: both were noted by the October audit
+	// (04-F7) as surfaces a stranger reaches whatever --allow-from says.
+	// Setup was a third, until it was made to ask.
+	"/api/auth/passkey/login/begin":  "as it is: reachable off the list (audit 04-F7)",
+	"/api/auth/passkey/login/finish": "as it is: reachable off the list (audit 04-F7)",
+	// The page's own files. What they call is what is guarded.
+	"/*": "the SPA bundle; every API it calls is behind the list",
+}
+
+func TestEveryRouteRefusesAnAddressOffTheAllowlist(t *testing.T) {
+	ts, srv := newTestServer(t)
+	nets, err := auth.ParseCIDRs([]string{"203.0.113.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Auth.Allow = nets // the test client is on loopback, which is not on it
+	param := regexp.MustCompile(`\{[^}]+\}`)
+	seen := map[string]bool{}
+	err = chi.Walk(srv.Routes().(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if _, ok := beyondTheAllowlist[route]; ok {
+			seen[route] = true
+			return nil
+		}
+		path := strings.ReplaceAll(param.ReplaceAllString(route, "x"), "*", "x")
+		req, _ := http.NewRequest(method, ts.URL+path, strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		res, rerr := ts.Client().Do(req)
+		if rerr != nil {
+			t.Errorf("%s %s: %v", method, route, rerr)
+			return nil
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Errorf("%s %s answered %d to an address off --allow-from, want 403", method, route, res.StatusCode)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for route := range beyondTheAllowlist {
+		if !seen[route] {
+			t.Errorf("%s is listed as beyond the allowlist and is not a route any more; take it off", route)
+		}
+	}
+}
+
+// Setup is refused to an address off --allow-from, like every other route.
+// It asked the throttle and the token and never the list, so on a panel
+// started with --allow-from and no account yet, whoever outside it held the
+// setup token -- printed to a terminal, a unit's journal -- could make the
+// first account. The token was the only thing between them and ownership, on
+// the one route the allowlist exists to put something in front of.
+func TestSetupIsRefusedToAnAddressOffTheAllowlist(t *testing.T) {
+	ts, srv := newUnconfiguredServer(t)
+	nets, err := auth.ParseCIDRs([]string{"203.0.113.0/24"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Auth.Allow = nets // the test client is on loopback
+	res, err := anonymousClient(t).Post(ts.URL+"/api/auth/setup", "application/json",
+		strings.NewReader(`{"token":"test-setup-token","username":"outsider","password":"a sufficiently long password"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("setup from an address off the list: %d, want 403", res.StatusCode)
+	}
+	if n, _ := srv.DB.CountUsers(context.Background()); n != 0 {
+		t.Fatalf("an account was made from an address off the list (%d)", n)
+	}
+	var rows int
+	_ = srv.DB.SQL().QueryRow(`SELECT COUNT(*) FROM audit_log WHERE event = 'blocked'`).Scan(&rows)
+	if rows == 0 {
+		t.Error("the refusal left no audit row")
 	}
 }

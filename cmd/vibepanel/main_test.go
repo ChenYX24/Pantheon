@@ -191,6 +191,11 @@ func TestACLITitleIsNotOverwrittenByTheNextPoll(t *testing.T) {
 	socket := "vibepanel-test-" + strconv.Itoa(os.Getpid()) + "-clititle"
 	t.Setenv("VIBEPANEL_DATA_DIR", dir)
 	t.Setenv("VIBEPANEL_TMUX_SOCKET", socket)
+	// This test is about the offline path: no panel answers, and the CLI
+	// works on the database and tmux itself. Without this the CLI finds
+	// whatever panel is on the default port of the machine running the
+	// tests -- on the author's box, a real one.
+	t.Setenv("VIBEPANEL_CLI_URL", "http://127.0.0.1:1")
 	// The session `session new` starts is a real one on a throwaway socket, and
 	// it has to be taken down again. Red line 1.
 	tm := tmux.New(socket, filepath.Join(dir, "tmux"))

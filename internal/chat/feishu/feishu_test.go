@@ -1112,7 +1112,16 @@ func TestTokenIsCachedUntilItExpiresAndRefreshedWhenRefused(t *testing.T) {
 		t.Fatalf("first try used %q", calls[len(calls)-2].Auth)
 	}
 	// Run reports a bad secret, which is the one moment it can.
+	//
+	// After r.run returns, not at it: r.run waits for Run to hold the sink,
+	// and Run holds it before it fetches and reports. Read at once, this
+	// failed under load -- render-check beside it -- with "oks=1" in the
+	// message: zero when compared, one by the time the message was built.
 	r.run()
+	deadline := time.Now().Add(2 * time.Second)
+	for r.sink.okCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if r.sink.okCount() != 1 {
 		t.Fatalf("Run did not report the token fetch: oks=%d err=%q", r.sink.okCount(), r.sink.lastErr())
 	}
@@ -1215,5 +1224,45 @@ func TestASignedRequestExpires(t *testing.T) {
 	}
 	if in := r.sink.wait(t); in.Text != "fresh" {
 		t.Fatalf("inbound %+v", in)
+	}
+}
+
+// The door is not an oracle. It decrypted first and answered with the reason
+// -- "decrypt: bad padding" against "body: invalid character" -- which is a
+// padding oracle for anybody holding a captured event. A signed request is
+// now checked before anything is decrypted, and every unsigned failure reads
+// the same from outside.
+func TestTheWebhookSaysNothingAboutWhyItRefused(t *testing.T) {
+	r := newRig(t, encKey)
+	r.run()
+	badPadding, _ := json.Marshal(map[string]string{"encrypt": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 48))})
+	notJSON := encryptBody(t, encKey, []byte("not json at all"))
+	anEvent := encryptBody(t, encKey, textEvent("ev9", "om_9", "hi"))
+	var first *httptest.ResponseRecorder
+	for name, body := range map[string][]byte{"bad padding": badPadding, "not JSON": notJSON, "an unsigned event": anEvent} {
+		rec := r.post(body, nil)
+		if first == nil {
+			first = rec
+		}
+		if rec.Code != first.Code || rec.Body.String() != first.Body.String() {
+			t.Errorf("%s: %d %q, and another failure was %d %q -- the difference is the oracle",
+				name, rec.Code, rec.Body.String(), first.Code, first.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "decrypt") || strings.Contains(rec.Body.String(), "padding") {
+			t.Errorf("%s: the answer names the check: %q", name, rec.Body.String())
+		}
+	}
+	r.sink.none(t)
+
+	// Signed but wrongly: refused on the signature, before the body is
+	// decrypted -- this one would not even decrypt.
+	r.advance(time.Minute)
+	ts := strconv.FormatInt(r.ad.now().Unix(), 10)
+	rec := r.post(badPadding, map[string]string{"X-Lark-Request-Timestamp": ts, "X-Lark-Request-Nonce": "n", "X-Lark-Signature": "00"})
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a wrongly signed body: %d", rec.Code)
+	}
+	if got := r.sink.lastErr(); !strings.Contains(got, "signature") || strings.Contains(got, "decrypt") {
+		t.Errorf("a signed request was decrypted before its signature was checked: %q", got)
 	}
 }

@@ -1,4 +1,7 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
+import { isEnter } from './enter'
+import { Menu } from './Menu'
+import { DisconnectedBar } from './Disconnected'
 import {
   Archive,
   ChevronLeft,
@@ -7,6 +10,7 @@ import {
   House,
   ListOrdered,
   Pause,
+  PanelRight,
   Pin,
   PinOff,
   Plus,
@@ -25,6 +29,7 @@ import { EXIT_VANISHED } from '../protocol/wire'
 import { t, useLang } from '../i18n'
 import { HOME_PATH } from '../routes'
 import { usePanelHomeLinks } from './home/usePanelHomeLinks'
+import { safeText } from './text'
 
 export interface SidebarProps {
   projects: Project[]
@@ -86,6 +91,20 @@ export interface SidebarProps {
   onAutoOrderProjects: () => void
   hasProjectOrder: boolean
   onRestoreProjectOrder: () => void
+
+  /**
+   * The panel has lost its connection. The states shown are the last ones it
+   * heard, so they are drawn as such; and the drawer covers the header on a
+   * phone, so it says so itself.
+   */
+  disconnected?: boolean
+
+  /**
+   * Opens the side panel or the project's terminals as a sheet. Only in the
+   * phone drawer: on a phone the side panel and the bottom strip had no way in
+   * at all, so files, notes, git, the monitor and tokens did not exist there.
+   */
+  onOpenSheet?: (which: 'panel' | 'terminals') => void
 
   /** An agent is running and nothing is reporting its state. */
   stateGuessed: boolean
@@ -343,11 +362,16 @@ export function Sidebar(props: SidebarProps) {
   // and acting second is one more tap and it is how every list on a phone
   // works; it also gives the row you are on something to be, which is the
   // other half of 「没有层次感」.
-  const rowControls = (isSelected: boolean) => !overlay || isSelected
+  //
+  // The same holds on any touch screen, not only in the phone's drawer: an
+  // iPad's sidebar is the desktop one, and with pin and kill drawn on every
+  // row at 44px the names came out "vib…", "dot…" and "pag…" -- in portrait
+  // and in landscape at 1194.
+  const rowControls = (isSelected: boolean) => !(overlay || props.touch) || isSelected
 
   // The overlay covers the terminal and must be opaque.
   const shell = overlay
-    ? 'absolute inset-y-0 left-0 z-20 w-72 border-r border-hairline shadow-2xl vp-solid'
+    ? 'vp-drawer-in absolute inset-y-0 left-0 z-20 w-72 border-r border-hairline shadow-2xl vp-solid'
     : 'w-64 shrink-0 border-r border-hairline vp-blur'
 
   return (
@@ -356,7 +380,7 @@ export function Sidebar(props: SidebarProps) {
         <button
           type="button"
           onClick={props.onToggle}
-          title={overlay ? 'Close' : 'Collapse'}
+          title={overlay ? t('settings.close') : t('sidebar.collapse')}
           className="vp-control"
         >
           <ChevronLeft size={15} />
@@ -404,7 +428,11 @@ export function Sidebar(props: SidebarProps) {
         </button>
       </header>
 
-      <nav className="flex-1 overflow-y-auto px-2 pb-3">
+      {props.disconnected && overlay && <DisconnectedBar className="border-t" />}
+      <nav
+        data-disconnected={props.disconnected === true}
+        className={`flex-1 overflow-y-auto px-2 pb-3 ${props.disconnected ? 'vp-disconnected' : ''}`}
+      >
         {projects.length === 0 && (
           <p data-testid="sidebar-empty" className="px-2 py-6 text-vp-base leading-relaxed text-ink-2">
             {/* Not the fresh-install line when everything is only archived:
@@ -460,24 +488,41 @@ export function Sidebar(props: SidebarProps) {
                   happens to exist gives you a project you could not remove from
                   here at all — the endpoint, the CLI and even the client method
                   were all there, and nothing in the panel called it. */}
+              {overlay || props.touch ? (
+                // On a touch screen every control is 44px and always drawn, and
+                // three of them beside a project's name left "vi…": archive and
+                // remove go into one menu, which also stops the destructive
+                // one sitting under a thumb next to archive.
+                <Menu
+                  testid="project-more"
+                  label={t('menu.moreFor', { name: projectLabel(p) })}
+                  items={[
+                    { label: t('project.archive'), icon: Archive, testid: 'project-archive', onSelect: () => props.onArchiveProject(p) },
+                    { label: t('project.remove'), icon: X, testid: 'project-remove', destructive: true, onSelect: () => props.onRemoveProject(p) },
+                  ]}
+                />
+              ) : (
+                <>
               <button
-                type="button"
-                onClick={() => props.onArchiveProject(p)}
-                data-testid="project-archive"
-                title={t('project.archive')}
-                className="vp-control vp-tap vp-reveal"
-              >
-                <Archive size={13} />
-              </button>
-              <button
-                type="button"
-                onClick={() => props.onRemoveProject(p)}
-                data-testid="project-remove"
-                title={t('project.remove')}
-                className="vp-control vp-tap vp-reveal"
-              >
-                <X size={13} />
-              </button>
+                    type="button"
+                    onClick={() => props.onArchiveProject(p)}
+                    data-testid="project-archive"
+                    title={t('project.archive')}
+                    className="vp-control vp-tap vp-reveal"
+                  >
+                    <Archive size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => props.onRemoveProject(p)}
+                    data-testid="project-remove"
+                    title={t('project.remove')}
+                    className="vp-control vp-tap vp-reveal"
+                  >
+                    <X size={13} />
+                  </button>
+                </>
+              )}
             </div>
 
             {homeLinks.has(p.id) && <a href={homeLinks.get(p.id)} className="vp-control mx-4 mb-1 text-vp-xs" data-testid="sidebar-project-home"><House size={13} />{t('home.shell.projectPage')}</a>}
@@ -486,18 +531,42 @@ export function Sidebar(props: SidebarProps) {
               const isLive = props.live.includes(s.id)
               const isSelected = props.selected === s.id
               return (
+                <Fragment key={s.id}>
                 <div
-                  key={s.id}
                   data-testid="session-row"
                   // The id, so a check can ask about *this* session's terminal
                   // rather than about whichever one it happens to find. The
                   // scale check waited on "any terminal has content", which is
                   // true of the one that was already on screen.
                   data-session-id={s.id}
+                  // Which one is on screen, said in words a screen reader and
+                  // a check can both read rather than only as a background.
+                  aria-current={isSelected ? 'true' : undefined}
                   className={`group flex cursor-pointer items-center gap-2 rounded-vp ${pack.row} transition-colors duration-200 ease-vp ${
                     isSelected ? 'bg-surface-2' : 'hover:bg-surface-2'
                   }`}
                   onClick={() => props.onSelect(s.id)}
+                  // Reachable and usable from the keyboard: it was a div with a
+                  // click handler and nothing else, so a session could not be
+                  // chosen, renamed or even reached without a pointer. Enter or
+                  // Space chooses, F2 renames, the arrows move between rows.
+                  // Only when the row itself has the focus, not a button in it.
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return
+                    if (isEnter(e) || e.key === ' ') {
+                      e.preventDefault()
+                      props.onSelect(s.id)
+                    } else if (e.key === 'F2') {
+                      e.preventDefault()
+                      setRenaming(s.id)
+                    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                      e.preventDefault()
+                      const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="session-row"]')]
+                      const at = rows.indexOf(e.currentTarget)
+                      rows[at + (e.key === 'ArrowDown' ? 1 : -1)]?.focus()
+                    }
+                  }}
                 >
                   <StateDot
                     state={s.state}
@@ -553,6 +622,10 @@ export function Sidebar(props: SidebarProps) {
                   {!isLive && !s.exited && (
                     <span className="shrink-0 text-vp-xs text-ink-2">idle</span>
                   )}
+                  {/* Where an unsandboxed plugin may draw beside a session
+                      (docs/plugins.md §7, host.slots.add): a placeholder the
+                      host runtime fills, empty and sizeless otherwise. */}
+                  <span data-host-slot="sidebar.sessionRow.trailing" data-session={s.id} className="contents" />
                   {/* Always visible, unlike pin and kill: a dead session is a
                       thing to act on, not an affordance to discover on hover —
                       and hover does not exist on the phone. */}
@@ -583,6 +656,8 @@ export function Sidebar(props: SidebarProps) {
                     }}
                     data-testid="pin-session"
                     title={s.pinned ? t('session.unpin') : t('session.pin')}
+                    // Six rows, six buttons all called "Pin" to a screen reader.
+                    aria-label={`${s.pinned ? t('session.unpin') : t('session.pin')}: ${props.labels.get(s.id) ?? sessionLabel(s)}`}
                     // Not vp-reveal while it is on. Being pinned is state you
                     // have to be able to see without hovering, so the row used
                     // to draw a second pin badge beside the name -- and on
@@ -603,12 +678,40 @@ export function Sidebar(props: SidebarProps) {
                     }}
                     data-testid="kill-session"
                     title={t('session.kill')}
+                    aria-label={`${t('session.kill')}: ${props.labels.get(s.id) ?? sessionLabel(s)}`}
                     className="vp-control vp-tap vp-reveal"
                   >
                     <X size={12} />
                   </button>
                   )}
                 </div>
+                {/* What the session says about itself (`vibepanel me`): a
+                    line, a figure and a few chips under the row. The figure
+                    is printed beside the bar, so the bar is never the only
+                    carrier (red line 4). */}
+                {(s.summary !== '' || s.progress >= 0 || s.labels.length > 0) && (
+                  <div data-testid="session-info" className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pr-2 pl-7 text-vp-xs text-ink-2">
+                    {s.summary !== '' && (
+                      <span className="min-w-0 truncate" title={safeText(s.summary)}>
+                        {safeText(s.summary)}
+                      </span>
+                    )}
+                    {s.progress >= 0 && (
+                      <span className="tabular inline-flex shrink-0 items-center gap-1" data-testid="session-progress">
+                        <span className="vp-bar h-1 w-10 overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
+                          <span className="block h-full" style={{ width: `${s.progress}%`, background: 'var(--vp-accent)' }} />
+                        </span>
+                        {s.progress}%
+                      </span>
+                    )}
+                    {s.labels.map((l) => (
+                      <span key={l} className="rounded-vp bg-surface-2 px-1 text-ink-3">
+                        {safeText(l)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                </Fragment>
               )
             })}
             </div>
@@ -646,6 +749,29 @@ export function Sidebar(props: SidebarProps) {
           </button>
         )}
       </nav>
+
+      {overlay && props.onOpenSheet && (
+        <div className="grid shrink-0 grid-cols-2 gap-1 border-t border-hairline px-2 py-2">
+          <button
+            type="button"
+            data-testid="open-panel-sheet"
+            onClick={() => props.onOpenSheet?.('panel')}
+            className="vp-press flex min-h-11 items-center justify-center gap-1.5 rounded-vp text-vp-base text-ink-2 hover:bg-surface-2 hover:text-ink"
+          >
+            <PanelRight size={15} aria-hidden />
+            {t('app.panelSheet')}
+          </button>
+          <button
+            type="button"
+            data-testid="open-terminals-sheet"
+            onClick={() => props.onOpenSheet?.('terminals')}
+            className="vp-press flex min-h-11 items-center justify-center gap-1.5 rounded-vp text-vp-base text-ink-2 hover:bg-surface-2 hover:text-ink"
+          >
+            <TerminalIcon size={15} aria-hidden />
+            {t('app.terminalsSheet')}
+          </button>
+        </div>
+      )}
 
       {/* What this software is, at the bottom-left, always.
           

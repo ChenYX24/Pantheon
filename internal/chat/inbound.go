@@ -668,6 +668,14 @@ func (b *Bridge) deliver(ctx context.Context, p store.ChatPeer, target Target, t
 	if s, ok := b.gate(ctx, p, row, h, target.How, lang); !ok {
 		return s
 	}
+	return b.typeInto(ctx, p, row, h, target.How, text, lang)
+}
+
+// typeInto is the typing itself, after the gate: the tool's profile for
+// the submit keys, the paste, the keys, the audit. A pressed notice choice
+// comes here without the gate -- the agent asked, so its state is not a
+// reason to refuse the answer.
+func (b *Bridge) typeInto(ctx context.Context, p store.ChatPeer, row store.Session, h int, how How, text, lang string) said {
 	tool := AgentFor(row.LaunchCommand, row.Command)
 	prof, ok := b.tools(ctx)[tool]
 	if !ok {
@@ -683,8 +691,8 @@ func (b *Bridge) deliver(ctx context.Context, p store.ChatPeer, target Target, t
 			return plain(msg(lang, "gone", h))
 		}
 	}
-	b.d.Audit(ctx, "chat.send", fmt.Sprintf("[%d] %s · %s via %s: %s", h, row.Title, who(p), target.How, preview(text)))
-	if target.How == HowFocus {
+	b.d.Audit(ctx, "chat.send", fmt.Sprintf("[%d] %s · %s via %s: %s", h, row.Title, who(p), how, preview(text)))
+	if how == HowFocus {
 		// The one route a person did not name in the message itself, so the
 		// receipt says so, and says who is still waiting while the words
 		// went elsewhere.
@@ -1098,6 +1106,8 @@ func (b *Bridge) action(ctx context.Context, ch *channel, p store.ChatPeer, a Ac
 		out = b.answer(ctx, p, answerReq{sessionID: sessionID, approve: verb == "approve", bound: bound, how: HowButton}, lang)
 	case "screen":
 		out = plain(b.screen(ctx, sessionID, lang))
+	case "reply":
+		out = b.replyChoice(ctx, p, sessionID, extra, lang)
 	default:
 		return
 	}

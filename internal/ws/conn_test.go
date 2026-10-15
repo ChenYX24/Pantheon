@@ -540,3 +540,62 @@ func TestTheSocketActuallyNegotiatesCompression(t *testing.T) {
 		}
 	}
 }
+
+// A viewer that stops answering pings is let go. The keepalive returned on a
+// failed ping and left the socket open, so a peer gone without a FIN kept its
+// connection and its subscriptions until a write timed out -- for an idle
+// terminal, never. The client here reads nothing, so it never answers.
+func TestAViewerThatStopsAnsweringPingsIsClosed(t *testing.T) {
+	h := &Handler{
+		Manager:   session.NewManager(nil, 1<<10),
+		Resolve:   stubResolver{},
+		PingEvery: 50 * time.Millisecond,
+		PongWait:  100 * time.Millisecond,
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+	time.Sleep(600 * time.Millisecond) // several pings, none answered
+
+	// Now read: a closed socket answers at once with an error of its own; an
+	// open one would answer the queued pings and then wait out this deadline.
+	rctx, rcancel := context.WithTimeout(ctx, 2*time.Second)
+	defer rcancel()
+	for {
+		_, _, rerr := c.Read(rctx)
+		if rerr == nil {
+			continue // a message sent before the close
+		}
+		if errors.Is(rerr, context.DeadlineExceeded) {
+			t.Fatal("the socket was still open after its pings went unanswered")
+		}
+		return
+	}
+}
+
+// A stream this viewer unsubscribed from ends without a message. Unsubscribe
+// cancels the stream's context and then closes its channel, and the pump's
+// select took either at random; on the channel it sent an exit for the
+// stream the viewer had just let go, which could land on the subscription
+// that replaced it.
+func TestAnUnsubscribedStreamEndsWithoutAnExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	if msg, ok := endOfStream(ctx, false, "s1", 1); !ok || msg.Type != MsgExit {
+		t.Errorf("a stream that ended on its own: %+v %v, want an exit", msg, ok)
+	}
+	if msg, ok := endOfStream(ctx, true, "s1", 1); !ok || msg.Type != MsgDropped {
+		t.Errorf("a dropped stream: %+v %v, want dropped", msg, ok)
+	}
+	cancel()
+	for _, dropped := range []bool{false, true} {
+		if msg, ok := endOfStream(ctx, dropped, "s1", 1); ok {
+			t.Errorf("an unsubscribed stream (dropped=%v) still sent %+v", dropped, msg)
+		}
+	}
+}

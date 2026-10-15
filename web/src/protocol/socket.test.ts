@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PanelSocket } from './socket'
 import { encodeData, FRAME_REPLAY } from './wire'
@@ -287,5 +287,250 @@ describe('resuming a stream', () => {
     sock.subscribe('s1', 80, 24, { onData: () => {}, onSize: () => {} })
     expect(sent[0]).not.toHaveProperty('since')
     expect(sent[0]).not.toHaveProperty('stream')
+  })
+})
+
+/**
+ * A session killed under a watching browser and then restored from its row.
+ *
+ * The server ends the old stream with `exit`; the restore creates a new tmux
+ * session under the same id and pushes a state in which the row is running
+ * again. The terminal is still mounted and nothing else will ask for the
+ * session, so the client has to. Measured before this existed: the terminal
+ * kept the old stream's last frame, "[exited]", typing reached nothing, and a
+ * reload was the only way out.
+ */
+describe('a session that comes back', () => {
+  const handlers = { onData: () => {}, onSize: () => {} }
+
+  function openSocket() {
+    const sock = newSocket()
+    ;(sock as unknown as { dark: () => boolean }).dark = () => false
+    const sent: ClientMessage[] = []
+    ;(sock as unknown as { ws: unknown }).ws = {
+      readyState: WebSocket.OPEN,
+      send: (s: string) => sent.push(JSON.parse(s) as ClientMessage),
+    }
+    return { sock, sent }
+  }
+
+  const state = (exited: boolean) =>
+    ({ t: 'state', projects: [], sessions: [{ id: 's1', exited }], live: [] }) as unknown as ServerMessage
+
+  it('subscribes again, from the start, once the state shows it running', () => {
+    const { sock, sent } = openSocket()
+    sock.subscribe('s1', 80, 24, handlers)
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 1, replayStream: 'a', replayOffset: 10 })
+    deliver(sock, { t: 'exit', sessionId: 's1', ref: 1 })
+    sent.length = 0
+
+    // Still gone: the restore dialog has not been pressed yet.
+    deliver(sock, state(true))
+    expect(sent).toEqual([])
+
+    deliver(sock, state(false))
+    expect(sent).toEqual([expect.objectContaining({ t: 'subscribe', sessionId: 's1' })])
+    // From the start: the new attachment is a new stream, and a resume point
+    // from the old one would be believed by nothing.
+    expect(sent[0]).not.toHaveProperty('stream')
+    expect(sent[0]).not.toHaveProperty('since')
+
+    // Once. The next state push describes the same running session, and the
+    // stream is no longer one that ended.
+    deliver(sock, state(false))
+    expect(sent).toHaveLength(1)
+  })
+
+  it('leaves a stream that never ended alone', () => {
+    const { sock, sent } = openSocket()
+    sock.subscribe('s1', 80, 24, handlers)
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 1 })
+    sent.length = 0
+    deliver(sock, state(false))
+    expect(sent).toEqual([])
+  })
+
+  it('resets the terminal on the confirmation that follows', () => {
+    const { sock } = openSocket()
+    let resets = 0
+    sock.subscribe('s1', 80, 24, { ...handlers, onReset: () => resets++ })
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 1 })
+    deliver(sock, { t: 'exit', sessionId: 's1', ref: 1 })
+    deliver(sock, state(false))
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 2 })
+    expect(resets).toBe(1)
+  })
+})
+
+/**
+ * Whether a write left.
+ *
+ * The compose box cleared itself after every send whether or not anything was
+ * sent, and `write` returned nothing it could have looked at: typed offline,
+ * sent, gone, and no pane had it after the reconnect. The box now keeps the
+ * text on false, so false has to mean "nothing went" and true "it went".
+ */
+describe('writes say whether they were sent', () => {
+  const handlers = { onData: () => {}, onSize: () => {} }
+
+  function subscribed(readyState: number) {
+    const sock = newSocket()
+    ;(sock as unknown as { dark: () => boolean }).dark = () => false
+    const frames: unknown[] = []
+    ;(sock as unknown as { ws: unknown }).ws = { readyState, send: (f: unknown) => frames.push(f) }
+    sock.subscribe('s1', 80, 24, handlers)
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 7 })
+    frames.length = 0
+    return { sock, frames }
+  }
+
+  it('reports true and sends when the socket is open', () => {
+    const { sock, frames } = subscribed(WebSocket.OPEN)
+    expect(sock.pasteText('s1', 'echo hi', true)).toBe(true)
+    expect(sock.writeText('s1', 'x')).toBe(true)
+    expect(frames).toHaveLength(2)
+  })
+
+  it('reports false and sends nothing while the socket is not open', () => {
+    for (const state of [WebSocket.CONNECTING, WebSocket.CLOSING, WebSocket.CLOSED]) {
+      const { sock, frames } = subscribed(state)
+      expect(sock.pasteText('s1', 'echo hi', true)).toBe(false)
+      expect(sock.writeText('s1', 'x')).toBe(false)
+      expect(frames).toHaveLength(0)
+    }
+  })
+
+  it('reports false for a session it holds no stream for', () => {
+    const { sock } = subscribed(WebSocket.OPEN)
+    expect(sock.pasteText('nobody', 'echo hi')).toBe(false)
+  })
+})
+
+/**
+ * Closed, then opened again.
+ *
+ * StrictMode runs an effect, its cleanup and the effect again in development,
+ * and App keeps one socket in a useMemo: connect, close, connect. `closed` was
+ * never reset, so the second connect returned at once and under `npm run dev`
+ * the panel never connected at all.
+ */
+describe('a socket opened again after close', () => {
+  class FakeWS {
+    static CONNECTING = 0
+    static OPEN = 1
+    static CLOSING = 2
+    static CLOSED = 3
+    static made: FakeWS[] = []
+    readyState = 0
+    binaryType = ''
+    onopen: (() => void) | null = null
+    onclose: (() => void) | null = null
+    onmessage: ((ev: { data: unknown }) => void) | null = null
+    onerror: (() => void) | null = null
+    constructor(public url: string) {
+      FakeWS.made.push(this)
+    }
+    send() {}
+    close() {
+      this.readyState = 3
+    }
+  }
+
+  function fresh() {
+    FakeWS.made = []
+    vi.stubGlobal('WebSocket', FakeWS)
+    vi.stubGlobal('location', { protocol: 'http:', host: 'panel.test' })
+    vi.stubGlobal('sessionStorage', { getItem: () => 'c1', setItem: () => {} })
+    const listeners: string[] = []
+    vi.stubGlobal('window', {
+      addEventListener: (t: string) => listeners.push(`+${t}`),
+      removeEventListener: (t: string) => listeners.push(`-${t}`),
+      setInterval: () => 0,
+      clearInterval: () => {},
+    })
+    return { sock: new PanelSocket(), listeners }
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('connects again', () => {
+    const { sock } = fresh()
+    sock.connect()
+    sock.close()
+    sock.connect()
+    expect(FakeWS.made).toHaveLength(2)
+    expect(sock.status).toBe('connecting')
+  })
+
+  it('listens for the network again', () => {
+    const { sock, listeners } = fresh()
+    sock.connect()
+    sock.close()
+    sock.connect()
+    expect(listeners.filter((l) => l === '+online')).toHaveLength(2)
+  })
+
+  it('does not let the socket it closed take over the new one', () => {
+    const { sock } = fresh()
+    sock.connect()
+    const first = FakeWS.made[0]
+    sock.close()
+    sock.connect()
+    const second = FakeWS.made[1]
+    second.readyState = 1
+    second.onopen?.()
+    expect(sock.status).toBe('open')
+    // The first one's close arrives late.
+    first.onclose?.()
+    expect(sock.status).toBe('open')
+  })
+})
+
+/**
+ * An `exit` for a subscription this viewer already replaced does not end the
+ * new one. The server can send the old stream's exit after an unsubscribe,
+ * and a remount resubscribes the same session at once; matched by session id
+ * alone, that exit marked a live session ended.
+ */
+describe('a stale end of stream', () => {
+  function openSocket() {
+    const sock = newSocket()
+    ;(sock as unknown as { dark: () => boolean }).dark = () => false
+    const sent: ClientMessage[] = []
+    ;(sock as unknown as { ws: unknown }).ws = {
+      readyState: WebSocket.OPEN,
+      send: (s: string) => sent.push(JSON.parse(s) as ClientMessage),
+    }
+    return { sock, sent }
+  }
+
+  it('is ignored when its ref is not the stream that is open now', () => {
+    const { sock } = openSocket()
+    let exits = 0
+    const handlers = { onData: () => {}, onSize: () => {}, onExit: () => exits++ }
+    sock.subscribe('s1', 80, 24, handlers)
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 1, replayStream: 'a', replayOffset: 0 })
+    sock.unsubscribe('s1')
+    sock.subscribe('s1', 80, 24, handlers)
+
+    deliver(sock, { t: 'exit', sessionId: 's1', ref: 1 }) // before the new one is confirmed
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 2, replayStream: 'a', replayOffset: 0 })
+    deliver(sock, { t: 'exit', sessionId: 's1', ref: 1 }) // and after
+    expect(exits).toBe(0)
+
+    deliver(sock, { t: 'exit', sessionId: 's1', ref: 2 })
+    expect(exits).toBe(1)
+  })
+
+  it('does not resubscribe on a drop of a stream already replaced', () => {
+    const { sock, sent } = openSocket()
+    const handlers = { onData: () => {}, onSize: () => {} }
+    sock.subscribe('s1', 80, 24, handlers)
+    deliver(sock, { t: 'subscribed', sessionId: 's1', ref: 2, replayStream: 'a', replayOffset: 0 })
+    sent.length = 0
+    deliver(sock, { t: 'dropped', sessionId: 's1', ref: 1 })
+    expect(sent).toEqual([])
   })
 })

@@ -164,8 +164,20 @@ command line, Docker, and building from source.
 
 [docs/features.md](docs/features.md) — including
 [sessions in a chat app](docs/features.md#on-a-phone-in-a-chat-app) through
-Telegram, 飞书 or 微信, with replies going back into the session.
+Telegram, 飞书 or 微信, with replies going back into the session, and
+[plugins](docs/features.md#plugins): themes, panels, services and processes,
+each installed from a screen that says in words what it may do; a process
+can be served on the panel's own port behind the panel's door, and declare
+the models and runtimes it needs for the panel to fetch and verify.
 ⚠️ Written by AI ⚠️
+
+## The command line
+
+`vibepanel` with a subcommand operates the running panel from a shell --
+projects, sessions, notes, todos, tokens, the activity log, share pages,
+plugins -- through the panel's own API, so a rename from `docker exec` is
+the same rename as from the sidebar. [docs/cli.md](docs/cli.md) lists the
+commands; `vibepanel --help` does too.
 
 ## Flags and troubleshooting
 
@@ -223,6 +235,7 @@ the ones that do:
 | `make restart-check` | kill the backend; the sessions and the login must outlive it |
 | `make scale-check` | two dozen sessions: snapshot size, sidebar reachability, poller |
 | `make pages-check` | share pages: the sandbox from inside a page, the editing loop, every template |
+| `make plugins-check` | plugins: arrive, the install screen in both languages, a grant withheld, settings, a theme, a new plugin from a template, layout at three widths |
 | `make tls-check` | its own TLS: wss, the Secure cookie, swapping a certificate |
 | `make install-check` | both installers down every branch, in both languages |
 | `make release-check` | build the archives and run one from a throwaway HOME |

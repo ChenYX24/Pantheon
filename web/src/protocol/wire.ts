@@ -118,6 +118,9 @@ export interface ServerMessage {
     | 'panel'
     // The memory question changed: `alert` is the new one, or null.
     | 'resources'
+    // A session spoke up (`vibepanel me say|notify`): a toast, and a
+    // browser notification when the page is not in front.
+    | 'notice'
   sessionId?: string
   ref?: number
   cols?: number
@@ -209,6 +212,10 @@ export interface Session {
   createdAt: number
   archivedAt: number | null
   archiveNote: string
+  /** What the session says about itself (`vibepanel me`): a line, 0-100 or -1, a few chips. */
+  summary: string
+  progress: number
+  labels: string[]
 
   /**
    * The argv this session was created with — the only version of it that can be
@@ -304,6 +311,8 @@ export interface PanelState {
   fullscreen: string[]
   /** Sessions paused from the resources page or the memory question. */
   frozen: string[]
+  /** Rises on every change to the plugins; the page re-reads the list and the theme sheet when it does. */
+  pluginsRev: number
   /** 'auto' orders projects by recent activity; 'manual' by explicit position. */
   projectOrder: 'auto' | 'manual'
   /**
@@ -2183,4 +2192,292 @@ export interface RolloverStatus {
   startedAt: number
   error: string
   newSessionId?: string
+}
+
+// ─── plugins (docs/plugins.md) ───────────────────────────────────────────
+//
+// Pinned field by field against the Go structs by TestTypeScriptRowsMatchWhatIsSent,
+// like every row above: an interface here that declares a field the server
+// stopped sending type-checks and is `undefined` at runtime.
+
+/** A string in both languages a plugin hands the panel to draw. */
+export interface PluginText {
+  en: string
+  'zh-CN'?: string
+}
+
+export type PluginRung = 'theme' | 'panel' | 'service' | 'process' | 'unsandboxed'
+
+export interface PluginRungs {
+  theme: boolean
+  panel: boolean
+  service: boolean
+  process: boolean
+  unsandboxed: boolean
+}
+
+/** One template `New plugin` offers, with the rungs it climbs (GET /api/settings/plugin-templates). */
+export interface PluginTemplate {
+  id: string
+  rungs: PluginRungs
+}
+
+/** What POST /api/settings/plugin-new answers: the plugin, in dev mode, and the project at its directory. */
+export interface NewPluginResult {
+  plugin: PluginDetail
+  projectId: string
+  dir: string
+}
+
+export interface PluginThemeRow {
+  plugin: string
+  /** The data-theme value: ext-<id>. */
+  attr: string
+  name: PluginText
+  scheme: string
+}
+
+export interface PluginSecretRow {
+  name: string
+  set: boolean
+}
+
+/** A plugin as the list shows it. */
+export interface PluginRow {
+  id: string
+  enabled: boolean
+  /** The version that runs; 0 is one that has not been through the install screen. */
+  installedVersion: number
+  sourceDir: string
+  dev: boolean
+  createdAt: number
+  updatedAt: number
+  name: PluginText
+  version: string
+  description?: PluginText
+  author?: string
+  rungs: PluginRungs
+  /** The owner's decision, and what the manifest asks for. */
+  granted: string[]
+  wanted: string[]
+  secrets: PluginSecretRow[]
+  latestVersion: number
+  /** Sentences for the card, in both languages; empty is nothing to say. */
+  problems: PluginText[]
+  theme?: PluginThemeRow
+  /** Where the plugin's frames mount, from the manifest that runs. */
+  panels: PluginPanelSpec[]
+}
+
+export interface PluginVersion {
+  version: number
+  manifest: unknown
+  note: string
+  bytes: number
+  files: number
+  hash: string
+  createdAt: number
+}
+
+/** One line of the install screen. internal/plugins/describe.go. */
+export interface PluginLine {
+  kind: 'what' | 'rung' | 'cap' | 'host' | 'runs' | 'keeps' | 'danger'
+  tone: 'plain' | 'amber' | 'red' | 'enforced'
+  text: PluginText
+  code?: string
+  granted?: boolean
+  checkable?: boolean
+}
+
+export interface PluginScreen {
+  lines: PluginLine[]
+  confirm: 'install' | 'grant' | 'run'
+  refused?: PluginLine
+}
+
+export interface PluginFieldSpec {
+  key: string
+  type: 'text' | 'number' | 'bool' | 'enum' | 'color' | 'list' | 'secret'
+  label: PluginText
+  hint?: PluginText
+  default?: unknown
+  min?: number
+  max?: number
+  values?: string[]
+}
+
+export interface PluginSettings {
+  fields: PluginFieldSpec[]
+  values: Record<string, unknown>
+}
+
+export interface PluginPanelSpec {
+  slot: string
+  entry: string
+  title: PluginText
+  icon?: string
+  group?: string
+  path?: string
+}
+
+export interface PluginManifest {
+  plugin: number
+  id: string
+  name: PluginText
+  version: string
+  panel?: string
+  description?: PluginText
+  author?: string
+  homepage?: string
+  theme?: { file: string; name: PluginText; scheme?: string }
+  panels?: PluginPanelSpec[]
+  capabilities?: string[]
+  settings?: { group?: string; fields: PluginFieldSpec[] }
+  data?: Record<string, unknown>
+  sources?: unknown[]
+  server?: { entry: string; every?: string; on?: string[]; routes?: Record<string, string> }
+  inbound?: { path: string; secret: string }
+  process?: { command: string[]; restart?: string; capabilities?: string[]; env?: string[]; hosts?: string[] }
+  unsandboxed?: { entry: string; tested: string; hosts?: string[] }
+  /** Declared downloads: what the panel fetches, verifies and unpacks for the plugin (docs/plugins.md §5). */
+  downloads?: PluginDownloadSpec[]
+}
+
+/** One plugin with everything the page draws: the row, flat, plus the rest. */
+export interface PluginDetail {
+  id: string
+  enabled: boolean
+  installedVersion: number
+  sourceDir: string
+  dev: boolean
+  createdAt: number
+  updatedAt: number
+  name: PluginText
+  version: string
+  description?: PluginText
+  author?: string
+  rungs: PluginRungs
+  granted: string[]
+  wanted: string[]
+  secrets: PluginSecretRow[]
+  latestVersion: number
+  problems: PluginText[]
+  theme?: PluginThemeRow
+  panels: PluginPanelSpec[]
+  manifest: PluginManifest
+  versions: PluginVersion[]
+  screen: PluginScreen
+  /** What this build no longer reads from the stored manifest. */
+  dropped: string[]
+  settings: PluginSettings
+}
+
+/** A plugin's source as the owner sees it: never a secret value. */
+export interface PluginSourceRow {
+  key: string
+  url: string
+  host: string
+  granted: boolean
+  every: string
+  ok: boolean
+  fetchedAt: number
+  status: number
+  error: string
+}
+
+/** A plugin's supervised process, as the card shows it. */
+export interface PluginProcessStatus {
+  declared: boolean
+  running: boolean
+  pid: number
+  since: number
+  restarts: number
+  stopped: boolean
+  stopWhy: string
+  lastExit: string
+  exitedAt: number
+  /** The last 64 KiB of what it printed. */
+  output: string
+  command: string
+  onPath: boolean
+  /** The path on the panel's port when the manifest mounts the process there, else ''. */
+  mount: string
+  /** Who may call the mount: 'owner' | 'token' | 'hmac'; '' when there is no mount. */
+  auth: string
+  /** Whether the process has opened its socket. */
+  socketUp: boolean
+  /** Required downloads not on disk yet; the process is not started until they are. */
+  waitingFor: string[]
+}
+
+/** A declared download as the manifest writes it. */
+export interface PluginDownloadSpec {
+  name: string
+  optional?: boolean
+  label: PluginText
+  url: string
+  sha256: string
+  size: number
+  unpack?: string
+}
+
+/** A session speaking up (ws `notice`): what the page shows as a toast and a notification. */
+export interface SessionNotice {
+  t: 'notice'
+  sessionId: string
+  title: string
+  project: string
+  /** 'say' | 'info' | 'warn' | 'ask' | 'file' */
+  level: string
+  text: string
+  choices: string[]
+  /** For a file: where the signed-in owner downloads it; '' otherwise. */
+  url: string
+}
+
+/** A file a session sent (GET /api/sessions/{id}/attachments). */
+export interface SessionAttachment {
+  name: string
+  bytes: number
+  size: string
+  url: string
+  at: number
+  contacts: number
+}
+
+/** One declared download (docs/plugins.md §5): what the card shows, with the job's progress while one runs. */
+export interface PluginDownloadRow {
+  name: string
+  label: PluginText
+  optional: boolean
+  size: number
+  host: string
+  sha256: string
+  unpack: string
+  ready: boolean
+  readyAt: number
+  /** '' | 'downloading' | 'verifying' | 'unpacking' | 'failed' */
+  status: string
+  received: number
+  error: string
+  dir: string
+}
+
+/** A plugin access token: the owner's credential for one plugin's mount, named, revocable. The token itself is shown once. */
+export interface PluginAccessToken {
+  id: string
+  pluginId: string
+  name: string
+  createdAt: number
+  lastUsedAt: number
+  revokedAt: number
+}
+
+/** A rung-4 module the panel's page loads (docs/plugins.md §7). */
+export interface PluginModule {
+  plugin: string
+  url: string
+  name: PluginText
+  tested: string
+  within: boolean
 }

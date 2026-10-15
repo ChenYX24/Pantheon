@@ -80,3 +80,21 @@ describe('the terminal strip follows the project', () => {
     expect(stripFor(shuffled, 'p_one').map((s) => s.id)).toEqual(['t_a', 't_b'])
   })
 })
+
+describe('a session this page just started', () => {
+  const row = (id: string, scratch = false) => ({ id, scratch }) as unknown as Session
+
+  it('is shown as soon as a snapshot carries it', () => {
+    expect(nextSelection([row('old'), row('new')], 'old', 'new')).toBe('new')
+  })
+
+  it('does not lose the selection to a snapshot taken before the create', () => {
+    // The stale snapshot keeps what is selected rather than reaching for the
+    // wanted one it does not have.
+    expect(nextSelection([row('old')], 'old', 'new')).toBe('old')
+  })
+
+  it('is never a scratch terminal', () => {
+    expect(nextSelection([row('main'), row('pane', true)], 'main', 'pane')).toBe('main')
+  })
+})

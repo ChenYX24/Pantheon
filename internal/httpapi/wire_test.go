@@ -15,6 +15,7 @@ import (
 	"github.com/jiangmuran/vibepanel/internal/browse"
 	"github.com/jiangmuran/vibepanel/internal/git"
 	"github.com/jiangmuran/vibepanel/internal/pages"
+	"github.com/jiangmuran/vibepanel/internal/plugins"
 	"github.com/jiangmuran/vibepanel/internal/resources"
 	"github.com/jiangmuran/vibepanel/internal/store"
 	"github.com/jiangmuran/vibepanel/internal/sysmon"
@@ -94,6 +95,32 @@ func TestTypeScriptRowsMatchWhatIsSent(t *testing.T) {
 		// know had been added. The snapshot around them is pinned to
 		// vibepanel.d.ts by TestTheSDKTypesMatchTheSnapshot instead.
 		{"ShareLink", store.ShareLink{}},
+		// Plugins. The row and the detail are what the plugins page draws;
+		// the screen is the install screen, whose lines are the permission
+		// decision, so a field added to a line that wire.ts does not know is
+		// a thing the screen would not draw.
+		{"PluginRow", PluginRow{}},
+		{"PluginDetail", PluginDetail{}},
+		{"PluginVersion", store.PluginVersion{}},
+		{"PluginThemeRow", pluginThemeRow{}},
+		{"PluginSecretRow", pluginSecretRow{}},
+		{"PluginLine", plugins.Line{}},
+		{"PluginScreen", plugins.Screen{}},
+		{"PluginFieldSpec", plugins.FieldSpec{}},
+		{"PluginSettings", pluginSettingsBody{}},
+		{"PluginManifest", plugins.Manifest{}},
+		{"PluginPanelSpec", plugins.PanelSpec{}},
+		{"PluginRungs", plugins.Rungs{}},
+		{"PluginText", plugins.Text{}},
+		{"PluginSourceRow", pluginSourceRow{}},
+		{"PluginProcessStatus", pluginProcessStatus{}},
+		{"PluginAccessToken", store.PluginAccessToken{}},
+		{"PluginDownloadRow", pluginDownloadRow{}},
+		{"SessionNotice", sessionNoticeEvent{}},
+		{"SessionAttachment", attachmentRow{}},
+		{"PluginModule", pluginModule{}},
+		{"PluginTemplate", plugins.Template{}},
+		{"NewPluginResult", newPluginResult{}},
 		{"ShareMachine", shareMachine{}},
 		// The moving line beside the machine reading. Uncovered until network
 		// rates were added to it, for no better reason than nobody had touched
@@ -282,7 +309,9 @@ func interfaceFields(t *testing.T, src, name, path string) []string {
 	}
 	body := rest[:end]
 
-	prop := regexp.MustCompile(`(?m)^\s{2}([A-Za-z_][A-Za-z0-9_]*)\??:`)
+	// A quoted property name ('zh-CN') is one a Go tag spells with a dash;
+	// the quotes come off so the two compare.
+	prop := regexp.MustCompile(`(?m)^\s{2}'?([A-Za-z_][A-Za-z0-9_-]*)'?\??:`)
 	var out []string
 	for _, line := range strings.Split(body, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -469,6 +498,51 @@ func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 		// chat.ask) reach the log through a function the server hands it, so
 		// the scan below cannot see them; these four are the handlers' own.
 		"chat.tools.rejected": true,
+		// Plugins: docs/plugins.md §6. One prefix for everything the owner
+		// decided about a plugin -- arrived, installed, upgraded, switched,
+		// granted, configured, removed -- so "what did I let this plugin do"
+		// is one GROUP BY. A secret is audited by name and never by value.
+		"plugin.imported":            true,
+		"plugin.installed":           true,
+		"plugin.updated":             true,
+		"plugin.enabled":             true,
+		"plugin.disabled":            true,
+		"plugin.removed":             true,
+		"plugin.permissions_changed": true,
+		"plugin.settings_changed":    true,
+		"plugin.secret_set":          true,
+		"plugin.secret_deleted":      true,
+		// Dev mode switched; a frame credential presented after it ended.
+		"plugin.dev":     true,
+		"plugin.created": true,
+		// Text typed into a session from the API: the CLI's `session send`.
+		"session.input": true,
+		// A session saying what it is up to, and a token that was not its own.
+		"session.info":     true,
+		"me.rejected":      true,
+		"session.said":     true,
+		"session.notified": true,
+		"session.sent":     true,
+		// The door on the panel's port: a token minted or revoked, the
+		// owner's cross-origin list changed.
+		"plugin.token_created":   true,
+		"plugin.token_revoked":   true,
+		"plugin.origins_changed": true,
+		// Declared downloads: asked for, ready, failed, removed.
+		"plugin.download":         true,
+		"plugin.download_ready":   true,
+		"plugin.download_failed":  true,
+		"plugin.download_removed": true,
+		"plugin.rejected":         true,
+		// An inbound call that failed its signature check.
+		"plugin.inbound_rejected": true,
+		// A process stopped after the failure cap; the owner restarting one.
+		"plugin.crashed":           true,
+		"plugin.process_restarted": true,
+		// A plugin typing into a terminal: the red capability, every use.
+		"plugin.input": true,
+		// The panel-wide switch for rung-4 modules.
+		"plugins.unsandboxed": true,
 		"chat.channel":        true,
 		"chat.assistant":      true,
 		"chat.peer":           true,
@@ -650,4 +724,25 @@ func jsonTagOf(t *testing.T, v any, field string) string {
 		t.Fatalf("%T has no field %s", v, field)
 	}
 	return strings.Split(f.Tag.Get("json"), ",")[0]
+}
+
+// Every kind of line the install screen can carry is one the page draws.
+// The page groups lines by kind under HEADINGS and drops the rest, so a
+// kind added in Go and not there is a sentence the owner is never shown.
+func TestTheInstallScreenDrawsEveryLineKind(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "components", "plugins", "screen.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`export const HEADINGS = \[([^\]]*)\]`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("no HEADINGS in screen.ts; the shape of the file changed")
+	}
+	var headings []string
+	for _, q := range regexp.MustCompile(`'([a-z]+)'`).FindAllSubmatch(m[1], -1) {
+		headings = append(headings, string(q[1]))
+	}
+	if !reflect.DeepEqual(headings, plugins.LineKinds()) {
+		t.Errorf("screen.ts HEADINGS = %v, Go LineKinds = %v: a kind missing from the page is a line nobody sees", headings, plugins.LineKinds())
+	}
 }

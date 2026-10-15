@@ -122,7 +122,16 @@ const group = (page, name) =>
 async function archiveFromSidebar(page, name) {
   const g = group(page, name)
   await g.hover()
-  await g.locator('[data-testid="project-archive"]').click()
+  // On a touch screen archive and remove are in the project's menu, so the
+  // name keeps the row; with a mouse they are buttons that appear on hover.
+  const more = g.locator('[data-testid="project-more"]')
+  if (await more.isVisible().catch(() => false)) {
+    await more.click()
+    // The menu is drawn at the top of the document, not inside the group.
+    await page.locator('[role="menu"] [data-testid="project-archive"]').click()
+  } else {
+    await g.locator('[data-testid="project-archive"]').click()
+  }
   await sleep(900)
 }
 

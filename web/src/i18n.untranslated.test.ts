@@ -1,4 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { KNOWN_LABELS } from './components/pages/labels'
+import { CodedError, errorText, UnauthorizedError } from './protocol/api'
+import { setLang } from './i18n'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -102,5 +105,71 @@ describe('every user-visible string comes from the dictionary', () => {
     }
     expect(bad, `use t('...') and add both languages to the dictionary:\n${bad.join('\n')}`)
       .toEqual([])
+  })
+})
+
+describe('the shapes the three rules above cannot see', () => {
+  // A literal inside a conditional or a `??` is not an attribute value and not a
+  // line of prose, so each of these passed every rule while being English on a
+  // Chinese page: the sidebar's collapse tooltip, the rename tooltip, and the
+  // selection bar a phone shows over the terminal.
+  const src = (rel: string) => stripComments(readFileSync(join(SRC, rel), 'utf8'))
+
+  it('the sidebar collapse button, the rename tooltip and the selection bar come from the dictionary', () => {
+    expect(src('components/Sidebar.tsx')).not.toMatch(/title=\{[^}]*'(?:Close|Collapse)'/)
+    expect(src('components/InlineName.tsx')).not.toMatch(/to rename/)
+    const sel = src('components/mobile/SelectionCopy.tsx')
+    expect(sel).not.toMatch(/character\{|selected\s*$|'Copy'|'Copied'/m)
+    expect(sel).toMatch(/t\('sel\./)
+  })
+
+  it('has no ternary or ?? fallback that yields an English sentence in a title', () => {
+    const bad: string[] = []
+    for (const file of sources(SRC).filter((f) => !f.endsWith('.test.tsx'))) {
+      for (const m of stripComments(readFileSync(file, 'utf8')).matchAll(/title=\{[^}]*?(?:\?\?|\?|:)\s*'([A-Z][A-Za-z ,.'-]+)'/g)) {
+        bad.push(`${file.slice(SRC.length)}: ${JSON.stringify(m[1])}`)
+      }
+    }
+    expect(bad, `use t('...'):\n${bad.join('\n')}`).toEqual([])
+  })
+
+  // The labels live in the templates' manifests, in English only. A template
+  // that gains a label without a line in components/pages/labels.ts is the same
+  // gap coming back.
+  it('every label a built-in page template ships has a translation', () => {
+    const dir = new URL('../../internal/pages/templates/', import.meta.url).pathname
+    const seen = new Set<string>()
+    const walk = (v: unknown) => {
+      if (Array.isArray(v)) v.forEach(walk)
+      else if (v && typeof v === 'object') {
+        for (const [k, x] of Object.entries(v)) {
+          if (k === 'label' && typeof x === 'string') seen.add(x)
+          else walk(x)
+        }
+      }
+    }
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name, 'vibepanel.json')
+      try {
+        walk(JSON.parse(readFileSync(p, 'utf8')))
+      } catch {
+        /* a template directory without a manifest */
+      }
+    }
+    expect(seen.size, 'read no template labels at all').toBeGreaterThan(8)
+    expect([...seen].filter((l) => !KNOWN_LABELS.includes(l))).toEqual([])
+  })
+
+  it('a sign-in refusal is shown in the reader\'s language by its code', () => {
+    setLang('zh')
+    try {
+      expect(errorText(new UnauthorizedError('wrong username or password', false, 'bad_credentials'))).toBe('用户名或密码不对')
+      expect(errorText(new CodedError('too many attempts; try again in 3s', 'too_many_attempts', 3))).toContain('3')
+      expect(errorText(new CodedError('too many attempts', 'too_many_attempts', 3))).not.toMatch(/[a-z]{4}/)
+      // A code this build has no words for falls back to the sentence it was sent.
+      expect(errorText(new CodedError('something new', 'a_code_from_a_newer_server'))).toBe('something new')
+    } finally {
+      setLang('en')
+    }
   })
 })

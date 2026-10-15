@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { AuthGate } from './components/AuthGate'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { loadModules, safeMode } from './components/plugins/hostRuntime'
+import { showToast } from './components/toasts'
 import { routeFor } from './routes'
 import { watchSystemTheme } from './components/theme'
 
@@ -43,9 +45,13 @@ const HomePage = lazy(() => import('./components/HomePage').then((m) => ({ defau
 const ProjectWorkspace = lazy(() => import('./components/ProjectWorkspace').then((m) => ({ default: m.ProjectWorkspace })))
 const SharingPage = lazy(() => import('./components/SharingPage').then((m) => ({ default: m.SharingPage })))
 const ChatPage = lazy(() => import('./components/ChatPage').then((m) => ({ default: m.ChatPage })))
+const PluginsPage = lazy(() => import('./components/PluginsPage').then((m) => ({ default: m.PluginsPage })))
+const PluginPageRoot = lazy(() => import('./components/plugins/slots').then((m) => ({ default: m.PluginPageRoot })))
 const App = lazy(() => import('./App').then((m) => ({ default: m.App })))
 
-createRoot(root).render(
+// index.html found this browser too old and has said so in #root; starting
+// the app here would draw over that with a layout the browser cannot lay out.
+if (document.documentElement.dataset.vpUnsupported !== '1') createRoot(root).render(
   <StrictMode>
     <Suspense fallback={null}>
     {route.kind === 'home' ? (
@@ -60,6 +66,14 @@ createRoot(root).render(
       <ErrorBoundary label="The chat page">
         <AuthGate>{(auth, signOut) => <ChatPage auth={auth} onSignOut={signOut} />}</AuthGate>
       </ErrorBoundary>
+    ) : route.kind === 'plugins' ? (
+      <ErrorBoundary label="The plugins page">
+        <AuthGate>{(auth, signOut) => <PluginsPage auth={auth} onSignOut={signOut} />}</AuthGate>
+      </ErrorBoundary>
+    ) : route.kind === 'plugin-page' ? (
+      <ErrorBoundary label="A plugin's page">
+        <AuthGate>{(auth, signOut) => <PluginPageRoot path={route.path} auth={auth} onSignOut={signOut} />}</AuthGate>
+      </ErrorBoundary>
     ) : (
       <ErrorBoundary label="The panel">
         <AuthGate>{(auth, signOut) => <App auth={auth} onSignOut={signOut} />}</AuthGate>
@@ -68,3 +82,16 @@ createRoot(root).render(
     </Suspense>
   </StrictMode>,
 )
+
+// Rung-4 modules (docs/plugins.md §7): on the panel's own page only, after
+// the first render, never under ?safe=1 -- which is the way back from a
+// module that broke the page, and says so once it has loaded without them.
+if (route.kind === 'panel') {
+  if (safeMode()) {
+    window.addEventListener('load', () => showToast({ kind: 'info', key: 'plg.safe' }))
+  } else {
+    window.addEventListener('load', () => {
+      void loadModules()
+    })
+  }
+}

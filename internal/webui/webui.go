@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"io"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +49,7 @@ func HandlerAt(staticDir, basePath string) http.Handler {
 		if err != nil {
 			root = filepath.Clean(staticDir)
 		}
-		return spaHandler{fsys: os.DirFS(staticDir), root: root, basePath: basePath}
+		return spaHandler{fsys: os.DirFS(staticDir), root: root, basePath: basePath, gz: &gzCache{}}
 	}
 	sub, err := fs.Sub(dist, "dist")
 	if err != nil {
@@ -55,7 +57,7 @@ func HandlerAt(staticDir, basePath string) http.Handler {
 		// time mistake rather than something a deployment can hit.
 		panic("webui: embedded dist missing: " + err.Error())
 	}
-	return spaHandler{fsys: sub, basePath: basePath}
+	return spaHandler{fsys: sub, basePath: basePath, gz: &gzCache{}}
 }
 
 // Built reports whether a frontend build is actually embedded.
@@ -80,6 +82,8 @@ type spaHandler struct {
 	// compares it against a resolved path; anything else silently rejects
 	// everything.
 	root string
+	// gz holds each compressible file's gzip form, made on first request.
+	gz *gzCache
 }
 
 func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -154,9 +158,6 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setCacheHeaders(w, name)
-	if h.serveCompressed(w, r, name, st, rs) {
-		return
-	}
 	// `.webmanifest` is not in Go's MIME table, so ServeContent falls through
 	// to content sniffing and answers `text/plain; charset=utf-8`. Measured
 	// against the real binary, which is the only way this shows up at all: the
@@ -173,7 +174,7 @@ func (h spaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(name, ".webmanifest") {
 		w.Header().Set("Content-Type", "application/manifest+json")
 	}
-	http.ServeContent(w, r, name, st.ModTime(), rs)
+	h.serveContent(w, r, name, st, rs)
 }
 
 func (h spaHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +200,7 @@ func (h spaHandler) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setCacheHeaders(w, "index.html")
-	http.ServeContent(w, r, "index.html", st.ModTime(), rs)
+	h.serveContent(w, r, "index.html", st, rs)
 }
 
 func (h spaHandler) serveMounted(w http.ResponseWriter, r *http.Request, name string) {
@@ -239,6 +240,8 @@ func (h spaHandler) serveMounted(w http.ResponseWriter, r *http.Request, name st
 		w.Header().Set("Content-Type", "application/manifest+json")
 	}
 	w.Header().Set("Cache-Control", "no-cache")
+	// The gzip cache holds the original file. Mounted HTML and the manifest
+	// carry rewritten URLs, so sending that cached body would escape the mount.
 	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(raw))
 }
 
@@ -257,60 +260,105 @@ func setCacheHeaders(w http.ResponseWriter, name string) {
 	}
 }
 
-// Hashed build assets never change for the life of the binary, so each is
-// gzipped once, on first request, and served from memory afterwards. The
-// panel is reached over long links (and phones); the main bundle is 1.4 MB
-// raw and about a quarter of that compressed. Only gzip: every browser sends
-// it, and it needs no dependency.
-var gzipped sync.Map // name -> []byte
-
-func (h spaHandler) serveCompressed(w http.ResponseWriter, r *http.Request, name string, st fs.FileInfo, rs io.ReadSeeker) bool {
-	if h.root != "" || !strings.HasPrefix(name, "assets/") || r.Header.Get("Range") != "" || !acceptsGzip(r) {
-		return false
-	}
-	ext := path.Ext(name)
-	if ext != ".js" && ext != ".css" && ext != ".svg" && ext != ".json" {
-		return false
-	}
-	body, ok := gzipped.Load(name)
-	if !ok {
-		var buf bytes.Buffer
-		zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-		if _, err := io.Copy(zw, rs); err != nil || zw.Close() != nil {
-			_, _ = rs.Seek(0, io.SeekStart)
-			return false
-		}
-		body, _ = gzipped.LoadOrStore(name, buf.Bytes())
-	}
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Header().Add("Vary", "Accept-Encoding")
-	if ctype := mimeFor(ext); ctype != "" {
-		w.Header().Set("Content-Type", ctype)
-	}
-	http.ServeContent(w, r, name, st.ModTime(), bytes.NewReader(body.([]byte)))
-	return true
+// gzCache keeps one compressed copy per file, in memory.
+//
+// The bundle is ~1.35 MB of JavaScript and was sent as-is: a phone on 3G
+// waited ~29 s on a spinner for what gzip makes ~400 KB. Vite is not asked to
+// precompress, so it is done here, once per file rather than per request
+// (level 9 on the main chunk costs far more than a request should), and a
+// rebuilt file under --static-dir replaces its entry because the key carries
+// size and mtime.
+type gzCache struct {
+	mu sync.Mutex
+	m  map[string]gzEntry
 }
 
-func acceptsGzip(r *http.Request) bool {
-	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
-		coding, params, _ := strings.Cut(strings.TrimSpace(part), ";")
-		if strings.EqualFold(strings.TrimSpace(coding), "gzip") && strings.ReplaceAll(strings.TrimSpace(params), " ", "") != "q=0" {
-			return true
-		}
+type gzEntry struct {
+	sig  string
+	body []byte // nil: compression did not make it smaller, serve as-is
+}
+
+func (c *gzCache) get(name, sig string, rs io.ReadSeeker) []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, ok := c.m[name]; ok && e.sig == sig {
+		return e.body
+	}
+	var plain bytes.Buffer
+	_, _ = rs.Seek(0, io.SeekStart)
+	if _, err := io.Copy(&plain, rs); err != nil {
+		return nil
+	}
+	var out bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&out, gzip.BestCompression)
+	_, _ = zw.Write(plain.Bytes())
+	_ = zw.Close()
+	body := out.Bytes()
+	if len(body) >= plain.Len() {
+		body = nil
+	}
+	if c.m == nil {
+		c.m = map[string]gzEntry{}
+	}
+	c.m[name] = gzEntry{sig: sig, body: body}
+	return body
+}
+
+// compressible is a whitelist: PNG, woff2 and the like are already compressed
+// and gzip only burns CPU on them.
+func compressible(name string) bool {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".js", ".mjs", ".css", ".html", ".svg", ".json", ".webmanifest", ".map", ".txt", ".wasm":
+		return true
 	}
 	return false
 }
 
-func mimeFor(ext string) string {
-	switch ext {
-	case ".js":
-		return "text/javascript; charset=utf-8"
-	case ".css":
-		return "text/css; charset=utf-8"
-	case ".svg":
-		return "image/svg+xml"
-	case ".json":
-		return "application/json"
+// acceptsGzip reads Accept-Encoding far enough to honour "gzip;q=0".
+func acceptsGzip(r *http.Request) bool {
+	for _, part := range strings.Split(strings.Join(r.Header.Values("Accept-Encoding"), ","), ",") {
+		tok, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		if !strings.EqualFold(strings.TrimSpace(tok), "gzip") {
+			continue
+		}
+		if _, q, ok := strings.Cut(strings.ReplaceAll(params, " ", ""), "q="); ok {
+			if v, err := strconv.ParseFloat(q, 64); err == nil && v <= 0 {
+				return false
+			}
+		}
+		return true
 	}
-	return ""
+	return false
+}
+
+// serveContent is http.ServeContent with gzip when the browser accepts it.
+//
+// Vary is set on every compressible answer, identity included, or a shared
+// cache could hand the gzip body to a client that never asked for it. The ETag
+// differs per encoding for the same reason, and the compressed body goes
+// through ServeContent so HEAD, Range and If-None-Match keep working (a range
+// then addresses the encoded bytes, which is what Content-Encoding means).
+func (h spaHandler) serveContent(w http.ResponseWriter, r *http.Request, name string, st fs.FileInfo, rs io.ReadSeeker) {
+	if !compressible(name) || h.gz == nil {
+		http.ServeContent(w, r, name, st.ModTime(), rs)
+		return
+	}
+	w.Header().Add("Vary", "Accept-Encoding")
+	if acceptsGzip(r) {
+		sig := fmt.Sprintf("%d-%d", st.Size(), st.ModTime().UnixNano())
+		if body := h.gz.get(name, sig, rs); body != nil {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("ETag", `"`+sig+`-gz"`)
+			// ServeContent leaves Content-Length out whenever Content-Encoding
+			// is set, so a 1.3 MB bundle would go chunked with no progress
+			// figure. A Range reply is sized by net/http's own framing instead.
+			if r.Header.Get("Range") == "" {
+				w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			}
+			http.ServeContent(w, r, name, st.ModTime(), bytes.NewReader(body))
+			return
+		}
+		_, _ = rs.Seek(0, io.SeekStart)
+	}
+	http.ServeContent(w, r, name, st.ModTime(), rs)
 }

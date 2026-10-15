@@ -39,9 +39,13 @@ import { ResourceAlertBar } from './components/resources/ResourceAlert'
 import { ThemeToggle } from './components/ThemeToggle'
 import { SETTINGS_HOME } from './components/settings/groups'
 import type { SettingsSection } from './components/settings/groups'
+import { SETTINGS_SECTIONS } from './components/settings/groups'
 import { TokenUsageView } from './components/TokenUsageView'
 import { MobileKeyBar } from './components/mobile/MobileKeyBar'
 import { ComposeInput } from './components/mobile/ComposeInput'
+import { DisconnectedBar, useDisconnected } from './components/Disconnected'
+import { neighbour, panelShortcut } from './components/shortcuts'
+import { useViewportFit } from './components/mobile/viewport'
 import { TouchControls, TouchKeys } from './components/mobile/TouchControls'
 import { SelectionCopy } from './components/mobile/SelectionCopy'
 import {
@@ -55,9 +59,9 @@ import {
 } from './components/panes'
 import { disambiguatedLabels, projectLabel, sessionLabel } from './components/label'
 import { applyTheme, loadTheme } from './components/theme'
-import { PANEL_PATH, pageToOpen, sessionToOpen } from './routes'
+import { PANEL_PATH, pageToOpen, projectToOpen, sessionToOpen } from './routes'
 import type { ThemeChoice } from './components/theme'
-import { NARROW_QUERY, useMediaQuery } from './hooks/useMediaQuery'
+import { COMPACT_QUERY, NARROW_QUERY, useMediaQuery } from './hooks/useMediaQuery'
 import { EXIT_VANISHED } from './protocol/wire'
 import { shellQuote } from './shell'
 import type { LaunchProfile } from './protocol/wire'
@@ -74,9 +78,16 @@ import { RestoreDialog } from './components/RestoreDialog'
 import { LaunchPicker } from './components/LaunchPicker'
 import { filesFrom, uploadErrorText } from './components/upload'
 import { copyTextInGesture } from './clipboard'
-import { notifyOnArchivedWaiting, notifyOnResourceAlert, notifyOnWaiting } from './notify'
+import { notifyOnArchivedWaiting, notifyOnNotice, notifyOnResourceAlert, notifyOnWaiting } from './notify'
 import { readSkipped, shouldNotice, writeSkipped } from './components/updateView'
 import { t, useLang } from './i18n'
+import { PluginHeaderItems, usePlugins } from './components/plugins/slots'
+import { extTabs as pluginTabs } from './components/plugins/host'
+import { onOpen as onPluginOpen } from './components/plugins/open'
+import { publishHostState } from './components/plugins/hostRuntime'
+import { notePluginsRev } from './components/plugins/rev'
+import { withKnown } from './components/panes'
+import { PANEL_TABS } from './components/chrome'
 
 /**
  * Safety net only.
@@ -111,6 +122,9 @@ const RIGHT_OPEN_KEY = 'vibepanel.rightOpen'
 // preset. Notes and todo are one tab now, so there is no arrangement that key
 // could seed; it is left alone in whatever browsers still have it.
 const RIGHT_TAB_KEY = 'vibepanel.rightTab'
+// The vanished sessions whose restore offer has been dismissed, by id, so
+// "later" stays later across reloads. See useState below.
+const RESTORE_DISMISSED_KEY = 'vibepanel.restoreDismissed'
 const RIGHT_DEFAULT_WIDTH = 280
 
 
@@ -221,9 +235,16 @@ function writeStored(key: string, value: string | null) {
  * the header and the terminal area both say "no session" while the sidebar
  * lists everything. It sticks, too: the id is a real session, so every later
  * snapshot keeps it, and it is written to localStorage for the next visit.
+ *
+ * `wanted` is a session this page just started and asked to show. It wins as
+ * soon as a snapshot carries it; until then it is ignored, because a snapshot
+ * taken before the create can still arrive after the reply to it, and without
+ * the hold that snapshot sent the selection back to whatever sorted first --
+ * the new session appeared in the list and the old one stayed on screen.
  */
-export function nextSelection(sessions: Session[], cur: string | null): string | null {
+export function nextSelection(sessions: Session[], cur: string | null, wanted: string | null = null): string | null {
   const mains = sessions.filter((s) => !s.scratch)
+  if (wanted && mains.some((s) => s.id === wanted)) return wanted
   if (cur && mains.some((s) => s.id === cur)) return cur
   return mains[0]?.id ?? null
 }
@@ -256,7 +277,17 @@ const KEEP_TERMINALS = 3
 export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => void }) {
   useLang()
   const socket = useMemo(() => new PanelSocket(), [])
+  const disconnected = useDisconnected(socket)
   const narrow = useMediaQuery(NARROW_QUERY)
+  const compact = useMediaQuery(COMPACT_QUERY) && !narrow
+  // Which sheet is over the terminal, in the layouts that use sheets. Per
+  // visit and starting closed, like the drawer: a tablet opens on the
+  // terminal. Read through `sheetShown`, so widening the window past the
+  // tier puts the column back without a stale sheet waiting behind it.
+  const [sheet, setSheet] = useState<'panel' | 'terminals' | null>(null)
+  const sheetLayout = narrow || compact
+  const sheetShown = sheetLayout ? sheet : null
+  const keyFit = useViewportFit(narrow)
   // Width decides the layout; the pointer decides the gestures. A tablet in
   // landscape is not narrow and still has nothing but fingers, so keying
   // press-and-hold selection to the layout breakpoint would leave it with no
@@ -282,8 +313,12 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     hasProjectOrder: false,
     stateGuessed: false,
     hooksInstalled: false,
+    pluginsRev: 0,
   })
   const [selected, setSelected] = useState<string | null>(() => readStored(SELECTED_KEY))
+  // A session this page started and wants shown once a snapshot carries it.
+  // See nextSelection.
+  const wantSelected = useRef<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [theme, setThemeState] = useState<ThemeChoice>(loadTheme)
 
@@ -328,9 +363,26 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   const [layoutKey, setLayoutKey] = useState(() =>
     layoutStorageKey(window.innerWidth, window.innerHeight),
   )
-  const [paneLayout, setPaneLayout] = useState<PaneLayout>(() =>
+  const [storedLayout, setPaneLayoutState] = useState<PaneLayout>(() =>
     seedLayout(layoutStorageKey(window.innerWidth, window.innerHeight)),
   )
+  // The panes plugins add (docs/plugins.md §5). The layout is re-read
+  // against the installed set whenever it changes, so a plugin installed in
+  // another tab gets its pane here on the next poll and a removed one goes.
+  const plugins = usePlugins()
+  const extTabs = pluginTabs(plugins)
+  const knownKey = extTabs.map((x) => x.id).join('|')
+  // Derived rather than written back: the stored layout is what the person
+  // arranged, and the installed set is laid over it at render. withKnown
+  // returns the same object when nothing needs doing, so this memo is the
+  // identity the panel's own effects key on.
+  const paneLayout = useMemo(
+    () => withKnown(storedLayout, [...PANEL_TABS, ...extTabs.map((x) => x.id)]),
+    // knownKey is the list's identity; the array is rebuilt every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [storedLayout, knownKey],
+  )
+  const setPaneLayout = setPaneLayoutState
   // Which block of the settings dialog is open, and null for closed.
   //
   // A section rather than a boolean, because two things open this dialog and
@@ -342,13 +394,24 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   const [settingsAt, setSettingsAt] = useState<SettingsSection | null>(null)
   const [tokensOpen, setTokensOpen] = useState(false)
   const [restoreOpen, setRestoreOpen] = useState(false)
-  // Dismissing the offer is per visit, not remembered.
+  // Which vanished sessions the restore offer has been dismissed for, by id.
   //
-  // A remembered dismissal is how somebody loses a day's sessions for good: the
-  // notice never comes back, the rows keep saying "gone", and the archived
-  // scrollback sits in the database until the row is deleted. Reloading brings
-  // the offer back, which is the behaviour a person expects from "later".
-  const [restoreDismissed, setRestoreDismissed] = useState(false)
+  // Dismissing used to be per visit: a reload brought the whole offer back, so
+  // that a permanent dismissal could not lose a day's sessions silently. But
+  // the banner then returned after every refresh for sessions already decided
+  // about, which is its own kind of nagging -- 「我关了就关了」. Remembered by id
+  // instead: a session dismissed stays dismissed across reloads, while a
+  // *newly* vanished one still raises the offer, so nothing new is missed. The
+  // sessions are not lost either way -- each gone row keeps its own restart
+  // button; this only silences the strip at the top.
+  const [restoreDismissed, setRestoreDismissed] = useState<Set<string>>(() => {
+    try {
+      const raw = readStored(RESTORE_DISMISSED_KEY)
+      return new Set(raw ? (JSON.parse(raw) as string[]) : [])
+    } catch {
+      return new Set()
+    }
+  })
 
   // The attribute is written synchronously here rather than from an effect.
   //
@@ -387,6 +450,9 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   // snapshot, so the render that sees the count sees the sessions.
   const [snapshots, setSnapshots] = useState(0)
   const applyState = useCallback((next: PanelState) => {
+    // For rung-4 modules' host.state.subscribe (docs/plugins.md §7).
+    publishHostState(next)
+    notePluginsRev(next.pluginsRev)
     setSnapshots((n) => n + 1)
     setState(next)
     // Every snapshot, because the transition it looks for is only visible by
@@ -400,7 +466,9 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     // knows that.
     notifyOnWaiting(next.sessions, document.hasFocus())
     notifyOnArchivedWaiting(next.archived, document.hasFocus())
-    setSelected((cur) => nextSelection(next.sessions, cur))
+    const wanted = wantSelected.current
+    if (wanted && next.sessions.some((s) => s.id === wanted)) wantSelected.current = null
+    setSelected((cur) => nextSelection(next.sessions, cur, wanted))
   }, [])
 
   // Pushed updates are the primary path.
@@ -455,6 +523,20 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   useEffect(
     () => notifyOnResourceAlert(resourceAlert, state.sessions, document.hasFocus()),
     [resourceAlert, state.sessions],
+  )
+  // A session speaking up (`vibepanel me say|notify`): a toast naming it,
+  // with its words as detail, and a notification when the page is not in
+  // front. The words are a session's: detail, never the key's params.
+  useEffect(
+    () =>
+      socket.onNotice((n) => {
+        const name = n.title || n.sessionId
+        const key =
+          n.level === 'say' ? 'notice.say' : n.level === 'warn' ? 'notice.warn' : n.level === 'ask' ? 'notice.ask' : n.level === 'file' ? 'notice.file' : 'notice.info'
+        showToast({ kind: n.level === 'warn' ? 'error' : 'info', key, params: { name: safeText(name) }, detail: n.text })
+        notifyOnNotice(n, document.hasFocus())
+      }),
+    [socket],
   )
 
   // What the server says went wrong, said to the person it happened to.
@@ -636,6 +718,38 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     () => mainSessions.filter((s) => s.exited && s.exitStatus === EXIT_VANISHED),
     [mainSessions],
   )
+  // Forget a dismissal once its session leaves the vanished set -- restored or
+  // deleted -- so the same session vanishing a second time (restored, then
+  // lost in the next reboot) raises the offer again rather than being silently
+  // held back, and the stored set cannot grow without bound. Pruned during
+  // render, the React way to adjust state from changing inputs: an effect that
+  // called setState would double-render and is lint-refused. `seenRestorable`
+  // is the guard that stops it looping; it tracks the id set it last pruned
+  // against.
+  const restorableIds = restorable.map((x) => x.id).join(',')
+  const [seenRestorable, setSeenRestorable] = useState(restorableIds)
+  if (restorableIds !== seenRestorable) {
+    setSeenRestorable(restorableIds)
+    if (restoreDismissed.size > 0) {
+      const live = restorable.filter((x) => restoreDismissed.has(x.id)).map((x) => x.id)
+      if (live.length !== restoreDismissed.size) setRestoreDismissed(new Set(live))
+    }
+  }
+  // Persisted whenever it changes, by effect rather than at every call site, so
+  // the prune above and the dismiss below each only touch the state.
+  useEffect(() => {
+    writeStored(RESTORE_DISMISSED_KEY, JSON.stringify([...restoreDismissed]))
+  }, [restoreDismissed])
+  // The offer is about the vanished sessions not already dismissed.
+  const pendingRestorable = useMemo(
+    () => restorable.filter((x) => !restoreDismissed.has(x.id)),
+    [restorable, restoreDismissed],
+  )
+  // Dismiss every session the offer is currently about: remember them so the
+  // strip does not return for them on the next load.
+  const dismissRestore = useCallback(() => {
+    setRestoreDismissed(new Set(restorable.map((x) => x.id)))
+  }, [restorable])
   const labelOf = (s: Session) => labels.get(s.id) ?? sessionLabel(s)
   // Sorted by age, not by the order they arrive in.
   //
@@ -753,15 +867,11 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   // and the key bar, so tapping it must not raise the software keyboard over
   // the thing being read.
   const sendToCurrent = useCallback(
-    (text: string) => {
-      if (current) socket.writeText(current.id, text)
-    },
+    (text: string): boolean => (current ? socket.writeText(current.id, text) : false),
     [socket, current],
   )
   const pasteToCurrent = useCallback(
-    (text: string, submit: boolean) => {
-      if (current) socket.pasteText(current.id, text, submit)
-    },
+    (text: string, submit: boolean): boolean => (current ? socket.pasteText(current.id, text, submit) : false),
     [socket, current],
   )
   // By id rather than "the current one": a share page's Preview names the
@@ -1111,6 +1221,43 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     focusTerminal(id)
   }
 
+  // The panel's keys (shortcuts.ts), on the window so they work from inside a
+  // terminal too: xterm lets them past. In the order the sidebar draws, which
+  // is the order the person sees, read off the rows rather than recomputed.
+  //
+  // The handler is refreshed on every render through a ref, and the listener
+  // is added once: it reads `selected`, `narrow` and `selectSession`, all of
+  // which change, and re-adding a window listener on every render to keep up
+  // with them was harmless and pointless.
+  const onShortcut = useRef<(e: KeyboardEvent) => void>(() => {})
+  useEffect(() => {
+    onShortcut.current = (e: KeyboardEvent) => {
+      const act = panelShortcut(e)
+      if (!act) return
+      e.preventDefault()
+      const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="session-row"]')]
+      if (act === 'leave') {
+        if (narrow) setDrawerOpen(true)
+        // After the drawer has had a frame to mount its rows.
+        window.requestAnimationFrame(() => {
+          const here =
+            document.querySelector<HTMLElement>('[data-testid="session-row"][aria-current="true"]') ??
+            document.querySelector<HTMLElement>('[data-testid="session-row"]')
+          here?.focus()
+        })
+        return
+      }
+      const order = rows.map((r) => r.dataset.sessionId ?? '').filter(Boolean)
+      const next = neighbour(order, selected, act)
+      if (next) selectSession(next)
+    }
+  })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => onShortcut.current(e)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // A page the sharing page handed over on the address (routes.ts). Opened
   // once the first snapshot is here rather than on mount, because opening
   // reads the projects and sessions and the empty initial state would send
@@ -1129,6 +1276,68 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     // render and the effect is meant to fire once, on the first open snapshot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, snapshots])
+
+  // A new plugin's project, handed over from the plugins page the same way
+  // (docs/plugins.md §9): the launch picker opens for it with the plugin's
+  // first line typed. Read once and taken off the address for the same
+  // reasons as a page.
+  const openProject = async (id: string) => {
+    // The project was made a moment ago by another page, so the first
+    // snapshot may predate it: ask the server before saying it is gone.
+    const project =
+      state.projects.find((p) => p.id === id) ?? (await api.state()).projects.find((p) => p.id === id)
+    if (!project) {
+      setError(t('plg.projectGone'))
+      return
+    }
+    if (!narrow) setRightOpen(true)
+    pagePrompt.current = { projectId: project.id, text: t('plg.firstPrompt') }
+    setLaunchFor(project)
+  }
+  const handedProject = useRef(projectToOpen(location.search))
+  useEffect(() => {
+    if (status !== 'open' || snapshots === 0) return
+    const id = handedProject.current
+    if (!id) return
+    handedProject.current = null
+    history.replaceState(null, '', PANEL_PATH)
+    void openProject(id)
+    // openProject is a fresh closure every render; the effect fires once, on
+    // the first open snapshot, like a page's hand-over.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, snapshots])
+
+  // A frame asking the panel to open something (docs/plugins.md §5): a
+  // handle, resolved against what the panel is showing by asking the server
+  // for the same handle of every candidate would be a round trip per row, so
+  // the frame's handles are matched against the ones the panel already asked
+  // for -- the selected session and project -- and otherwise the settings
+  // dialog is opened by name. A handle the panel cannot match opens nothing.
+  useEffect(() => {
+    return onPluginOpen((req) => {
+      if (req.settings) {
+        const section = req.settings as SettingsSection
+        if ((SETTINGS_SECTIONS as readonly string[]).includes(section)) setSettingsAt(section)
+        return
+      }
+      void (async () => {
+        const rows = req.session ? state.sessions : state.projects
+        for (const row of rows) {
+          const h = await api.pluginHandles(req.plugin, req.session ? row.id : undefined, req.session ? undefined : row.id)
+          if ((req.session && h.session === req.session) || (req.project && h.project === req.project)) {
+            if (req.session) selectSession(row.id)
+            else {
+              const first = state.sessions.find((x) => x.projectId === row.id && !x.scratch)
+              if (first) selectSession(first.id)
+            }
+            return
+          }
+        }
+      })()
+    })
+    // selectSession and state are read at the time of the request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.sessions, state.projects])
 
   // A session a chat card linked to (routes.ts). Same shape as the page
   // hand-over: read once, opened on the first snapshot, taken off the
@@ -1188,6 +1397,15 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           onAutoOrderProjects={() => void guard(() => api.autoOrderProjects())}
           hasProjectOrder={state.hasProjectOrder}
           onRestoreProjectOrder={() => void guard(() => api.restoreProjectOrder())}
+          disconnected={disconnected}
+          onOpenSheet={
+            narrow
+              ? (which) => {
+                  setDrawerOpen(false)
+                  setSheet(which)
+                }
+              : undefined
+          }
           stateGuessed={state.stateGuessed}
           hooksInstalled={state.hooksInstalled}
           onOpenSettings={() => {
@@ -1212,7 +1430,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           type="button"
           aria-label={t('app.closeProjects')}
           onClick={() => setDrawerOpen(false)}
-          className="absolute inset-0 z-10 bg-black/30"
+          data-testid="drawer-scrim"
+          className="vp-scrim-in absolute inset-0 z-10 bg-black/30"
         />
       )}
 
@@ -1373,9 +1592,11 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
               <button
                 type="button"
                 data-testid="right-show"
-                onClick={() => setRightOpen(rightWidth === 0)}
-                aria-pressed={rightWidth > 0}
-                title={rightWidth === 0 ? t('app.showPanelShort') : t('app.hidePanel')}
+                onClick={() =>
+                  compact ? setSheet((v) => (v === 'panel' ? null : 'panel')) : setRightOpen(rightWidth === 0)
+                }
+                aria-pressed={compact ? sheetShown === 'panel' : rightWidth > 0}
+                title={(compact ? sheetShown !== 'panel' : rightWidth === 0) ? t('app.showPanelShort') : t('app.hidePanel')}
                 className="vp-control"
               >
                 <PanelRight size={15} />
@@ -1390,6 +1611,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
                 onFiles={(files) => void uploadInto(files)}
               />
             )}
+            <PluginHeaderItems />
+            <span data-host-slot="header.item" className="contents" />
             <button
               type="button"
               data-testid="settings-open"
@@ -1412,6 +1635,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             <ConnectionDot status={status} />
           </div>
         </header>
+
+        {disconnected && <DisconnectedBar />}
 
         {/* safeText, because a server error message is a name-carrying channel
             nobody funnels. Several of them echo a filename back: `base + " already
@@ -1552,7 +1777,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             Every row read "gone", the restart button on each of them started a
             login shell, and there was no way to find out that was what it did
             until you typed at it. */}
-        {restorable.length > 0 && !restoreDismissed && (
+        {pendingRestorable.length > 0 && (
           <div
             data-testid="restore-notice"
             className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-4 py-2 text-vp-base"
@@ -1560,7 +1785,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           >
             <span className="font-semibold text-ink">{t('restore.title')}</span>
             <span className="min-w-0 flex-1 text-ink-2">
-              {t('restore.body', { n: String(restorable.length) })}
+              {t('restore.body', { n: String(pendingRestorable.length) })}
             </span>
             <button
               type="button"
@@ -1573,7 +1798,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             </button>
             <button
               type="button"
-              onClick={() => setRestoreDismissed(true)}
+              onClick={dismissRestore}
               className="vp-press shrink-0 rounded-vp px-2 py-1 text-vp-base text-ink-2 transition-colors duration-150 ease-vp hover:text-ink"
             >
               {t('restore.later')}
@@ -1587,7 +1812,14 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             and a few pixels of chrome showing around it are what say "this is
             the thing, that was the frame". */}
         <div
-          className="relative m-2 min-h-0 flex-1 overflow-hidden rounded-vp border border-hairline"
+          // On a phone the terminal keeps a floor of a few rows: below it the
+          // keys give way instead (useViewportFit). It used to be the terminal
+          // that gave way, to 0px, under the keyboard.
+          data-testid="terminal-area"
+          className={`relative m-2 flex-1 overflow-hidden rounded-vp border border-hairline ${narrow ? 'min-h-22' : 'min-h-0'} ${
+            disconnected ? 'vp-disconnected' : ''
+          }`}
+          data-disconnected={disconnected}
           style={{ background: 'var(--vp-terminal-bg)' }}
           onDragOver={(e) => {
             // Both handlers, and both preventDefault: without dragover the
@@ -1693,12 +1925,15 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             <SelectionCopy selection={selection} />
             <ComposeInput
               sessionId={current.id}
+              disconnected={disconnected}
               onPaste={pasteToCurrent}
               // The same road a dropped or pasted file takes: into the project,
               // then the path on the command line.
               onFiles={(files) => void uploadInto(files)}
             />
-            <MobileKeyBar onSend={sendToCurrent} onPaste={pasteToCurrent} />
+            {keyFit !== 'none' && (
+              <MobileKeyBar onSend={sendToCurrent} onPaste={pasteToCurrent} oneRow={keyFit === 'one'} />
+            )}
           </>
         )}
 
@@ -1795,8 +2030,12 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             pagePrompt.current = null
             void guard(async () => {
               const made = await api.createSession(project.id, [], { launchProfileId })
-              if (!prompt) return
+              // Shown as soon as it exists. It was selected only when a page
+              // handed over a prompt, so starting an agent from the picker
+              // added a row and left you on the session you were in.
+              wantSelected.current = made.id
               selectSession(made.id)
+              if (!prompt) return
               // After the agent has had a moment to start. A paste that
               // arrives before it has set up its terminal lands in a buffer
               // it may throw away, and nothing says so.
@@ -1817,33 +2056,32 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
         />
       )}
 
-      {restoreOpen && restorable.length > 0 && (
+      {restoreOpen && pendingRestorable.length > 0 && (
         <RestoreDialog
-          sessions={restorable}
+          sessions={pendingRestorable}
           projects={state.projects}
           profiles={profiles}
           labels={labels}
           onClose={() => setRestoreOpen(false)}
-          onDone={() => {
-            setRestoreOpen(false)
-            setRestoreDismissed(false)
-          }}
+          onDone={() => setRestoreOpen(false)}
         />
       )}
 
-      {!narrow && rightWidth > 0 && (
+      {!narrow && !compact && rightWidth > 0 && (
         <RightPanel
+          placement="column"
           project={currentProject}
           sessions={state.sessions}
           socket={socket}
           layout={paneLayout}
           onLayout={setPaneLayout}
+          extTabs={extTabs}
           onRefocus={() => {
             if (current) focusTerminal(current.id)
           }}
           width={rightWidth}
           onWidthChange={setRightSize}
-          onCollapse={() => setRightOpen(false)}
+          onCollapse={() => (sheetLayout ? setSheet(null) : setRightOpen(false))}
           onOpenTokens={() => setTokensOpen(true)}
           onOpenResources={(id) => {
             setFocusSession(id)
@@ -1853,6 +2091,71 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           onPaste={pasteToSession}
           previewAsk={previewAsk}
         />
+      )}
+
+      {/* The tablet tier and the phone reach the same panel as a sheet over
+          the terminal: from the header toggle at tablet width, from the
+          drawer on a phone, where there used to be no way to it at all. */}
+      {sheetShown && (
+        <button
+          type="button"
+          aria-label={t('app.closeSheet')}
+          data-testid="sheet-scrim"
+          onClick={() => setSheet(null)}
+          className="vp-backdrop absolute inset-0 z-20 bg-black/30"
+        />
+      )}
+      {sheetShown === 'panel' && (
+        <div
+          data-testid="panel-sheet"
+          className={narrow ? 'absolute inset-0 z-30 flex flex-col vp-solid vp-safe-pad-top' : 'contents'}
+        >
+          <RightPanel
+            placement={narrow ? 'fill' : 'sheet'}
+          project={currentProject}
+            sessions={state.sessions}
+            socket={socket}
+            layout={paneLayout}
+            onLayout={setPaneLayout}
+            extTabs={extTabs}
+            onRefocus={() => {
+              if (current) focusTerminal(current.id)
+            }}
+            width={rightWidth}
+            onWidthChange={setRightSize}
+            onCollapse={() => (sheetLayout ? setSheet(null) : setRightOpen(false))}
+            onOpenTokens={() => setTokensOpen(true)}
+            onOpenResources={(id) => {
+              setFocusSession(id)
+              setSettingsAt('usage')
+            }}
+            currentSession={current}
+            onPaste={pasteToSession}
+            previewAsk={previewAsk}
+          />
+        </div>
+      )}
+      {sheetShown === 'terminals' && current && (
+        <div
+          data-testid="terminals-sheet"
+          className="absolute inset-0 z-30 flex flex-col vp-solid vp-safe-pad-top"
+        >
+          <BottomTerminals
+            fill
+            key={current.projectId}
+            socket={socket}
+            near={current}
+            touchSelect
+            terminals={bottomTerminals}
+            themeKey={themeKey}
+            height={0}
+            onHeightChange={() => {}}
+            onCollapse={() => setSheet(null)}
+            onNew={newBottomTerminal}
+            onClose={(t) => void guard(() => api.deleteSession(t.id))}
+            onRename={(t, title) => void guard(() => api.patchSession(t.id, { title }))}
+          />
+        </div>
       )}
 
       {/* Last in the tree and z-50, so it is over the settings dialog that two

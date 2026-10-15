@@ -274,6 +274,11 @@ const (
 	// raising, or null when it has gone. An event rather than part of the
 	// snapshot, for the reason MsgPanel is one.
 	MsgResources = "resources"
+
+	// MsgNotice is a session speaking up (`vibepanel me notify`): a toast
+	// on every open page, and a browser notification when the page is not
+	// in front. An event, not part of the snapshot: it happened once.
+	MsgNotice = "notice"
 )
 
 // AllServerMessages and AllClientMessages exist so the two ends of this
@@ -287,7 +292,7 @@ const (
 var (
 	AllServerMessages = []string{
 		MsgSubscribed, MsgSize, MsgClipboard, MsgTitle, MsgExit,
-		MsgDropped, MsgError, MsgPong, MsgState, MsgPanel, MsgResources,
+		MsgDropped, MsgError, MsgPong, MsgState, MsgPanel, MsgResources, MsgNotice,
 	}
 	AllClientMessages = []string{
 		MsgSubscribe, MsgUnsubscribe, MsgResize, MsgTakeControl, MsgPing,

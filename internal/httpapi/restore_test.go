@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/store"
+	"github.com/jiangmuran/vibepanel/internal/tmux"
 )
 
 // A reboot, honestly simulated.
@@ -558,4 +560,221 @@ func truncate(s string) string {
 		return s[:200] + "…"
 	}
 	return s
+}
+
+// A listing that tmux answered but that the panel could not read is not a
+// listing in which every session has died. tmux refuses a whole format it
+// does not understand and prints its complaint in place of every line (see
+// parseInfo); List skipped each unparseable line and returned an empty list
+// with no error, and the poller marked every session vanished and done --
+// a session.gone event, a chat push and a webhook for each, on every poll
+// for as long as the panel and tmux disagreed. The sessions were fine.
+func TestAnUnreadableListingDoesNotEndEverySession(t *testing.T) {
+	ts, srv := newTestServer(t)
+	ctx := context.Background()
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"unreadable"}`)
+	sess := postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	if err := srv.pollOnce(ctx); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	before := getSession(t, srv, sess.ID)
+	if before.Exited {
+		t.Fatalf("exited before the listing went bad: %+v", before)
+	}
+
+	real := srv.Tmux.Bin
+	fake := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = list-sessions ]; then echo 'unknown format: #{q/x:session_name}'; exit 0; fi\ndone\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv.Tmux.Bin = fake
+	defer func() { srv.Tmux.Bin = real }()
+
+	// The tick that could not read tmux reports that and changes nothing:
+	// it returns before marking anything vanished, so there is no exit, no
+	// state change and so no event, push or webhook either.
+	if err := srv.pollOnce(ctx); err == nil {
+		t.Error("a listing with no readable line was a successful poll")
+	}
+	got := getSession(t, srv, sess.ID)
+	if got.Exited || got.State == session.StateDone {
+		t.Fatalf("one unreadable listing ended a running session: exited=%v status=%v state=%s",
+			got.Exited, got.ExitStatus, got.State)
+	}
+	if got.State != before.State || got.ExitStatus != before.ExitStatus {
+		t.Errorf("the failed tick changed the row: state %s -> %s, exit status %v -> %v",
+			before.State, got.State, before.ExitStatus, got.ExitStatus)
+	}
+}
+
+// A tick where nothing changed takes no write lock. It ran two UPDATEs per
+// session regardless -- elided on disk, but each one queued for the
+// database's single write lock behind the hooks and the archive. Held by
+// another connection here, the steady tick has to finish without it; before,
+// it waited out busy_timeout and then failed the whole tick.
+func TestASteadyPollTakesNoWriteLock(t *testing.T) {
+	ts, srv := newTestServer(t)
+	ctx := context.Background()
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"steady"}`)
+	for i := 0; i < 2; i++ {
+		postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	}
+	// Settle: the first ticks record cwd, command, title and state.
+	for i := 0; i < 3; i++ {
+		if err := srv.pollOnce(ctx); err != nil {
+			t.Fatalf("settling poll: %v", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	tx, err := srv.DB.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx, `UPDATE settings SET value = value WHERE key = 'nothing'`); err != nil {
+		t.Fatal(err)
+	}
+	pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	start := time.Now()
+	err = srv.pollOnce(pctx)
+	if took := time.Since(start); err != nil || took > time.Second {
+		t.Errorf("a tick with nothing to write, while another connection held the write lock: %v after %v", err, took)
+	}
+}
+
+// One session's failed write does not cost the sessions after it their tick.
+// Every write in the loop returned out of it, so a single "database is
+// locked" left every later session unattached and unevaluated until the next
+// tick, and the next one could fail the same way.
+func TestOneFailedWriteDoesNotEndTheTick(t *testing.T) {
+	ts, srv := newTestServer(t)
+	ctx := context.Background()
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"partial"}`)
+	first := postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	second := postJSON[store.Session](t, ts, "/api/sessions", newSessionBody(t, project.ID, "sleep", "600"))
+	if err := srv.pollOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// first sorts ahead and needs a write this tick; second needs attaching.
+	if _, err := srv.DB.SQL().Exec(`UPDATE sessions SET pinned = 1, cwd = '/elsewhere' WHERE id = ?`, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	srv.Manager.Detach(second.ID)
+	tx, err := srv.DB.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx, `UPDATE settings SET value = value WHERE key = 'nothing'`); err != nil {
+		t.Fatal(err)
+	}
+	// Long enough for the first session's write to wait out busy_timeout and
+	// fail on its own, rather than the whole tick running out of context.
+	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := srv.pollOnce(pctx); err == nil {
+		t.Error("a tick whose write failed reported success")
+	}
+	if _, attached := srv.Manager.Get(second.ID); !attached {
+		t.Error("the session after the failed write was not attached that tick")
+	}
+}
+
+// A running panel seals what an older one stored in the clear: the pass is
+// called where every panel starts, not only by a test.
+func TestStartingThePollerSealsWhatWasStoredInTheClear(t *testing.T) {
+	_, srv := newTestServer(t)
+	if err := srv.DB.SetSetting(context.Background(), webhooksKey, `[{"url":"https://h.example/plain-secret"}]`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); srv.Poll(ctx) }()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		raw, _ := srv.DB.GetSetting(context.Background(), webhooksKey, "")
+		if !strings.Contains(raw, "plain-secret") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the webhook list was still in the clear after the poller started")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+}
+
+// A create the browser gave up on does not leave a session nobody can see.
+// tmux can have made the session by the time the request's context kills
+// the client; the handler answered 500 with no row written, and the agent
+// kept running in a tmux session the panel would never list. Here the tmux
+// in front makes the session and then dawdles, so the request ends first.
+func TestACancelledCreateLeavesNoTmuxSessionBehind(t *testing.T) {
+	ts, srv := newTestServer(t)
+	project := postJSON[store.Project](t, ts, "/api/projects", `{"path":"`+t.TempDir()+`","name":"abandoned"}`)
+	real := srv.Tmux.Bin
+	fake := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = new-session ]; then " + real + " \"$@\"; sleep 2; exit 0; fi\ndone\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before, err := srv.Tmux.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Tmux.Bin = fake
+	client := ts.Client()
+	client.Timeout = 300 * time.Millisecond
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/sessions", strings.NewReader(newSessionBody(t, project.ID, "sleep", "600")))
+	req.Header.Set("Content-Type", "application/json")
+	if res, err := client.Do(req); err == nil {
+		res.Body.Close()
+		t.Fatalf("the create finished (%d) before the client gave up; the test did not test anything", res.StatusCode)
+	}
+	time.Sleep(2500 * time.Millisecond) // the fake's sleep, and the handler after it
+	// A client of its own to look with. srv.Tmux.Bin stays the fake, which
+	// passes everything else through: the handler is still running after the
+	// client gave up, and setting Bin back here raced its Kill reading it.
+	look := tmux.New(srv.Tmux.Socket, t.TempDir())
+	look.Bin = real
+	after, err := look.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := srv.DB.ListSessions(context.Background())
+	if len(after) > len(before) && len(rows) == 0 {
+		t.Errorf("tmux has %d sessions and the panel has no row for the new one", len(after))
+	}
+}
+
+// A tmux that stops answering does not stop the poller for good. Every tmux
+// call in a tick ran on the service context, which has no deadline: one
+// list-sessions that never returned held the poll -- and the archive, idle
+// and trim tickers on the same goroutine -- with nothing marked stale,
+// because only an error does that.
+func TestAStuckTmuxDoesNotHoldThePollForever(t *testing.T) {
+	_, srv := newTestServer(t)
+	defer func(d time.Duration) { pollTmuxBudget = d }(pollTmuxBudget)
+	pollTmuxBudget = 300 * time.Millisecond
+	real := srv.Tmux.Bin
+	fake := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = list-sessions ]; then exec sleep 600; fi\ndone\nexec " + real + " \"$@\"\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srv.Tmux.Bin = fake
+	defer func() { srv.Tmux.Bin = real }()
+	done := make(chan error, 1)
+	go func() { done <- srv.pollOnce(context.Background()) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a tick whose tmux never answered reported success")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tick was still waiting on tmux five seconds later")
+	}
 }

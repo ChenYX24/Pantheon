@@ -301,12 +301,16 @@ type sourceFetcher struct {
 	serverName string
 }
 
-func (f *sourceFetcher) fetch(ctx context.Context, src pages.SourceSpec, headers map[string]string) *sourceResult {
-	res := &sourceResult{FetchedAt: time.Now().Unix()}
-	u, err := url.Parse(src.URL)
+// guardedClient is the guard as a client for one URL: https only, every
+// resolved address public (or the fake-ip exception), the checked address
+// dialled and the name used only for TLS. It never follows a redirect
+// itself; the caller decides what a redirect means, because for a source
+// it is a second URL nobody approved and for a declared download it is
+// what every release host does.
+func (f *sourceFetcher) guardedClient(ctx context.Context, rawURL string, timeout time.Duration) (*http.Client, string) {
+	u, err := url.Parse(rawURL)
 	if err != nil || u.Scheme != "https" {
-		res.Error = "only https sources are fetched"
-		return res
+		return nil, "only https sources are fetched"
 	}
 	host, port := u.Hostname(), u.Port()
 	if port == "" {
@@ -322,16 +326,12 @@ func (f *sourceFetcher) fetch(ctx context.Context, src pages.SourceSpec, headers
 	if allow == nil {
 		allow = publicAddr
 	}
-	ctx, cancel := context.WithTimeout(ctx, src.TimeoutOrDefault())
-	defer cancel()
-
 	var addrs []netip.Addr
 	resolved := false
 	if literal, perr := netip.ParseAddr(host); perr == nil {
 		addrs = []netip.Addr{literal}
 	} else if addrs, err = resolve(ctx, host); err != nil || len(addrs) == 0 {
-		res.Error = "the host does not resolve"
-		return res
+		return nil, "the host does not resolve"
 	} else {
 		resolved = true
 	}
@@ -359,18 +359,16 @@ func (f *sourceFetcher) fetch(ctx context.Context, src pages.SourceSpec, headers
 				continue
 			}
 		}
-		res.Error = "the host resolves to an address a source may not reach"
-		return res
+		return nil, "the host resolves to an address a source may not reach"
 	}
 	target := net.JoinHostPort(addrs[0].Unmap().String(), port)
 	serverName := host
 	if f.serverName != "" {
 		serverName = f.serverName
 	}
-
 	dial := f.dial
 	if dial == nil {
-		dial = (&net.Dialer{Timeout: src.TimeoutOrDefault()}).DialContext
+		dial = (&net.Dialer{Timeout: timeout}).DialContext
 	}
 	transport := &http.Transport{
 		Proxy: nil,
@@ -380,14 +378,25 @@ func (f *sourceFetcher) fetch(ctx context.Context, src pages.SourceSpec, headers
 		},
 		TLSClientConfig:        &tls.Config{ServerName: serverName, RootCAs: f.rootCAs, MinVersion: tls.VersionTLS12},
 		DisableKeepAlives:      true,
-		ResponseHeaderTimeout:  src.TimeoutOrDefault(),
+		ResponseHeaderTimeout:  timeout,
 		MaxResponseHeaderBytes: 64 << 10,
 	}
-	client := &http.Client{
+	return &http.Client{
 		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return errors.New("a source may not redirect")
 		},
+	}, ""
+}
+
+func (f *sourceFetcher) fetch(ctx context.Context, src pages.SourceSpec, headers map[string]string) *sourceResult {
+	res := &sourceResult{FetchedAt: time.Now().Unix()}
+	ctx, cancel := context.WithTimeout(ctx, src.TimeoutOrDefault())
+	defer cancel()
+	client, problem := f.guardedClient(ctx, src.URL, src.TimeoutOrDefault())
+	if problem != "" {
+		res.Error = problem
+		return res
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src.URL, nil)
 	if err != nil {
@@ -456,9 +465,12 @@ var (
 	reserved  = netip.MustParsePrefix("240.0.0.0/4")
 	testNets  = []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("203.0.113.0/24"), netip.MustParsePrefix("2001:db8::/32")}
 	nat64     = netip.MustParsePrefix("64:ff9b::/96")
-	sixToFour = netip.MustParsePrefix("2002::/16")
-	teredo    = netip.MustParsePrefix("2001::/32")
-	orchid    = netip.MustParsePrefix("2001:10::/28")
+	// RFC 8215, local-use NAT64: the translator is the operator's, and so is
+	// the IPv4 it reaches, private ones included.
+	nat64Local = netip.MustParsePrefix("64:ff9b:1::/48")
+	sixToFour  = netip.MustParsePrefix("2002::/16")
+	teredo     = netip.MustParsePrefix("2001::/32")
+	orchid     = netip.MustParsePrefix("2001:10::/28")
 )
 
 // fakeIPResolver reports whether the resolver is a fake-ip one: asked for a
@@ -507,7 +519,7 @@ func publicAddr(a netip.Addr) bool {
 		a.IsMulticast() || a.IsUnspecified() || a.IsInterfaceLocalMulticast() {
 		return false
 	}
-	for _, p := range append([]netip.Prefix{cgnat, thisNet, ietf, benchmark, reserved, nat64, sixToFour, teredo, orchid}, testNets...) {
+	for _, p := range append([]netip.Prefix{cgnat, thisNet, ietf, benchmark, reserved, nat64, nat64Local, sixToFour, teredo, orchid}, testNets...) {
 		if p.Contains(a) {
 			return false
 		}

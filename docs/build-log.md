@@ -24443,6 +24443,100 @@ until the file was read directly. It is `'\u0000none'` now: the same string,
 written so the file is text.
 
 
+## 2026-09-29 — A 413 that was nginx's, a service worker in the way, and "413 "
+
+"Why does uploading a slightly bigger file fail with 413?" The panel's upload
+limit is 256 MiB; the nginx in front of this panel had `client_max_body_size
+50m`, and its log had the two uploads, 52.5 MB and 55 MB, refused there. That
+was fixed on the machine, not here -- with one trap worth writing down, now in
+the runbook: its config is bind-mounted as a single read-only file, `sed -i`
+replaced the file, and the container went on reading the old one until it was
+restarted.
+
+Then "413 service worker 拦截". The worker did not refuse anything -- its fetch
+handler was `respondWith(fetch(event.request))` for every request -- but that
+put it in the middle of every upload, and it cost two things. XMLHttpRequest's
+upload progress measured the hand-over to the worker, which is instant, so a
+large file's bar ran to the end and waited there; and DevTools listed every
+response, nginx's 413 included, as "from ServiceWorker". Non-GET requests now go
+to the network without it. A GET still passes through, which is the fetch
+handler installability asks for. render-check asserts both on a page the worker
+controls; a probe against the old worker saw the POST through it, and against
+the new one, not.
+
+And what the person was shown was "413 " -- nginx's answer is an HTML page, and
+over HTTP/2 there is no status text. A 413 without the panel's JSON reason is
+now a failure of its own, `tooLarge`, which says a proxy in front of the panel
+refused the file and that its limit is what to raise. The panel's own 413 still
+shows its own reason.
+
+## 2026-10-01 — The launch-profile drop mark, drawn in the wrong place
+
+「拖动启动配置时显示预览蓝色长方体错位」. The launch-profile list reorders by
+drag and draws the gap the row would land in, the way the sidebar does for
+projects. The sidebar's bar is an ordinary block before the row. This one was
+`absolute -mt-2 h-0.5 w-24` inside a flex row that was not positioned, so its
+containing block was the dialog and, with no offsets, it took its static
+position: centred in the row by `items-center`, then nudged up 8px. The result
+was a short blue slab across the grip of the row it was meant to be *above*,
+and nothing at all for a drop below the last row, because no row owns that
+gap.
+
+The row is `relative` now and the bar is `inset-x-2 top-0 -translate-y-1/2`,
+so it sits on the row's top edge at full width; a second bar after the list
+covers the last gap. Both carry `data-testid="profile-drop-mark"`. Measured in
+a real browser at 1280px and 390px: the mark's centre is on row 0's top edge
+to the pixel while dragging the last row up, and under the last row's bottom
+edge while dragging there; the drop still reorders. The first run of that
+measurement found no mark at all, which was `make check` passing against a
+binary that still embedded the previous bundle -- the AGENTS note about `make
+build` before a commit, seen from the other side.
+
+Reported in the same breath: 「pi agent 使用的时候老是无法使用中文输入法」.
+Not reproduced. With Chrome's own IME emulation (CDP `Input.imeSetComposition`
+and `Input.insertText`, with and without the keyCode-229 keydowns a real IME
+produces) against a throwaway panel, the browser sent exactly the committed
+UTF-8 for 你好 and 世界 to a `cat` session, to a session streaming output
+during the composition, and to a real `pi 0.99.2`, which displayed them in its
+editor. xterm's composition preview sat at the buffer cursor, which pi parks
+on its editor line, so the candidate window has somewhere sensible to be. pi
+asks for the kitty keyboard protocol and modifyOtherKeys at startup; the
+installed xterm implements neither, the panel's tmux has `extended-keys off`,
+and pi falls back to legacy input, which is what the test exercised. Whatever
+the person is hitting needs their browser, their OS and the exact symptom.
+
+## 2026-10-01 — A restored session stayed "[exited]" until the page was reloaded
+
+「从重启恢复 agent 不显示，必须刷新」. Reproduced against a throwaway panel:
+a session on screen, its tmux session killed from a shell, the row marked
+vanished, then restored through the same API the dialog calls. The pane came
+back with the banner and the archived scrollback; the browser kept showing the
+old stream's last frame, "[exited]", typing reached nothing, and a reload was
+the only way out.
+
+The server was right at every step. Killing the tmux session ended the
+attachment, so the viewer's stream was deregistered and told `exit`; the
+restore attached again under the same id. What nobody did was ask again. The
+terminal is mounted per session and rebuilds only when the session changes,
+and the socket client resubscribes only on a reconnect or a `dropped` -- the
+one case where the server itself says "ask again". A session that ended and
+came back was not one of them.
+
+The socket client now remembers that a stream ended (`ended`, set on `exit`,
+cleared by the next confirmation) and, on the state push that shows that
+session running again, subscribes once more from the start: the new attachment
+is a new stream, so a resume point from the old one would be believed by
+nothing, and the confirmation that follows takes the reconnect path, which
+resets the terminal before the replay. A `dropped` is still handled where it
+was; `exit` for a session that stays exited sends nothing; a stream that never
+ended is left alone. Three tests in `socket.test.ts`, and the loop removed
+turns the first one red. Measured end to end: after the restore the terminal
+shows the banner and the archived output within half a second, and a line
+typed into it reaches the new pane.
+
+The one other sender of `exit` is deleting a session, whose row leaves the
+state push, so nothing resubscribes to it.
+
 ## 2026-10-02 — Parthenon development workspace
 
 The new `/projects` workspace keeps project discussions, task acceptance,
@@ -24548,6 +24642,921 @@ verified binary was installed only in the development runtime; projects and
 roadmap revision 5 persisted. Public HTTPS smoke checks passed again, and the
 unrelated live Caddy configuration and production process remained unchanged.
 The default full verify matrix and a committed-release check remain later gates.
+
+## 2026-10-02 — pi 1.0 went full-screen, and the wheel was a twentieth of itself
+
+「对新版 pi agent 的兼容仍然是地狱 无法滚动 无法点击 输入法经常加载不出来」. pi
+1.0.0 changed its default to a full-screen TUI: the alternate screen, SGR
+mouse reporting with button tracking, the hardware cursor hidden, its own
+transcript viewport. Every pi pane on this machine has `alternate_on=1` and
+the mouse flags up. Under 0.99 none of that was on, which is why the earlier
+look at pi and an input method found nothing.
+
+What that changes in the panel, measured against pi 1.0.0 in a throwaway
+panel with a real browser, at 1280px, on a 390px phone with a touch screen,
+and on an 820px tablet:
+
+- **Scrolling is pi's now, not xterm's.** With mouse reporting on, xterm hands
+  the wheel to the application and pi moves its transcript. It moved one line
+  per report, and xterm sends one report per wheel *event* once enough pixels
+  have accumulated for a row -- so six notches of a mouse moved six lines, and
+  320px of trackpad travel moved six lines too. A terminal emulator sends one
+  report per row of travel. `wheel.ts` does that arithmetic for the pointer,
+  with a carry across events so a trackpad's 8px deltas are not each rounded
+  away and a change of direction drops the remainder; `Terminal.tsx` attaches
+  it through `attachCustomWheelEventHandler`, only while the application is
+  tracking the mouse, and sends the reports in one frame -- pi treats reports
+  closer than five milliseconds as one notch, a line each. The same 320px of
+  trackpad now sends 21 reports. The touch path was already right about this
+  (`WHEEL_NOTCH_ROWS`), and a swipe on the phone moved pi's transcript before
+  and after.
+- **Clicks reach pi.** A click sends press and release; a drag sends the
+  motion, pi highlights the range and owns the selection, and xterm selects
+  nothing, which is how every terminal behaves with mouse reporting on. On the
+  phone the terminal is a display and a tap sends nothing, by design.
+- **The input method commits.** Chrome's IME emulation composed 你好 at pi's
+  editor line, with the hardware cursor hidden and tmux still placing it
+  there, idle and while pi was re-rendering a streaming command; the commit
+  reached the pane every time. The phone's compose box reached pi too.
+
+The last two were not reproduced, and the first is the one the panel owed.
+A way out that costs nothing: `pi --tui-mode regular` is the 0.99 layout,
+normal scrollback and no mouse, and a launch profile can carry it.
+
+## 2026-10-02 — A scaled viewer's clicks landed on the wrong cell
+
+「找一下可能的问题」, after the wheel. Two more things pi 1.0's full-screen
+mode exposes, measured in a throwaway panel with two browsers on one session.
+
+**The one fixed.** The second browser is passive: it renders the owner's grid
+and is scaled with a CSS transform to fit (0.69 here). xterm maps a pointer to
+a cell by dividing its distance from the screen's edge by the cell size it
+rendered at, and the transform is applied after, so a click on column 40, row
+10 was reported to pi as column 28, row 7. Nothing in pi could be clicked
+from that browser, and a drag selected the wrong text. The touch path never
+had this problem, because it measures the box the finger is in
+(`touchSelect.ts`, `cellAt`). `mouseReport.ts` is the same arithmetic for a
+pointer in the SGR encoding, and `Terminal.tsx` uses it only while the host
+is scaled, the application is tracking the mouse and the encoding is SGR: a
+capture-phase mousedown on the host, which runs before xterm's listener on
+its element, stops the event there, focuses the terminal as xterm would have,
+and sends press, motion while held, and release from the scaled box. The
+encoding is not in xterm's public `modes`, so it is read from the core with
+every field optional, and `mouseReport.test.ts` reads the installed bundle
+for the names so an upgrade that moves them is noticed rather than quietly
+returning the scaled viewer to the wrong cells. Measured after: the scaled
+browser reports the cell under the pointer, and a drag sends press, motion
+and release at scaled cells.
+
+**The one noted.** pi copies on selection by writing OSC 52. The panel
+receives it outside any gesture, the browser refuses the write, and the
+"Copied N characters — click to put them on your clipboard" offer appears
+after every drag. Correct, and noisy. Chrome keeps transient activation for a
+few seconds after a click, so a real browser may well accept the write that
+the headless one refused; not changed.
+
+Ruled out, for the record: focus. xterm calls `focus()` on mousedown before
+it decides whether the event is a report, so a click into a mouse-tracking
+terminal takes the keyboard like any other, and an IME composition started
+after one reached pi.
+
+## 2026-10-02 — The modes that fell out of the ring
+
+pi 1.0 runs full-screen: it enters the alternate screen, turns mouse reporting
+on, turns autowrap off, hides the cursor. tmux tells its client about a pane's
+private modes once, when they change. The ring keeps the last two megabytes of
+what the client was told, and a full-screen program redraws the whole screen
+on every wheel notch, so after an afternoon the `ESC[?1002h` and `ESC[?7l` it
+sent at startup have been evicted. A viewer that subscribes after that without
+a resume point inside the ring -- a new tab, a reconnect whose last offset is
+also gone -- gets the screen and not the modes. xterm then does not know the
+pane wants the mouse: the wheel scrolls xterm's own scrollback through replayed
+redraw fragments, a click selects text instead of reaching the program, a
+paste arrives unbracketed. Measured in a throwaway panel with a shell that set
+the modes and then pushed exactly 2,097,152 bytes of redraws: a fresh tab
+replayed the ring and sent no mouse report at all. This is the scroll/click
+half of the earlier "无法滚动 无法点击" on pi 1.0, from a second device or
+after a reload, and a reload does not fix it because the reload replays the
+same ring.
+
+`internal/session/modes.go` follows `CSI ? Pm h/l` in the same stream the ring
+stores, across read boundaries, and a snapshot that does not continue the
+viewer's own stream is prefixed with the modes whose last setting differs from
+a terminal's default: set modes as `h`, and the two that start on -- the cursor
+and wrap -- as `l` when reset. A continued snapshot is not prefixed, because
+that viewer saw the original. The alternate screen is never replayed (tmux
+never sends it here, and a stray one would move the replay to a buffer with no
+scrollback), nor is synchronized output, which brackets single frames.
+`Replay.Offset` moves back by the prefix's length so the viewer's resume point
+still counts real bytes. `TestALateViewerIsToldThePanesModes` runs the
+eviction against real tmux with a 4 KiB ring; the prefix removed, it is red.
+In the browser, the fresh tab now reports the mouse.
+
+Not this, and said so rather than claimed: the doubled "Working" footer in the
+reported screenshot was not reproduced. The guess that a lost autowrap made the
+full-width footer wrap was tested against the un-fixed binary and did not
+double -- a full-width line written with absolute cursor positioning fills the
+row and parks in pending-wrap without advancing. A second idle viewer of a real
+pi session rendered identically to tmux's truth, before and after a reload.
+That footer is xterm state diverging from the byte stream over a long session,
+which a fresh replay re-syncs -- which is why a reload fixes it -- and its
+trigger is still open. The mode fix is the scroll/click bug, not that one.
+
+## 2026-10-02 — Tracking the live jailbreak session: tmux is clean, the browser is not
+
+The reported doubled footer, caught live. A pi 1.0 session that had been
+"Working" on a `while ps -p …` wait loop for fourteen minutes showed four
+stacked "Working" footer bars in the browser. Captured from the running panel,
+read-only:
+
+- `tmux capture-pane` on that session's grid: exactly ONE footer. tmux's model
+  of the screen is correct.
+- `tmux pipe-pane` of pi's own output for eight seconds: 48,996 bytes, and
+  every cursor move is an absolute `CSI row;1 H` to row 29 or 30, max row 30 on
+  a 30-row pane. Zero line feeds, zero IND/RI/NEL, zero `CSI S/T`, zero DECSTBM,
+  zero erase, zero soft reset. pi only ever rewrites its footer in place.
+
+So pi and tmux are both correct, and the four bars are the browser's xterm
+having diverged from the byte stream over a long session -- which is why a
+reload, replaying into a fresh xterm, re-syncs it.
+
+What the trigger is NOT: a first guess that a resize desynced the relay was
+reproduced with a synthetic footer app and looked convincing -- until the app
+was made faithful. The synthetic app cached its size at startup and kept
+drawing the footer at the old rows after a resize; that was the app failing to
+handle SIGWINCH, not the panel. An app that recomputes its layout and does a
+full clear+repaint on SIGWINCH, the way pi does, survives seven resizes with
+the browser matching tmux exactly. Resize is ruled out.
+
+The trigger is still open. pi's live output is clean, so the divergence is
+introduced on the tmux->client->ring->xterm path and accumulates only under
+conditions a short synthetic run has not hit. Nailing it needs the bytes the
+panel actually delivered to that browser over those fourteen minutes, which is
+not in pi's output and not in tmux's grid. `pi --tui-mode regular` sidesteps
+the whole alternate-screen class in the meantime.
+
+## 2026-10-04 — The restore offer stays dismissed, per session
+
+「那个没能活过重启的提示我关了就关了，你能不能不要持久化显示」. The strip that
+offers to rebuild sessions whose tmux went with a reboot was dismissed per
+visit: a reload brought it back. That was deliberate once -- a permanent
+dismissal could lose a day's sessions silently -- but it meant the strip
+returned after every refresh for sessions already decided about.
+
+Remembered by id now (`vibepanel.restoreDismissed` in localStorage): a session
+dismissed stays dismissed across reloads, while a session that vanishes *after*
+the dismissal still raises the offer, so nothing new is missed. The stored set
+is replaced with the currently-vanished ids on each dismissal, which also
+prunes ids of sessions since restored or deleted. Nothing is lost either way --
+every gone row keeps its own restart button; this only silences the top strip.
+Verified in a browser: the strip shows for two vanished sessions, hides on
+dismiss, stays hidden across a reload, and returns when a third session
+vanishes.
+
+## 2026-10-06 — Review of the pi 1.0 terminal fixes: two held, three did not
+
+A code review of v1.24.2..HEAD (the wheel, scaled-pointer, mode-replay and
+restore-dismiss changes) raised five points. Two were real and are fixed; the
+mode-replay Go side (the offset arithmetic, chunk boundaries, default-mode
+suppression) checked out, and three frontend points did not survive a look.
+
+Fixed:
+
+- **A scaled passive viewer over-scrolled.** The wheel row height was taken
+  from the on-screen `.xterm-screen` box, which is the CSS-scaled size, while
+  `deltaY` is in page pixels the transform does not touch. Dividing one by the
+  other made a viewer at 0.69 scale move 1/scale too many rows per notch. The
+  row height is unscaled now (`box.height / hostScale() / rows`), and a notch
+  moves the same rows at any zoom. Measured: owner 8 reports/notch, scaled
+  viewer 8, where it was ~12 before.
+- **A dismissed restore offer never returned for a second disappearance.** A
+  session dismissed from the strip kept its id forever, so one restored and
+  then lost in the next reboot -- this machine reboots -- would be held back
+  silently, exactly what the per-visit behaviour used to prevent. The
+  dismissed set is now pruned, during render, of ids no longer vanished, so a
+  re-vanish raises the offer again and the set cannot grow without bound.
+  Measured: dismiss hides it, a restore-then-re-vanish brings it back.
+
+Not bugs, with the reason:
+
+- **"The wheel always sends SGR regardless of the app's encoding."** True of
+  the bytes, but every pane is behind tmux, and tmux negotiates SGR with the
+  outer terminal whatever the inner app asked for -- it translates coordinates
+  to the app's own encoding itself. So xterm's `activeEncoding` is always SGR
+  here, and SGR is the correct thing to send. The guard (`sgrMouse`) is kept as
+  the same defensive check the scaled-pointer path already makes.
+- **1003 any-motion hover is not reported on a scaled viewer** unless a button
+  is held. True, and left: full-screen agents use 1002 (button motion), the
+  scaled-viewer path exists for clicking pi from a second screen, and adding a
+  constant buttonless-motion report to that path for a mode nothing here uses
+  is not worth the hot-path cost.
+- **`getBoundingClientRect` per wheel/mouse event is layout thrash.** The box
+  changes only on resize, so it could be cached. Left: during a scroll the
+  terminal's layout is a stable WebGL canvas, the read is cheap against it, and
+  a cache with its own invalidation is more to get wrong than the thrash is to
+  pay.
+
+## 2026-10-07 — Plugins: the design, replacing the argument against one
+
+Issue #30 asked for a plugin system in the owner's words: frontend and
+backend, for different needs and levels of trust, a development spec, one
+packaged file, an install screen that shows permissions, hosts and whether a
+command runs, permissions that do not interfere between plugins, and real
+freedom — themes, features, routes, changing how a piece of the panel
+behaves. Then, mid-design: the settings panel and the shared components
+should have one extension path that does not conflict, and a big or breaking
+update should not break plugins.
+
+`docs/plugins.md` used to be the argument that the API already was the plugin
+system and that an in-process runtime should not be built. That argument was
+written before share pages, which built every piece it said was too
+expensive — HTML the panel did not write on its own origin under a response
+header sandbox, goja with a budget and a `ctx`, host-approved outbound
+fetches with a resolved-address guard, session-bound grants, a per-page data
+store, a live dev loop. So the document is rewritten as the design, with the
+old reasoning kept in §14 and what still holds named: no veto, no tmux
+socket, a supervisor rather than a runtime for processes, capabilities
+decided in one file, and same-origin code said out loud on the screen rather
+than mitigated by a message allowlist.
+
+The decisions, in the order they cost something to get wrong:
+
+- **Five rungs, one word each on the install screen**: theme (tokens only),
+  panel (a sandboxed frame with a grant, the admin page's shape), service
+  (`server.js` with events, a schedule, routes), process (a supervised
+  command in the sessions' scope), unsandboxed (a module on the panel's
+  origin, as the owner). One plugin may combine 0–3; rung 4 is its own
+  kind and its screen carries the red paragraph.
+- **One capability table**, `internal/plugins/caps.go`: name, sentence in
+  both languages, the routes it opens, the `ctx` members it adds. Pinned by
+  a test that mints each capability alone and walks the router. `sessions:
+  create` and `sessions:input` are on the list in bold, because the
+  credential is a grant or a token rather than a URL; what `writable-links`
+  refused for a URL is kept as loudness, not as a refusal.
+- **Credentials narrowed by route, not by a flag** — red line 8's shape,
+  drafted as red line 10: a grant or plugin token reaches
+  `/api/plugin/{cred}/v1/` and nothing else; `currentUser` consults neither
+  table; scoped API tokens are not needed, because a plugin never holds one.
+- **Declare, and the panel draws.** Settings are a schema the panel renders
+  with its own `Section`/`Row`; a frame gets `vibepanel-ui.css` (tokens and
+  a short list of stable classes) and six SDK behaviours (`confirm`, `menu`,
+  `toast`, `badge`, `text`, `fmt`), not a widget vocabulary — the board was
+  a vocabulary and lost to HTML. That is what makes a redesign of the
+  settings modal move nothing a plugin wrote.
+- **Surviving updates** is a section, not a sentence: every contract has a
+  number the manifest names, contracts only grow (a committed list of slot
+  names, classes and base tokens, `TestNothingAPluginCanNameWasRemoved`),
+  `v2` beside `v1` for three minor releases, manifests strict in and
+  lenient out, a corpus of frozen fixture plugins installed and run by a
+  test, and the update screen naming each plugin the new version cannot
+  run before it is installed. The rungs are also the stability order.
+- **No interference** is namespaces the id owns — data, settings, routes,
+  credentials, hosts, secrets, an event channel, a handler semaphore, a
+  cgroup leaf, slot ids, one active theme — not rules a plugin follows.
+- **Live development** is the page workflow with the panel as the preview:
+  scaffold into `<data dir>/plugins/dev/`, a `plugin-<name>` project, the
+  fingerprint reload, dev mode under the grants already given to that id
+  with an amber line for what the draft asks and has not got.
+- **Build order** 0–4, each shipping alone; foundations and themes first,
+  because the screen, the words and the audit rows are what needs testing
+  before any runtime exists.
+
+Nothing is built. `docs/api.md`'s harness section and `share-pages.md`'s
+reference to the old §3 are updated to point at the new document.
+
+## 2026-10-07 — Plugins, step 0: the screen, the words, a theme end to end
+
+The first step of `docs/plugins.md` §13, built as the design said to build it:
+no credential, no frame, no runtime -- the install screen, the audit rows, the
+tables and a theme, because the screen and its words are what the rest of the
+system will be judged by and are the thing to test before any runtime exists.
+
+What exists:
+
+- `internal/plugins`: the manifest (strict in, lenient out -- `DecodeStored`
+  drops the section a validation error names and says which), the capability
+  table with its sentence in both languages, `Describe` (the install screen as
+  a pure function; `TestEveryCapabilityHasWordsOnTheScreen` fails the build
+  on a capability with no words), `LintTheme` (one rule, tokens the base
+  `:root` defines, no `url()`, no escape, no at-rule; `BaseTokens` is a
+  committed list pinned both ways against `styles.css` by
+  `TestNothingAThemeCanNameWasRemoved`), the bundle reader (the page's rules
+  with a plugin's names and limits; `pages.SniffOK` and `pages.ReadBounded`
+  exported so there is one definition of "a PNG is a PNG"), and version
+  arithmetic for `"panel": ">=1.26"` and a rung-4 `tested` range.
+- Tables: `plugins`, `plugin_versions`, `plugin_files` (in the page's blob
+  table -- `gcPageBlobs` now reads both file tables, and a test publishes a
+  page to prove it does not sweep a plugin's files), `plugin_caps` (the grant
+  decision, attached to the id), `plugin_settings`, `plugin_secrets`.
+- Routes under the session, documented in `docs/api.md`: arrive (zip or a
+  directory, one `POST`, decided by the body's type, because every word under
+  `/settings/plugins/` is a valid plugin id), install with the boxes as
+  ticked, enable/disable, grants, settings, secrets, export, the enabled
+  themes as a list and as one stylesheet. Ten `plugin.` audit events.
+- `/plugin-themes.css`, linked from `index.html`, so a chosen plugin theme is
+  in the document before first paint like the panel's own; the pre-paint
+  script honours `ext-<id>`.
+- The plugins page (`/plugins`, linked from the settings rail like Sharing
+  and Chat): the card, the install screen, the settings form the panel draws
+  from the schema, secrets. `vibepanel plugin` with the same code and words.
+- `make plugins-check`, in `make verify`.
+
+Two things the browser check found that the Go tests could not:
+
+- **A controlled checkbox that waits for the server reads as one that did
+  not take.** The settings form saved on change and showed the new value
+  when the answer came back; Playwright's `uncheck` saw no change and said
+  so. The form now shows the value at once and replaces it with what the
+  server kept, reverting on an error -- which is also what a person expects
+  of a toggle.
+- **The language switch is behind the dialog.** The install screen is a
+  modal over the page whose header holds the switch, so switching languages
+  while reading the permissions means closing the screen. Left as it is --
+  the screen is reopened from the card in one press, and a second switch
+  inside the dialog is a second copy of a control -- and the check does the
+  same.
+
+A choice worth recording: `settings.fields` is an **array** in the manifest,
+not the object the design sketched, for the reason a page's `params` are: the
+form draws the fields in the author's order and a JSON object's order does
+not survive a Go map. The design document says so now.
+
+What is deliberately not here: any route under `/api/plugin/`, any frame, any
+goja call, any process. A panel rung in the manifest is accepted, listed on
+the screen and stored; it does nothing yet, and the card does not pretend
+otherwise.
+
+## 2026-10-07 — Plugins, step 1: a frame, a grant, and the capability matrix
+
+Rung 1 of `docs/plugins.md`: a plugin's HTML at a slot, in a frame with the
+admin page's shape -- `sandbox allow-scripts allow-forms`, an opaque origin,
+a grant in the path as the only credential, a `connect-src` naming that
+grant's API and nothing else -- and a v1 API under `/api/plugin/{cred}/v1/`
+where which routes answer is the capability table's decision and nobody
+else's.
+
+What exists:
+
+- **The table decides the router.** `plugins.RouteTable()` is built from
+  `caps.go`: each capability lists the routes it opens, and seven routes
+  (`me`, `settings`, the plugin's own data) are open to every credential.
+  `registerPluginAPIRoutes` registers exactly that map and panics at startup
+  on a route with no handler. `TestEveryCapabilityOpensOnlyItsRoutes` mints
+  a grant holding one capability at a time and sends it to every route:
+  what the table names answers, everything else is 403 naming the missing
+  capability. `TestAPluginCredentialReachesOnlyTheseRoutes` is the list for
+  both prefixes, and `TestAPluginGrantDoesNotCrossSurfaces` presents a grant
+  as a cookie, a bearer and a path segment on the panel's, the share and the
+  admin routes and gets 401 from all of them.
+- **Grants** have the admin grant's shape and revocation (the lookup joins
+  `auth_sessions`), plus one more join: the plugin must be enabled or in dev
+  mode. What a grant may reach is read from `plugin_caps` at every request
+  rather than copied onto the row, so a box unticked on the settings page is
+  withdrawn from an open frame at its next request -- a test unticks
+  `read:panel` and watches `/view` turn 403 while `/me` still answers.
+- **Handles.** A plugin never sees the panel's ids: `HMAC(salt + plugin id,
+  id)`, sixteen hex characters, resolved back by scanning the lists the
+  plugin may see. `TestTheViewWithoutReadPathsCarriesNoPath` walks the view's
+  structs by reflection rather than by a list of field names, so a path
+  field added later is caught too.
+- **The view** is a restated struct (`pluginView`), built from the same
+  `buildState` the panel pushes, so archived projects are absent here as
+  they are there; `read:paths` fills `cwd`, `command` and a project's path.
+  `GET /events` is a server-sent stream fed by a bus that `notifyState` and
+  `notifyPanel` bump -- a closed channel per change, costing nothing with no
+  listener -- re-resolving the credential on every send so a signed-out
+  grant ends the stream rather than the next page load.
+- **The SDK** (`vibepanel-plugin.js`, served from the binary) and
+  `vibepanel-ui.css` (the tokens, with the enabled plugin themes appended at
+  serve time, and a short list of stable classes). The share SDK's
+  formatting and `honest()` are copied rather than shared: two scripts with
+  no build step cannot import one another, and the plugin SDK is its own
+  contract.
+- **The host.** `PluginFrame` is the only component that talks to a frame:
+  it mints the grant, posts `context` (handles, theme, language, slot),
+  accepts a message only from its own frame's window, rebuilds it from
+  checked fields (`host.ts`, with a test per shape), re-reads the plugin's
+  grants before honouring a gated message, and answers. Four slots:
+  `sidepanel.pane` (the pane tab union opened with a `known` parameter so
+  every existing test reads as before), `settings.section`, `page` at
+  `/x/<path>`, `header.item`. `session.action` and `project.action` wait for
+  a menu on the sidebar's rows, which the render check pins as buttons.
+- **Dev mode**: the draft directory's manifest and files run under the
+  grants already given; the fingerprint is polled twice a second and the
+  frame reloads when two readings agree on something new.
+
+Two things the browser check found:
+
+- **The fingerprint baseline has to be taken at mount, not at the first
+  tick.** The check writes the file right after the frame goes live, inside
+  the half second before the first reading, so the reading that became the
+  baseline was already the changed one and no change was ever seen. The
+  symptom was invisible from the polls (loaded and current agreed), and only
+  a script that watched the frame's body text while writing showed that the
+  same sequence with a second's pause worked. A real agent is unlikely to
+  hit the window; the fix costs one request.
+- **A visibility question to a frame mid-navigation throws.** The check
+  reads the frame's body text instead.
+
+`TestTheSDKTypesMatchThePluginView` is not written yet; the `.d.ts` is
+hand-kept against `pluginView` for now and is the next thing to pin.
+
+## 2026-10-07 — Plugins, step 2: a service is server.js with more hooks
+
+Rung 2 of `docs/plugins.md`: a plugin's `server.js` runs inside the panel
+with the page runtime's shape and a `ctx` that is the capability table made
+into an object.
+
+What exists (`internal/httpapi/pluginservice.go`):
+
+- **Hooks.** `onEvent(ev, ctx)` for `session.state`, `session.created`,
+  `session.gone`, `project.archived`, `note.changed`, `todo.changed`;
+  `onSchedule(ctx)` on the manifest's `every`; a function per
+  `server.routes` entry, `(req, ctx)`; `onInbound(req, ctx)` behind the
+  declared secret. Budgets of 500 ms enforced by `vm.Interrupt`, a fresh
+  runtime per call from a program compiled once per version, data writes
+  committed only on a clean return through the same `applyDataOps` the
+  routes use, a 64 KiB result cap, a 200-line log written to
+  `.vibepanel/server.log` in dev mode.
+- **`ctx` is the grants.** `data`, `settings`, `secret`, `sources`, `now`,
+  `log`, `caps` for every service; `panel.view` with `read:panel`;
+  `notes.get`/`set`, `todos.list`/`add`/`set`/`remove`, `sessions.state`,
+  `sessions.screen` each with its capability; `fetch` only when some
+  `net:<host>` is granted, refusing any other host before the request and
+  going through the share page's guarded fetcher after (https, resolved
+  address checked, no redirects, bounded, within what is left of the
+  budget). A member not granted is absent, which `TestCtxHasOneMemberPerCapability`
+  checks with `typeof`, so `vibepanel plugin check` can one day read a script
+  for what it asks.
+- **Events never run on the poller.** `pluginEventRaised` is a non-blocking
+  send into a bounded channel per subscribing plugin, called from the same
+  places the flow log and the chat bridge are told: `setSessionState`,
+  session create and delete, `markVanished`, the archive handler,
+  `notifyPanel`. A full queue drops the oldest and counts it; the card shows
+  the count. Workers follow the installed set (`ensurePluginWorkers`, called
+  from `pluginsChanged`), and the clock for schedules and sources is a
+  goroutine beside the event drain, started from `Poll`.
+- **Two doors and one open one.** A route answers at
+  `/api/plugin/{cred}/v1/x/…` for the plugin's own frames (open to every
+  credential in the capability table, because what the handler does is under
+  the grants) and at `/api/ext/{id}/…` for the owner's session;
+  `req.caller` says which. `POST /api/plugin-hook/{id}/{path}` is the one
+  route the internet reaches: sixty a minute per plugin, verified as a
+  bearer or as `sha256=` HMAC of the body before any of the plugin's code
+  runs, and the failure audited `plugin.inbound_rejected`. It is on the
+  open-routes list in `auth_test.go` with its reason, which is the same
+  shape the chat bridge's callback has.
+- **Sources per plugin.** The host approval is the `net:<host>` tick on the
+  install screen, so there is no second approval list; results and ages are
+  on the card.
+
+What was duplicated rather than shared, and why: the goja call (`compile,
+budget, run, cap, commit`) is written again here rather than lifted out of
+`pageserver.go` into a package both use. The two differ in every parameter
+-- what is compiled from where, which data table, what `ctx` holds, who is
+audited -- and the honest generalisation is a type with eight callbacks. It
+is the first thing on the optimisation list, once both have been run in
+anger and the shared shape is visible rather than guessed.
+
+Not here: `vibepanel plugin run`, which the page CLI has, because it needs the
+server's own context to build `ctx`; the owner's door with an API token
+covers running a route from a shell, and the log route covers reading what
+happened.
+
+## 2026-10-07 — Plugins, step 3: a process is a supervised command
+
+Rung 3 of `docs/plugins.md`, which the earlier version of that document
+called the only part worth building: a supervisor, not a runtime, and the
+three tests it asked for.
+
+What exists (`internal/httpapi/pluginprocess.go`):
+
+- **Start.** From the installed version checked out to
+  `<data dir>/plugins/<id>/v<N>/` (once; the files are immutable), or the
+  draft directory in dev mode; a cleared environment plus `PATH`, `HOME`,
+  `LANG`, `VIBEPANEL_PLUGIN_URL` (the v1 prefix with a fresh token minted at
+  every start), `VIBEPANEL_PLUGIN_STATE`, `VIBEPANEL_PLUGIN_ID`, and each
+  secret the manifest's `env` names; its own process group, so a signal
+  reaches what it forked; `cmd.Cancel` sends SIGTERM and `WaitDelay` the
+  SIGKILL five seconds later.
+- **The token** is a row in `plugin_tokens`, resolved by `resolvePluginCred`
+  when the hash is not a grant's, and narrowed to the capabilities the
+  process itself declared of what the owner granted -- a plugin's frame and
+  its process are two credentials with two lists. Presented as a bearer on
+  the panel it is 401; disabling the plugin ends it (the lookup joins the
+  plugin's enabled/dev row); a stopped process has its token deleted.
+- **The three tests**: a process that never exits (`trap '' TERM`) is ended
+  at shutdown within the grace; one that crashes in a loop is restarted with
+  backoff and stopped at the cap, audited `plugin.crashed`, and the owner's
+  restart clears the stop; one that prints in a loop fills a 64 KiB ring and
+  nothing else. The backoff and the cap are fields on the state so the loop
+  test takes milliseconds.
+- **The leaf.** `Governor.PlacePlugin` moves the pid into `p-<id>` under the
+  sessions' pool where a layout exists; `Prune` removes only `s-` leaves,
+  so the plugin's survives a sweep; `EndPlugin` removes it when the process
+  ends. A panel that manages no scope moves nothing.
+- **The red capabilities' routes.** `sessions:control`, `sessions:create`
+  and `sessions:input` open now, through the panel's own handlers by an
+  internal request with the real id substituted for the handle (`internally`),
+  so what a plugin does to a session is exactly what the sidebar does and a
+  change to the handler is a change here. Every `input` is audited with the
+  byte count.
+- The card's *Process* block: the state in a sentence, the output, a
+  restart. `plugins-check` installs a `sh` loop and reads its ticks off the
+  card.
+
+What the first run of the tests found: **a shell script is not a file a
+plugin could carry.** The bundle's allowlist was the share page's, which has
+no reason to know `.sh`, so `cmd.sh` was listed as ignored and the process
+started without it -- `sh: cannot open cmd.sh`, ten times, stopped. The
+allowlist gained `.sh`, `.py`, `.toml`, `.yaml` and `.yml`, all sniffed as
+text; the lesson is the one the design already states for themes, that an
+install screen should say what was left out, and the `ignored` list does.
+
+## 2026-10-07 — Plugins, step 4: the module, loud and with two ways back
+
+Rung 4 of `docs/plugins.md`: a plugin's `main.mjs` on the panel's own origin,
+as the owner. The design refused to pretend this can be bounded, and the
+build keeps to that: what was built bounds the blast radius and says the
+rest out loud.
+
+What exists:
+
+- **Three gates, none of them a capability.** `/plugin-code/{id}/<file>` is
+  served only while the panel-wide switch (`plugins.unsandboxed`, a setting,
+  off by default, audited) is on, only for a plugin that is installed and
+  enabled, only under the owner's session -- and only from the installed
+  version, never from a draft, which a test pins by turning dev mode on,
+  changing the draft and reading the installed bytes back. The list the SPA
+  loads from (`/api/settings/plugin-modules`) is empty while the switch is
+  off, so a page that never asks about the switch loads nothing.
+- **The host object** (`hostRuntime.ts`): `v`, `plugin`, `api`, `lang`,
+  `theme`, `state.subscribe`/`current`, `slots.add` for two placeholders the
+  SPA renders (`sidebar.sessionRow.trailing`, `header.item`), `css`, a
+  prefixed `i18n`, `toast`, `open`. The slots are DOM placeholders filled by
+  a MutationObserver rather than by React, so the module's element is its
+  own and React never reconciles inside it; every renderer runs in a
+  try/catch, so a throw is one empty box. `host.override` is not built:
+  `host.css` turned out to cover what "change how a piece looks" meant, and
+  a list of replaceable components is a contract to write once there is a
+  plugin asking for it.
+- **The one dynamic `import()` in the codebase**, in `loadModules`, after
+  the SPA's own render, on the panel's page only. A module that fails to
+  import is a toast naming it; one outside its `tested` range loads with a
+  toast saying so.
+- **Two ways back that need no working page.** `?safe=1` is read by the
+  pre-paint script (no plugin theme) and by `main.tsx` (no module), and the
+  page says it is in safe mode once it has loaded; `vibepanel plugin disable
+  --all` turns every plugin and the switch off from a shell. The switch's
+  strip on the plugins page carries the red sentence and names both.
+- `plugins-check`: nothing loads with the switch off; on, the module draws
+  into both slots and sees the state; `?safe=1` loads none of it.
+
+Two small things the browser check caught: the install screen's danger
+paragraph and its section shared a test id, which is a strict-mode
+violation in Playwright and a hint that the two were one thing to the eye;
+and the earlier assertion that the plugin page shows "1 sessions" was true
+only until the service check started a second one.
+
+## 2026-10-07 — Plugins, step 5: the scaffold, and the templates are tests
+
+§9 of `docs/plugins.md`: 「agent 自己实时加功能」 needs somewhere for the agent
+to start. The page workflow already had the answer -- a template, a
+directory, a project, the launch picker with the first line typed -- so this
+step is that loop with a plugin in it and the panel itself as the preview.
+
+What exists:
+
+- **`internal/plugins/scaffold.go`**: five templates (`theme`, `pane`,
+  `service`, `process`, `full`), each a working plugin with `__ID__` and
+  `__NAME__` filled in, plus `AGENTS.md` (what the sandbox enforces and what
+  is not the agent's to do: install, grant, enable), `CLAUDE.md`,
+  `README.md`, the SDK and its types, and a `.gitignore`. Written only into
+  an empty or missing directory, every file with `O_EXCL`: the directory
+  may be somebody's work. `Slug` makes an id from a name; `Templates()`
+  reads each template's rungs from its own manifest, so the gallery has no
+  second list.
+- **`POST /api/settings/plugin-new`** and **`GET
+  /api/settings/plugin-templates`**, beside `/settings/plugins` rather than
+  under it, because every word under it is a valid plugin id and
+  `/settings/plugins/new` would shadow a plugin called `new`. The handler
+  scaffolds, `git init`s, stores the directory as a version, turns dev mode
+  on, and finds or makes the project at that directory (`projectForDir`:
+  the one there, an archived one restored, or a new `plugin-<id>`), then
+  answers `{plugin, projectId, dir}`. Audited `plugin.created`.
+- **The hand-over** is the page's, with a project instead of a page:
+  `panelOpeningProject` / `projectToOpen` on `?project=`, read once on the
+  first open snapshot and taken off the address, then the launch picker for
+  that project with `plg.firstPrompt` typed. The snapshot may predate a
+  project made a moment ago on another page, so the opener asks the server
+  before saying it is gone.
+- **`vibepanel plugin init <dir> --template … [--name] [--dev]`**: the same
+  scaffold from a shell; `--dev` also registers it, which is what the button
+  does, and without it nothing in the panel changes, for a machine with no
+  panel on it.
+
+The templates are tests. `TestEveryTemplateIsAPluginThatInstalls` scaffolds
+each, reads it back through the bundle reader, puts it through the install
+screen, lints its theme and refuses anything the reader would silently
+ignore; the httpapi test takes each through the real route and then installs
+the `service` one and calls its route; `plugins-check` does the same through
+the page and watches the launch picker open. The templates were checked
+against the SDK, the manifest and the service `ctx` by reading those files
+before the first test ran, and the first run still had something to say:
+the bundle reader ignores the scaffold's own copies of `AGENTS.md` and the
+SDK, with the reason "the panel provides its own", and the test now accepts
+an ignored file by that reason and no other. `tsc` found the one real
+mistake: `rungsOf` took a whole `PluginRow` when all it reads is `rungs`,
+so the template gallery could not use it until it asked for only that.
+
+Deferred, and said so in §9: `vibepanel plugin shot` and `plugin run`, and
+the session/project action slots, which wait for a sidebar menu to put them
+in.
+
+## 2026-10-07 — Plugins, step 6: the three pins §10 promised
+
+Three tests the design named before anything was built, now built, each
+checked by removing what it guards and watching it go red:
+
+- **`TestTheSDKTypesMatchThePluginView`** reads the `export interface`
+  blocks out of `vibepanel-plugin.d.ts` with the same parser `wire.ts` is
+  pinned with, and compares them both ways with the Go structs that are
+  sent: `PluginView`, `PluginIdentity`, the project and session rows, `Note`
+  and `Todo`. Renaming `pinned` in the `.d.ts` is four failures.
+- **`TestNothingAPluginCanNameWasRemoved`** is a committed list,
+  `internal/plugins/testdata/contract-v1.txt`: 6 slots, 22 classes in
+  `vibepanel-ui.css`, 43 base tokens, 16 capabilities, 5 settings groups.
+  Both directions are red -- a name removed from the source, and a name
+  added to the source without a line in the file -- because the second is
+  how a contract gets made by accident. `VP_WRITE_CONTRACT=1` rewrites the
+  file; that is the deliberate step.
+- **`TestEveryCompatFixtureStillInstallsAndRuns`** walks
+  `internal/plugins/testdata/compat/`: five plugins frozen against contract
+  v1, one per rung and one with everything (six settings field types, a
+  log, a `net:` capability, two languages, a `panel` constraint), each with
+  an `expect.json`. Every fixture goes through the real routes in its own
+  test server: add, install, secrets, enable, theme sheet, frames on a
+  grant, SDK calls, routes through `/api/ext/`, an event delivered to
+  `onEvent`, a process run to its output. The corpus found its first thing
+  on the first run: a `log` item is an object, and the fixture appended a
+  string. That was the fixture's mistake, and it is the kind the corpus is
+  for, because a plugin author makes it next.
+
+## 2026-10-07 — Plugins, optimisation round 1: one runner for every server.js
+
+The step-2 entry said sharing the goja core between `pageserver.go` and
+`pluginservice.go` was the first thing on the optimisation list, and it was
+the first thing done once the system was whole. The forty lines that make
+`server.js` a sandbox -- a fresh runtime per call, the stack cap, the budget
+as an interrupt, the request's end as an interrupt, the hook looked up by
+name, the result as JSON under a 64 KiB cap -- were in both files, as was
+the whole of `ctx.data` (get/set/increment/append/reset over a working copy,
+checked as written) and `ctx.now`/`ctx.log`/`ctx.sources`. They are
+`internal/httpapi/jsrun.go` now: `runJS` over a `jsCall`, `jsDataObject`
+with an optional guard on `set` (the visitor-action `writes` list, which is
+the one thing the page's data object did that the plugin's did not), and
+`jsCommon`. 271 lines gone, 28 added at the two call sites; what stays with
+each caller is what actually differs -- where the program comes from, what
+else `ctx` carries, how the ops are committed.
+
+Checked the way a refactor of a sandbox should be: with the result cap
+disabled in the shared file, both `TestAHookIsBoundedInTimeAndSize` (plugin)
+and `TestServerJSWritesOnlyWhatItsActionAllowsAndOnlyOnSuccess` (page) go
+red, which is the point -- a fix to the cap now reaches both or neither.
+
+## 2026-10-07 — Plugins, optimisation round 2: once per change, one request per poll
+
+Two hot paths, both of the shape "N things each doing the whole job":
+
+- **The view's state is built once per change.** Every open event stream
+  -- one per frame, and a panel with a pane, a settings section, a header
+  item and a page open in three tabs has a dozen -- rebuilt `buildState`
+  (every table) on every bump, and the SDK's polling fallback did the same
+  on every `GET view`. `pluginState` memoises it on the bus generation (a
+  counter `bump` increments) with a one-second ceiling: one build per bump,
+  a dozen cuts of it. Exact rather than approximate, because every change
+  the panel notices is a bump; the ceiling is for the frame that polls
+  without a stream. `TestThePluginViewIsBuiltOncePerChange` counts the slow
+  path -- three views, one build; a bump, two -- and goes red with the memo
+  made to always miss.
+- **The plugins page polls in one request.** Its five-second refresh was
+  the list and then one detail request per card. `GET
+  /api/settings/plugins?detail=1` is the list as `PluginDetail` rows, and
+  the page asks for that. `TestTheListCarriesDetailOnRequest` pins both
+  shapes: the plain list still without the screen, the detail list with it.
+
+Neither changed what a plugin sees; the SDK pin and the compat corpus are
+the proof of that, and they ran unchanged.
+
+## 2026-10-07 — Plugins, optimisation round 3: a revision instead of two timers
+
+Two caches on the page knew about plugins and neither knew when they
+changed. The slot list (`usePlugins`) re-read itself every thirty seconds,
+so a plugin enabled on the plugins page took up to half a minute to appear
+in the side panel of a tab beside it; the theme toggle's list was read once
+and never again, and the comment on it said so -- a theme installed while a
+tab is open joined the cycle on the next load, when its stylesheet also
+arrived.
+
+The snapshot now carries `pluginsRev`, one integer that `pluginsChanged`
+raises on every install, enable, disable, dev switch and removal. The list
+itself stays out of the snapshot for the reason the slots file gives --
+every viewer gets every snapshot, and the list changes rarely -- but one
+number is what lets `rev.ts` fire its listeners the moment it moves: the
+slot list re-reads, the theme list re-reads, and the `<link>` to
+`/plugin-themes.css` gets a new query string so the new theme's rules
+arrive without a reload. The thirty-second timer became a five-minute
+fallback for a tab whose socket missed the change, and the theme toggle's
+cache moved into `pluginThemes.ts` as a hook that subscribes.
+
+Pinned at both ends: `TestThePluginsRevisionRisesOnEveryChange` (install
+and disable each raise it; a read does not), `TestTypeScriptRowsMatchWhatIsSent`
+caught `PanelState` the moment the Go struct had the field and the
+interface did not, and `rev.test.ts` has the baseline, the change, the
+repeat, the sheet swap through a stand-in holder, and a listener that
+throws without stopping the next.
+
+## 2026-10-07 — Plugins: what head-check found that four fast gates had not
+
+`make head-check` on the committed tree failed one Go test that `make
+check` had passed four times that day: `TestAProcessStartsWithItsTokenAndSecret`
+read the process status the instant `Running` turned true and found an
+empty output ring, because the status says running when the process is
+spawned and its first lines arrive through the pump a moment later. On an
+idle machine the pump wins; under head-check's full `go test ./...` it
+did not. `taskset -c 0` made it fail 29 runs in 30, which is the
+reproduction a timing flake needs before it is fixed, and the fix is in the
+test -- wait for what the script prints, not for the start -- after which
+fifteen runs of every process test on one CPU pass. The product was right;
+the test asked its question too early.
+
+## 2026-10-08 — Plugins: a process on the panel's port
+
+The question was whether a plugin could mount an API of its own on the
+panel's port, and the honest answer was "a `server.js` route, yes; a real
+HTTP service, no". `internal/httpapi/pluginhttp.go` is the second answer:
+`process.http` in the manifest, and the process is served at
+`/api/plugin-http/<id>/*`. The shape is the one agreed before building,
+with the three corrections the review found written in:
+
+- **The panel guards, the process does business.** Who may call is
+  declared and on the install screen in red: `owner` (session or API
+  token), `token` (a plugin access token minted on the card, named, revoked
+  one at a time, last use shown, a fourth table `currentUser` does not
+  consult) or `hmac` (the inbound door's check). No anonymous mode. The
+  cookie and the Authorization header never reach the process; it gets the
+  caller's name in a header.
+- **The same-user hole.** The socket's directory keeps other users out and
+  nobody else: every process of this user can connect, and a coding agent
+  in a session is this user, which would have let it forge
+  `X-Vibepanel-Caller: owner`. Every forwarded request now carries
+  `X-Vibepanel-Proxy`, a secret minted at each start and handed to the
+  process in its environment; the scaffold's spec tells every author to
+  refuse a request without it, and the check's own process does.
+- **SVG is not an image here.** The response is cleaned on the way back:
+  `Set-Cookie` and every policy header removed, `nosniff` added, and
+  anything that is not JSON, an event stream, text, a raster image, audio,
+  video or bytes served under `Content-Security-Policy: sandbox` as an
+  attachment. `image/svg+xml` and anything XML fall on the attachment side,
+  because they carry script and would have been rung 4 without the switch.
+- **The socket lives in the runtime directory**, not under the data
+  directory: a unix socket path is 108 bytes on Linux and 104 on macOS, and
+  `<data>/plugins/<40-character id>/state/http.sock` under a long HOME is
+  past it. The name carries a hash of the data directory, so two panels of
+  one user do not share a socket.
+- **Across origins is the owner's list**, on the card, exact matches,
+  never the manifest's; preflights answered by the panel; Bearer only, so
+  the cookie is never a credential across origins and there is no CSRF to
+  defend. Rate limits per plugin and per caller, in-flight and stream caps,
+  an idle timeout that resets on every byte, bodies capped at 16 MiB.
+- Seven methods registered by name rather than `HandleFunc`'s everything:
+  the API-doc pin asked for CONNECT, TRACE and QUERY to be documented, and
+  the right answer was that a door should not have them.
+
+Tested with the test's own listener on the socket the panel named, so what
+is checked is the door and not a plugin: what reaches the process (no
+cookie, the caller, the secret, the cleaned path), what comes back (the
+cookie gone, HTML and SVG as attachments, PNG and CSV as themselves, the
+first SSE event while the stream is open), who gets through (a token on its
+own mount and refused on `/api/state`, `/api/ext/` and `/api/plugin/`; a
+revoked one refused; an unlisted origin refused with a good token; a cookie
+alone refused across origins), and the per-caller limit. Three mutations --
+the cookie strip, the response cleaning, the origin list -- each turn one
+test red. In the browser check the fixture's process became a Node server
+on the socket that refuses a request without the secret, and the step mints
+a token on the card, calls through it, reads what the process saw, and
+revokes it.
+
+Deliberately not audited: each use of a token. The design asked for it, and
+at 120 requests a minute per token the activity log would be nothing else;
+the row's last use and the plugin's own log carry it instead.
+
+## 2026-10-08 — Plugins: declared downloads
+
+The second half of the same review: a plugin package is text, and a
+plugin that needs 239 MB of speech model should say so rather than carry
+it or fetch it itself. `downloads` in the manifest, `plugindownload.go`
+behind it.
+
+- **The hash is the approval.** It is on the install screen; the panel
+  computes the digest as the bytes stream to a temporary file and renames
+  into place only when they match. An author who swaps the upstream file
+  changes nothing on anyone's disk. The marker under the assets directory
+  names the hash, so a manifest with a new hash sees the old file as not
+  there rather than as good enough.
+- **The guard, with redirects.** The review's point 5 was that the
+  existing fetcher refuses every redirect and GitHub's release URLs always
+  302 to `objects.githubusercontent.com`. The guard became
+  `guardedClient`, one function the sources' `fetch` and the downloader
+  share; the sources keep refusing redirects (a second URL nobody
+  approved), the downloader follows up to five, each hop a fresh guarded
+  client, with `ErrUseLastResponse` so the 3xx comes back unfollowed and
+  the next URL is checked here. The first attempt let the client follow and
+  got "a source may not redirect" from its own guard, which is the test
+  doing its job.
+- **The fetcher was for a kilobyte of JSON**, read into memory under a
+  cap; this streams, and caps by the declared size with room for an author
+  who rounded. Unpacking refuses `..` as written -- `path.Clean` would have
+  quietly made `../escape` polite, and an archive that says it is hostile
+  should be refused, not corrected -- refuses links and anything that is
+  not a file or a directory, keeps absolute names under the directory, and
+  caps the total at eight times the declared size or 256 MiB, the floor
+  because a 161-byte test archive unpacking to 3 KB was over eight times.
+- **Required and optional.** A required download starts at enable and
+  the supervisor leaves the process unstarted until it is there, the card
+  saying *waiting for downloads*; the download's end goes through
+  `pluginsChanged` and the process starts. Optional ones wait for the
+  button. The process reads `VIBEPANEL_PLUGIN_ASSETS`; the directory is
+  read-only by convention, because the process runs as you and mode bits
+  are its to change.
+
+Tested against the test's own TLS server through the fetcher's hooks: a
+302 followed, the digest checked, an exec bit kept, the process waiting
+and then starting with the path in its environment, removal and the
+required download's return; a wrong hash leaving nothing, not even the
+temp file; `..` refused in three spellings and a bomb capped. The browser
+check declares a download on a host that cannot resolve, which is the one
+outcome a check without the internet can watch end in words.
+
+## 2026-10-08 — Plugins: settings that reach a running plugin
+
+Two small things from the same review, both about a change the owner
+makes on the card not reaching a plugin that is already running.
+
+- **A settings change is an event on the stream.** `GET v1/events` sends
+  `event: settings` with the values as `v1/settings` would answer them --
+  the baseline on connect, then on every change -- so a frame or a process
+  holding the stream learns that the owner moved a switch without polling.
+  The SDK listens and replays the last values to a late `on('settings')`.
+  The stream was SSE all along; the review's text said WebSocket, and the
+  design document now says which.
+- **A process is restarted when what it was started with changes.** A
+  secret saved after the start, a download that arrived, a new version:
+  `pluginEnvFingerprint` hashes all of it (never kept in the clear; it has
+  secrets in it), the supervisor keeps the hash the process was started
+  with, and a reconcile with a different hash stops and restarts. A
+  reconcile with the same hash leaves the pid alone, which the test checks
+  too: a restart loop from a fingerprint that changed by itself would be
+  worse than the confusion this fixes.
+
+## 2026-10-08 — Plugins: a loopback origin on any port
+
+A smart-glasses plugin: the glasses' app serves its page in a WebView from
+`http://127.0.0.1:<whatever port was free>`, the engine adds the `Origin`,
+and the door's exact list had nothing to be told in advance, so every call
+was a 403 with a good token. The analysis before changing anything: a
+cross-origin allowance decides which page may *read* a response, never who
+is credentialed -- the cookie is never a credential here -- so what a
+loopback-any-port entry admits is a page on that device's loopback holding
+a token, which is the app itself; and a client that can forge an Origin was
+never bound by CORS, so the panel's side sees no difference. Port-squatting
+on the device is the one real exposure, and it is the device's, bounded to
+that plugin's mount.
+
+So: port `0` on a loopback entry means any port, refused anywhere else,
+and a host that begins with `127.0.0.1` is not loopback. Written on the
+same list rather than as a switch, because it is a per-origin decision and
+reads as one. Eight origins in the test say which side of the line each is
+on; removing the port-0 branch turns it red.
+
+## 2026-10-08 — Plugins: a change from the shell reaches the running panel
+
+`vibepanel plugin disable <id>` writes the database and exits, and nothing
+it can reach tells the panel: the process kept running until the panel
+restarted, and the CLI's `--all` message promised "its next poll", which
+did not exist -- the thirty-second service loop runs sources and schedules
+and never reconciled processes. Reported as 「通过命令行关闭插件 插件进程
+不会被立刻干掉」.
+
+The panel now polls one small query every two seconds, `PluginsStamp`, a
+hash of every plugin row's fields that decide what runs (id, enabled,
+installed version, dev, source directory, updated_at), and on a change runs
+the same `pluginsChanged` the settings page runs. The fields rather than
+`MAX(updated_at)`, which was the first version: `updated_at` has second
+resolution, and the test installed and disabled within one second and read
+"nothing changed". The first reading is a baseline, so a panel that starts
+with plugins in place does not reconcile them as news. With the comparison
+removed the test goes red.
 
 ## A file-backed home for Pantheon (2026-10-09)
 
@@ -24835,6 +25844,21 @@ checks, permission blocking, cancellation within ten seconds, and reviewer-only
 acceptance. Existing workflow worker tests also pass; its implementation is
 unchanged. No real model or tmux server was invoked by these tests.
 
+## 2026-10-10 — Stage E1 execution frontend
+
+The execution API adapter follows the frozen E1 contract: a direct run array,
+flat run details with log and handoff filename, an enabled-only switch PUT, and
+bodyless run/stop/merge actions. Mutation refusals now retain their server reason;
+only a stale file revision gets the stale-edit toast. Manual-run eligibility
+ignores autonomy and checks the exposed status, checkout, dependencies and
+concurrency facts. Git validity remains a server check because the snapshot has
+no Git-validity field. Run timestamps accept RFC3339 or Unix seconds, the two
+existing home/runtime conventions; E1 does not specify their encoding.
+
+The first low-priority, single-worker pass passed 35 tests for API shapes,
+eligibility explanations, state glyphs, durations, autonomy defaults and bounds,
+full-auto consent, handoff route selection, and visible three-second polling.
+
 ## 2026-10-11 — Stage E1 execution service and reconciliation
 
 The home execution ticker claims eligible file tasks in priority/age order and
@@ -24889,21 +25913,6 @@ GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB`, followed by
 - `go test ./internal/parthenon -run '^TestHome|^TestWorker'` — passed, including the final rerun.
 - `go test ./internal/httpapi -run '^TestHome|^TestTheAPIDocCoversEveryRoute$'` — passed, including the final rerun.
 - `go test ./cmd/vibepanel -run '^TestEveryDocumentedCommandExists$|^TestTheHelpTextDescribesEachCommand$'` — cancelled during compilation; pending reviewer validation.
-
-## 2026-10-10 — Stage E1 execution frontend
-
-The execution API adapter follows the frozen E1 contract: a direct run array,
-flat run details with log and handoff filename, an enabled-only switch PUT, and
-bodyless run/stop/merge actions. Mutation refusals now retain their server reason;
-only a stale file revision gets the stale-edit toast. Manual-run eligibility
-ignores autonomy and checks the exposed status, checkout, dependencies and
-concurrency facts. Git validity remains a server check because the snapshot has
-no Git-validity field. Run timestamps accept RFC3339 or Unix seconds, the two
-existing home/runtime conventions; E1 does not specify their encoding.
-
-The first low-priority, single-worker pass passed 35 tests for API shapes,
-eligibility explanations, state glyphs, durations, autonomy defaults and bounds,
-full-auto consent, handoff route selection, and visible three-second polling.
 
 ## 2026-10-11 — Verified process groups for session rollover
 
@@ -24986,6 +25995,948 @@ validation. Frontend dependencies were installed locally with
 `NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npm ci --ignore-scripts --cache ../.tmp/npm-cache`
 from `web/`; the lockfile is unchanged. An initial tsc attempt before dependencies
 were installed failed, then the installed compiler and full build passed.
+
+## 2026-10-13 — The command line operates the running panel
+
+「完善重构面板 cli，可以完整操作整个面板，包括改名之类的特性，方便容器内管理」.
+The first CLI could add and list projects and create and kill sessions,
+by writing the database and driving tmux from a second process; it could
+not rename anything, and what it wrote the running panel did not learn
+about until it looked (the plugin-disable entry above is the same shape).
+
+`cmd/vibepanel/client.go` is the CLI as a client of the panel's own API.
+The address is the panel's loopback URL from its configuration; the
+credential is an API token named `cli` that the CLI mints into the token
+table on first use -- it runs as the panel's user with the database in
+reach, so a boundary there would be theatre -- and keeps in
+`<data>/cli.token` at 0600, on the settings page's list with every other
+token, revocable there, re-minted on the next run and audited both ways.
+A command then reaches the same handler the browser does, which is what
+makes `docker exec vibepanel project rename` the same rename as the
+sidebar's: audited, every open tab told, tmux asked by the process that
+owns it.
+
+`cli.go` is the commands: `status`, `project` (ls, add, rename, pin,
+unpin, order, archive, restore, rm), `session` (ls, new, rename, pin,
+unpin, state, restart, kill, send, screen, restore), `note`, `todo`,
+`token`, `audit`, `settings`. Two owner routes were added for the two
+things the API had only for plugins: `GET /api/sessions/{id}/screen` and
+`POST /api/sessions/{id}/input`, the second audited. Things are named by
+id, name, an unambiguous prefix or a directory, and a name that fits two
+is an error that lists both. Flags may follow positionals, because
+`project add ~/x --name X` is how a person types it and Go's flag package
+stops at the first positional; `parseInterspersed` carries on, with `--`
+still meaning "the rest is the command".
+
+The offline paths stay: without a reachable panel, the subcommands the
+first CLI had work on the database and tmux directly and say so; the rest
+say the panel is not running. The first version minted the token before
+asking whether the panel was up, and the existing test for the offline
+`session new` on a machine with no account was told to finish setup first
+-- so the token is minted only when a running panel answers 401.
+
+Tested against a real `httpapi.Server` on a throwaway tmux socket: add,
+rename, pin, order, archive, restore; a session created, renamed, typed
+into and read back (`echo cli-was-here` appears on its screen), marked
+waiting, pinned, shown by `status`, killed; a note and todos; a token
+minted and the CLI's own revoked and re-minted; the log oldest first; and
+the offline fallbacks with the panel's port closed.
+
+`make release-check` then found two things the unit tests could not: the
+check's throwaway data directory had no panel, and the CLI computed the
+loopback URL from the configuration and knocked on the real panel on this
+machine's default port, which answered 401 to a token minted into the
+wrong database; and inside the container `project add` ran before the
+first account existed, so there was nothing to mint a token for. So `serve`
+writes `<data>/panel.url` and the CLI reads the address from there -- the
+panel that owns the data directory, or none -- and a running panel with no
+account is treated as none for the commands that have an offline path. Two
+tests pin both.
+
+## 2026-10-13 — A session's own voice, step 1: the door and the self-description
+
+「通过 CLI 发送弹窗/通知/文件，mark 自己的状态，获取并修改自己的信息，配套最佳实践」.
+The elegant part was already there: every session's environment holds a
+credential that names it and nothing else (`VIBEPANEL_TOKEN`,
+MAC(root, session id), the state reporter's since report tokens exist).
+`/api/me/v1` (`internal/httpapi/me.go`) is that credential given a second
+thing to do, in the shape of red lines 8 and 10: it reaches two routes,
+`currentUser` does not consult it, and there is no target parameter -- the
+session is the one the token was derived for, so an agent cannot speak
+for, rename or read another session, and cannot reach a project, a note
+or a setting (`TestASessionTokenIsItsSessionsAlone` tries each; the root
+hook token is refused too, because it names no session). The owner does
+the same things to any session through `PATCH /api/sessions/{id}`; one
+`applySessionInfo` behind both.
+
+What a session may say: its title and state as before, now with a `why`
+that becomes a notice in its messages (what the chat card shows as the
+last thing it said), and three new columns on the row -- a 120-character
+summary, a 0-100 progress, up to five 24-character labels -- drawn under
+the row in the sidebar with the figure printed beside the bar (red line
+4). `vibepanel me` is the agent's command, `vibepanel session info` the
+owner's; `vibepanel me guide` prints the practice. The sub-router spelled
+the route `/api/me/v1/` to the walk and `/api/me/v1` to the doc pin, so it
+is registered flat and spelled one way.
+
+Next: `say` and `notify` to the web and the chat bridge, `send` for files,
+and `hook install --guide`.
+
+## 2026-10-13 — A session's own voice, step 2: say and notify
+
+Two more things through the same door and the owner's session routes,
+one implementation each (`internal/httpapi/notices.go`):
+
+- `say` is a line in the session's messages, the kind the chat card
+  already shows as the last thing the session said, pushed by the routes
+  as any change is, and a quiet toast on every open page.
+- `notify` is an explicit call for attention. `Bridge.Notify`
+  (`internal/chat/notice.go`) sends a card to every paired contact whatever
+  the session's state -- the agent asked -- still honouring a contact's
+  mute, the routes' recipients when a rule names some, and quiet hours
+  unless it is an `ask`, as a prompt is. The choices are buttons whose
+  value is `reply:<session>:0:<text>`, and a press types the words into
+  the session through the same paste-and-submit a typed reply gets,
+  without the "it is working" gate: the agent asked, so its state is not a
+  reason to refuse the answer. Twelve characters a choice, four choices,
+  because Telegram's callback data is 64 bytes and the session id rides
+  in it. The page gets a `notice` event on the socket -- a toast with the
+  session's name and its words as detail, and a browser notification
+  through the worker when the page is not in front, opening the session
+  on click as a waiting one does.
+- Sixty says and six notices a minute per session, 429 with Retry-After
+  after: an agent in a loop is the likely caller, and a notice a second is
+  a phone that never stops. Audited with byte counts and not words.
+
+The socket pin (`TestMessageTypesMatchTheClient`) went red the moment the
+server knew `notice` and the page did not, which is the drift it exists
+for. The bridge test presses a choice on a session that is still `working`
+and reads the words in the fake terminal.
+
+## 2026-10-13 — A session's own voice, step 3: send
+
+A file through the same door (`internal/httpapi/attachments.go`): a chart
+the agent drew, a report it wrote. Kept under
+`<data>/sessions/<id>/attachments/`, sixteen megabytes a file, a hundred
+an hour per session, the newest twenty; the name reduced to letters,
+digits, dots and dashes, a second of the same name numbered rather than
+replacing the first because the link already sent still points at it.
+Served to the signed-in owner by the same rule as a plugin process's
+answers: images, audio, video and text inline with `nosniff`, everything
+else -- HTML and SVG included -- as a download under `Content-Security-
+Policy: sandbox`. The phone gets an image as a photo with the caption
+(`Bridge.SendAttachment`, `internal/chat/attach.go`), anything else as a
+card naming the file with the link, which is not a door: the route is
+under the session cookie, and the test presents the session's own token
+there and is refused. The page gets a `notice` with `level: "file"` and
+the url. `vibepanel me send` and `vibepanel session attach` stream the
+file as multipart; `session attachments` lists them.
+
+## 2026-10-13 — The CLI after the audit's hands-on run
+
+An audit of HEAD c50485f (`audit-2026-10/`, eight subagents) and a
+device/UI audit beside it; the two sessions that wrote them are fixing
+their findings on branches, and this entry is the CLI's share, which is
+code of mine.
+
+- **`panel.url` was trusted blindly** (04-F4). A crash leaves the file; a
+  panel that is not running holds no lock; and the CLI sent its
+  never-expiring owner token to whatever bound that port since, then on
+  a 401 minted a fresh one and sent that too. Now the file counts only
+  while the panel holds the data directory's lock -- the lock is the
+  panel's own, taken by `serve` and released at exit, so "held" means
+  "that panel, now" -- the client never follows a redirect with the token
+  on it, and plain http off loopback is refused unless
+  `VIBEPANEL_CLI_INSECURE=1`.
+- **`session restart` printed fields the answer did not carry** -- the
+  panel restarts in place and answers 204 -- so the receipt read
+  `restarted X as  (tmux )`, and `docs/cli.md` said "a new session". The
+  row is read back for the receipt; the doc says in place.
+- **A directory could be added as a project twice**, after which
+  `project order` and `session new --project <name>` had two of the same
+  name to choose between. The panel answers 409 naming the first.
+- **`--data-dir` was refused wherever it went**; `session --help` and
+  `project --help` were refused; `--cols 0` was accepted. The two panel
+  flags are lifted out of the arguments into the environment before any
+  command sees them; every command answers `--help`; a grid is 1-500 by
+  1-200.
+- **`vibepanel doctor` probed the configured loopback port** rather than
+  the data directory's panel, and on a machine with two panels reported
+  every hook token stale. It asks `panel.url` first.
+- `todo`: the panel's pages no longer draw a project's todos; the CLI and
+  the docs now say who reads them (plugins, the chat assistant).
+- **The socket directory under `/tmp` was taken as found** (04-F2):
+  `MkdirAll` accepts an existing directory of any owner and mode and
+  follows a symlink, so on a shared machine another account could
+  pre-create `/tmp/vibepanel-<uid>` and the door would dial a socket it
+  put there, with the per-start secret and the caller's name on every
+  request. `ownedPrivateDir` insists on a real directory, this user's,
+  0700, and the door refuses to start otherwise; the pages root's `/tmp`
+  last resort goes through the same check.
+
+## 2026-10-13 — Fixes from the October audit
+
+The audit in `audit-2026-10/` (eight dimensions, each in its own worktree)
+left a list; these are the ones taken here, one commit each, each with a test
+that goes red when the fix is taken back out.
+
+**Switching a plugin off could take the panel down.** `pluginEventRaised`
+copies the worker set under the lock and sends after letting it go, so it can
+hold a worker that `ensurePluginWorkers` has just retired -- and retiring one
+closed its channel. The send was a panic on the poller's goroutine, with no
+recover on the path: flip a plugin off on the Plugins page while a session
+changes state, and the panel is gone. Reproduced without `-race` in a
+hundred toggles (`TestTogglingAPluginWhileEventsFlowDoesNotPanic`).
+A worker is now retired through a `done` channel and its event channel is
+never closed; a send to a retired one lands in a buffer nobody reads and is
+collected with it. `TestARetiredWorkerCanStillBeSentTo` holds the sender's
+stale copy across a disable and sends to it.
+
+**A plugin's events stopped for good on one failed read.** The event worker
+returned on any error from `PluginByID`, and nothing starts a worker again
+while the plugin stays enabled, so one locked or failing read silenced
+`onEvent` until the panel restarted, with nothing on the Plugins page saying
+so. It now drops that event, logs it, and carries on; a removed plugin's
+worker still stops, through `done`. `TestAnEventWorkerOutlivesAFailedRead`
+makes the plugins table unreadable for one event and expects the next to
+arrive.
+
+**Transactions that read first lost to any concurrent writer.** busy_timeout
+turns a lock collision into a wait, except one: a deferred transaction that
+has read and then tries to write, after another connection committed in
+between, fails with `SQLITE_BUSY_SNAPSHOT` (517) and no busy handler runs.
+Plugin install, plugin caps, adding a plugin or page version and the chat
+handle all read first, and the poller and the hooks are always writing. The
+earlier fixes (`handleMu`, the write-first ordering in `SetSessionState`, the
+WHERE-clause precondition in `SetNoteIfUnchanged`) each closed one path; the
+DSN now says `_txlock=immediate`, so every transaction takes the write lock
+at BEGIN, where the timeout applies. Every transaction in `internal/store`
+writes, so nothing read-only is made to queue.
+`TestAReadThenWriteTransactionWaitsForAWriter` installs a version 1000 times
+beside a tight writer: red in ten runs of ten without the parameter, green
+with it.
+
+**`previewSandbox` was a pinned function nothing called.** Its comment said
+it was the one place the sandbox value was built; `previewCSP` spelled the
+directive out by hand, and the iframe attribute is built on the page by
+`sandboxFor` (`render.ts`). The audit read this as the header being
+unguarded, and that part was wrong: `TestTheRenderedPreviewNeverGetsThePanelsOrigin` checks
+`previewCSP` itself, and adding `allow-same-origin` to the hand-written string
+turned it red. What was true is that the helper the comment pointed at served
+nothing. `previewCSP` now builds its directive from `previewSandbox`, and the
+comment names the page's mirror instead of claiming there is none. A
+refactor: the header is byte-for-byte what it was, which the handler tests
+compare against, and a token added to `previewSandbox` now reaches the
+served header and fails there as well.
+
+**`publicAddr`'s `Unmap` was not pinned.** Deleting it left every test
+green, because the only IPv4-mapped rows in the table were loopback and
+private, and netip's `IsLoopback`/`IsPrivate` unmap on their own.
+`Prefix.Contains` does not, and an IPv4 prefix never contains a mapped
+address, so without the `Unmap` a page source resolving to
+`::ffff:100.64.0.1` (or the benchmark, reserved, test, `0/8` or broadcast
+ranges) passed as public. The table now has the mapped form of each of
+those, and the deletion turns eight rows red. The same pass adds RFC 8215's
+local-use NAT64 prefix, `64:ff9b:1::/48`, which translates to whatever IPv4
+the operator's translator picks.
+
+**The chat tables were never swept.** The migration says none of them
+cascade from sessions and that rows pointing at nothing are swept;
+`SweepSessionMessages` and `SweepChatOutbound` existed, were tested, and
+were called by nothing. `chat_outbound` grew by a row per push per peer for
+as long as a panel ran, and a deleted session left its messages, transcript
+path, status ref and mutes behind. One `SweepChatLeftovers` replaces both,
+in one transaction: sent-message records older than thirty days, and the
+deleted sessions' rows in `session_messages`, `session_transcripts`,
+`chat_status` and `chat_mutes`. It runs on the event log's hourly tick and
+once at startup. `chat_handles` is deliberately not swept: a handle is
+`MAX+1` and promised never to be reused, and deleting the highest row hands
+its number to the next session, so a reply to an old "#7" reaches the wrong
+one -- the first draft of this did exactly that, and
+`TestChatLeftoversAreSweptAndHandlesAreNot` now says so.
+`TestTheEventDrainSweepsChatLeftovers` starts the drain as Poll does and
+goes red with the call removed.
+
+**A tmux listing the panel could not read ended every session** (the audit
+had this as plausible; both halves reproduced). `pollOnce` takes an empty
+list from `List` as every session having died and marks each one vanished
+and done -- `session.gone`, a chat push and a webhook apiece -- and two
+things produced an empty list with no error while the sessions were fine:
+
+- tmux refusing the format, which it does by printing its complaint in place
+  of every line (`parseInfo` already said so). `List` skipped each
+  unparseable line and returned what was left, which was nothing. It now
+  returns the first parse error when tmux said something and none of it was
+  a session. One bad line among good ones is still skipped, and now said
+  once in the log with tmux's text (`TestAnUnreadableLineIsSkippedAndSaidOnce`),
+  since that session is missing from the sidebar until it reads again.
+  `TestAnUnreadableListingDoesNotEndEverySession` swaps in a `tmux` that
+  answers `list-sessions` that way, and checks that the failed tick returns
+  its error and leaves the row exactly as it was.
+- a socket that refuses us. `run` folded every "error connecting" into
+  `ErrNoServer`, and tmux says `error connecting to <socket> (Permission
+  denied)` for a server that is running and that this process may not open.
+  Only "No such file or directory" and "Connection refused" -- nothing
+  there, or a dead server's socket -- mean no server now; everything else is
+  an error with tmux's words in it, which also gives the "File name too
+  long" case its reason back. `Has` had the same fold and told restore a
+  live session was gone. `TestAServerThatRefusesUsIsNotAnEmptyOne` chmods
+  the socket to 0.
+
+**An open plugin stream held a shutdown for its whole budget.**
+`http.Server.Shutdown` waits for every request that is not hijacked and does
+not cancel them; a frame's event stream and a process's streamed answer
+return only when their request context ends. One open frame made `Shutdown`
+run all ten seconds, and the steps after it in `cmdServe` shared that one
+context: `StopPluginProcesses` returned without waiting out the grace,
+leaving process groups behind, and `ArchiveAll`'s last capture of every pane
+-- the reason an orderly restart is lossless -- failed on a dead context.
+`Server.EndStreams` (`streams.go`) closes one channel both loops watch.
+`TestAnOpenEventStreamDoesNotHoldShutdownOpen` and
+`TestAStreamThroughTheDoorDoesNotHoldShutdownOpen` register it with the test
+server's `Shutdown`, as serve must, and go red with either watch removed.
+`stopServing` in `cmd/vibepanel` now does both: it registers `EndStreams`
+with the server, and gives Shutdown, the plugin processes and the last
+capture a budget each. `TestStoppingWithAStreamOpenLeavesTheLaterStepsTheirBudget`
+holds a stream open across it; with the registration removed it takes the
+whole budget, and with one shared context the two later steps run dead.
+
+**Junk at a plugin's inbound door locked out the real sender.** The door is
+open at the router and verifies the signature itself, but the per-plugin
+limit of sixty a minute was counted before verification, so anybody who
+knew the URL could spend the minute on unsigned posts and every real
+delivery got 429 -- GitHub retries a few times and gives up. Failures now
+count per plugin and address (ten a minute, checked before the body is
+read, so a flood still costs only a lookup), and the plugin's limit counts
+only verified deliveries, which are what run `server.js`. The map is keyed
+by address now, so it is pruned of quiet keys past 4096.
+`TestJunkAtTheInboundDoorDoesNotLockOutTheSender` floods from one address
+through a trusted proxy and then delivers from another: 429 before, 200 now.
+
+**A plugin process's children could outlive it and hang its supervisor.**
+The supervisor read stdout to EOF and only then called `Wait`, and EOF
+needs every holder of the pipe gone: a leader that exited while a child it
+started kept running was never seen to exit -- the card said running with
+a dead pid, no restart came, and `WaitDelay` never applied because `Wait`
+was never reached. Output now goes to a writer (`pluginRing`) so `Wait`
+owns the copy and `WaitDelay` bounds it. And the kill after the grace went
+to the leader alone, which is the one that had already obeyed SIGTERM;
+`endProcessGroup` now ends whatever is left in the group once the leader is
+reaped -- SIGKILL at once on a stop, the usual grace after an exit of its
+own. `TestALeaderThatExitsIsSeenToExitThoughItsChildLives` and
+`TestStoppingEndsAChildThatIgnoresTerm` both failed before; removing the
+group kill fails both again.
+
+**A `server.js` could take the panel's memory with it.** The budget is an
+interrupt, and goja checks interrupts between instructions, not inside a
+native call. Measured here: `new Array(2**28).fill(0)` was 8.3 GiB and
+thirty-six seconds with the budget long gone; `[...Array(2**26)]` 2 GiB and
+twenty-two; `'x'.padStart(2**28)` 256 MiB in one call. goja has no
+allocation limit to set, so three layers (`jsguard.go`), none enough alone:
+a prelude wraps the natives that walk or allocate by a number the script
+chose -- `repeat`, `padStart`/`padEnd`, the array methods that iterate a
+length including the iterators spread and for-of use, `Array.from`,
+`Function.prototype.apply` -- and refuses past four million; a panel-wide
+cap of eight runtimes at once, so whatever one call can hold is multiplied
+by a small number; and a heap watch that interrupts a call once the heap has
+grown 256 MiB since it began, which is what stops `s += s` (interruptible,
+but fast enough to reach hundreds of megabytes inside a budget).
+`Array(n)` itself is left alone: it allocates nothing, and wrapping the
+constructor in a Proxy broke `instanceof` in goja. What is left is a native
+that walks a length nothing above checks; the watch bounds those only as far
+as the heap shows between instructions. `TestAServerJSCannotAllocateItsWayPastTheBudget`
+runs fifteen of these against a two-second budget and wants each stopped
+inside one; `TestTheGuardsLeaveOrdinaryCodeAlone` is the other side.
+
+**A page on another port could write as the owner through a redirect.**
+`crossOriginWrite` let `Origin: null` through with "missing", and `decode`
+took any Content-Type. Together: a page on another port of this host posts
+a text/plain form to itself -- field name `{"path":"…","name":"csrf`, value
+`proof"}`, which the browser joins at the `=` into valid JSON -- and answers
+307 to `/api/projects`. The browser follows with the session cookie (another
+port is the same site, so SameSite=Strict sends it) and `Origin: null`,
+which is what a cross-origin redirect leaves. Reproduced in Chromium against
+a throwaway panel: 201, a project created as the owner. The same chain
+reaches plugin install, enable and grants, and so a plugin's `process.command`.
+The audit had it as plausible and medium; it is neither. `null` is now a
+cross-origin write (a sandboxed frame is the only other sender, and nothing
+in one writes through the cookie), the plugin door treats it the same way
+for its cookie, and `decode` wants `application/json`. The refusal for
+`null` has its own words, since "set VIBEPANEL_DOMAIN" cannot help that
+reader. The browser probe now gets 403. `TestAWriteWithANullOriginOrAFormBodyIsRefused`
+tests each lock with the other in place, and `TestTheDoorRefusesTheCookieFromANullOrigin`
+the door.
+
+**The 飞书 door was a padding oracle.** With an encrypt key set, the
+webhook AES-CBC-decrypted the body before checking the signature and
+answered with the reason: `decrypt: bad padding` (400), `body: invalid
+character` (400), `bad signature` (401). That distinguishes a good padding
+from a bad one, which is all a padding oracle needs to open a captured
+event block by block. A signed request is now checked before anything is
+decrypted; an unsigned one is decrypted only to see whether it is the
+handshake (the one thing 飞书 does not sign); every refusal says only its
+status text, and the reason goes to the health line and the log where the
+owner reads it. `TestTheWebhookSaysNothingAboutWhyItRefused` sends a bad
+padding, a good padding over non-JSON and an unsigned event, and wants the
+three answers identical; before, all three differed.
+
+**The pinned toolchain had ten reachable vulnerabilities again.** go1.26.6
+was pinned for five; `govulncheck` found ten more reachable from this code
+(GO-2026-6617, -6613, -6612, -6611, -6610, -6609, -6608, -6607, -6605,
+-6603), mostly net/http's HTTP/2 server, fixed in go1.26.9 and, for the five
+also vendored there, `golang.org/x/net` v0.60.0. Both bumped; govulncheck
+now reports none reachable. Nothing in CI runs it, which is how the gap
+opened between two audits.
+
+**A hook report that changed nothing resent the whole snapshot.** The poller
+compares the snapshot it built with the last one sent and sends nothing when
+they match; `notifyState`, which every hook report calls, did not. Most
+reports repeat the stored state, so each rebuilt the snapshot and sent it to
+every viewer: measured on the running panel at 40 KB/s per viewer of bytes
+identical to what each already had. It makes the same comparison now.
+`TestARepeatedReportDoesNotRebroadcastTheSnapshot` counts the state messages
+a viewer receives: ten from ten unchanged reports before, none now, and a real
+change still arrives.
+
+**The process sampler walked /proc to then answer from its cache.**
+`TreeSampler.Sample` read the whole process table first and only then
+checked whether the last answer was under half a second old -- 7 ms and
+1.8 MB a call measured here, once a second per share link watching a wall,
+to be told nothing had changed. The table is read after the cache says no,
+under the lock so two callers arriving together walk it once.
+`TestACachedAnswerDoesNotWalkProc` counts the walks: eleven samples in one
+window walked it eleven times before (twelve with the walk restored on top),
+once now.
+
+**`last_output_at` was the busiest writer in the database.** Stamped once a
+second per printing session: five commits a second on the running panel,
+measured. Nothing reads it that finely -- the sidebar ranks quietness in
+sixty-second buckets, the archive tick compares it for equality, the idle
+rule counts days, and it is not on the wire. `outputTouchEvery` is fifteen
+seconds now, a quarter of the smallest of those grains.
+`TestOutputIsStampedAtMostEveryFifteenSeconds` sends output two seconds after
+a stamp (not written) and past the interval (written).
+
+**Every hook report rewrote the transcript path.** The path is the same for
+the life of a session and every report carries it; the upsert always set a
+new `updated_at`, so each report was a real write (at least one a second on
+the running panel). The `DO UPDATE` now has a `WHERE` that skips a row whose
+tool and path are unchanged; `updated_at` is read by nothing.
+`TestAnUnchangedTranscriptPathIsNotRewritten` holds the stamp and reports the
+same path again.
+
+**A steady poll tick took the write lock twice per session, and one failure
+ended the tick.** The cwd/command and auto-title UPDATEs ran on every tick,
+on the documented grounds that SQLite elides a write that changes nothing --
+true for the disk, and `TestAnUpdateThatChangesNothingDoesNotWrite` still
+says so -- but each statement still takes the database's one write lock: 122
+every two seconds on the running panel, queued against hooks, the archive
+and every save. Both now compare with the row already in hand. And every
+write in the loop returned out of it, so one "database is locked" left every
+later session that tick unattached and unevaluated; a failed write is now
+logged, the loop carries on, and the first failure is still returned so the
+panel still says it is stale. `TestASteadyPollTakesNoWriteLock` polls while
+another connection holds the lock (4.7 s and an error before, immediate
+now); `TestOneFailedWriteDoesNotEndTheTick` makes the first session's write
+fail and expects the second attached anyway.
+
+**One address could lock everyone out of passkey sign-in.** `login/begin`
+is public and the ceremony store is capped at 4096 so a flood costs a flat
+amount -- which also made it a lockout: 4096 anonymous begins from one
+address, a second of curl, and nobody could sign in with a passkey for the
+three minutes they took to expire. Anonymous ceremonies now count per
+address, sixteen in flight each (429 past that); registration belongs to a
+signed-in account and is not counted; the global cap stays. Filling the
+store now takes 256 addresses. `TestOneAddressCannotTakeEveryPasskeyCeremony`
+floods from one address through a trusted proxy and signs in from another.
+
+**A launch profile's API key, and the webhook URLs, were the credentials a
+copied database still handed over.** Chat tokens, page and plugin secrets,
+the hook token and share links' addresses are sealed under `secrets.key`;
+a profile's secret variables sat in its `env` column as plain JSON, and the
+webhook list (Slack and Discord URLs carry their token in the path) in a
+settings row. `profiles.go` had argued against sealing -- a key beside the
+database is obfuscation -- but that was written on 2026-08-27, and
+`secrets.key` arrived on 2026-09-14 with the opposite conclusion for every
+other credential. Now the store opens the key from the data directory beside
+the database (`sealed.go`), so the panel and the CLI read profiles the same
+way: a secret variable is sealed bound to its profile and name (copied onto
+another row it opens as nothing), a base URL stays readable because the
+settings page shows it back, and the webhook list is sealed whole. Rows from
+before read as they are, and `ResealPlaintext`, run where `Poll` starts, seals
+them; a second run writes nothing. The settings page's line that said
+"stored in plain text" says what is true now, in both languages.
+`TestSecretsInProfilesAndWebhooksAreSealedAtRest`,
+`TestPlaintextFromBeforeIsReadAndThenSealed` and
+`TestStartingThePollerSealsWhatWasStoredInTheClear`.
+
+**Two openers of a database that needed migrating ran each step twice.**
+`migrate` read `user_version` once, outside any transaction, and the CLI
+opens the database as well as the panel now: the second opener re-ran every
+step the first had just committed, and the first `ALTER TABLE ADD COLUMN` it
+repeated failed with "duplicate column". Each step now reads the version in
+its own transaction, which takes the write lock at BEGIN, so one opener
+migrates and the other waits and then reads where it got to.
+`TestOpenersRacingOnAnUpgradeBothMigrate` opens a WAL file at version 0
+six times at once: "duplicate column name" before, clean now. Six openers on
+a file that does not exist yet also race on switching it to WAL, which
+SQLite refuses with SQLITE_BUSY without consulting busy_timeout; that is a
+first start rather than an upgrade, was not changed, and the test seeds the
+file to keep the two apart.
+
+**A viewer that stopped answering pings was kept forever.** The keepalive
+returned on a failed ping and left the socket open; coder/websocket does not
+close on a pong timeout either (v1.8.15, `conn.go`, read to check). A peer
+gone without a FIN -- a laptop lid, a phone off the network -- kept its
+connection, its stream subscriptions and their queues until a write timed
+out, which for an idle terminal is never. A failed ping now closes the
+connection. `TestAViewerThatStopsAnsweringPingsIsClosed` dials with a client
+that reads nothing, so never pongs, then reads: closed now, still open
+before.
+
+**A create the browser gave up on could leave an invisible agent running.**
+`Tmux.Create` runs under the request's context; a client that went away
+while `new-session` was in flight had its tmux client killed after the
+server had already made the session, the handler answered 500, and no row
+was ever written -- an agent running in a session the panel would never
+list. The failed-row path below it already killed the session; the failed-
+create path now does the same (a no-op when tmux made nothing).
+`TestACancelledCreateLeavesNoTmuxSessionBehind` puts a tmux in front that
+makes the session and then waits, and a client that gives up first.
+
+**An exit for a cancelled subscription could end the one that replaced
+it.** Unsubscribing cancels a stream's context and then closes its channel;
+the pump's `select` picks between the two at random, and on the channel it
+sent `exit` with the old ref. The page matched `exit` and `dropped` by
+session id alone, so a remount that had already resubscribed the same
+session drew it as exited while it ran. Not reproduced end to end -- the
+window is one select -- so each side is pinned on the state that decides it:
+`endOfStream` sends nothing once the stream's context is done
+(`TestAnUnsubscribedStreamEndsWithoutAnExit`), and the page ignores an end
+of stream whose ref is not the open stream's ("a stale end of stream" in
+`socket.test.ts`; a message without a ref is believed, as before).
+
+**An ending plugin process could take the next one's token and socket with
+it.** It closed `done` first -- which is what a restart waits on -- and then
+deleted every token of its plugin and, deferred to its return, removed the
+socket path. A restart quick enough could mint the next process's token and
+bind its socket in between: every API call from the new process 401, and
+its mount dead. It now deletes its own token by hash
+(`DeletePluginToken`), removes its socket, and only then closes `done`.
+`TestAnEndingProcessDeletesOnlyItsOwnToken` puts a second token row for the
+plugin beside the running process's and stops it: the other row was deleted
+before and survives now. The ordering itself is a window too narrow to test
+reliably and is held by the code.
+
+**A stop during a plugin process's start did not stop it.** `stopPluginProc`
+reaches what is recorded -- the previous run's cancel and its closed `done`
+-- so a stop that landed in the checkout, the token mint or the PATH lookup
+returned at once, and the start went on to run the process: alive until it
+exited on its own, behind a record that said stopped, and a candidate for a
+second copy on the next reconcile. The start now asks before `Start` and
+again once the run is recorded. `TestAStopDuringStartStopsTheProcess` holds
+the start in the PATH lookup, stops, and lets it go: the process ran on
+before; now it is never started.
+
+**A plugin's restart backoff never started over.** It doubled on every
+failure up to a minute and was reset only by a manual restart, so a plugin
+that crashed a few times while being installed and then ran for weeks waited
+the full minute after its next isolated crash. A run that lasted longer than
+the failure window -- the same ten minutes after which the cap forgets a
+failure -- now resets it. `TestALongRunStartsTheBackoffOver` makes every run
+"long" and reads the restart lines: 20, 40, 80 ms before; 20 ms each now.
+
+**A tmux that stopped answering held the poller for good.** Every tmux call
+in a tick ran on the service context, which has no deadline. One
+`list-sessions` that never returned -- a server stuck in a hook, stopped,
+swapped out -- held the tick and the archive, idle and trim tickers on the
+same goroutine, and nothing said so, since only an error marks the panel
+stale. The list, and each session's latched-bell read and attach setup, now
+have five seconds each (`pollTmuxBudget`); the attached client itself is
+`exec.Command` and not tied to it. `TestAStuckTmuxDoesNotHoldThePollForever`
+puts a tmux in front whose `list-sessions` sleeps: the tick returns an error
+now, and with the list's deadline taken away it was still waiting five
+seconds later.
+
+**A 飞书 test assumed Run had reported by the time it held the sink.**
+`TestTokenIsCachedUntilItExpiresAndRefreshedWhenRefused` failed once beside
+render-check with "oks=1" -- zero when compared, one by the time the message
+was built. `r.run` waits for `Run` to hold the sink, and `Run` holds it
+before it reads the token and reports. A test's timing, not the adapter's:
+reproduced every time by a 20 ms pause between those two lines of `Run`,
+and the test now waits up to two seconds for the report, which passes with
+that pause in place.
+
+## 2026-10-13 — The UI and device audit, batch 1
+
+Seven auditors drove the built binary in Chromium, Firefox and WebKit 26.5
+(the Linux build, in the playwright docker image) across phones, tablets,
+widths from 320 to 2560, both themes and both languages, plus four people
+acted out end to end without reading the source. This batch is the part
+that lost words or showed something untrue.
+
+**A send that did not leave kept its words.** `PanelSocket.write` and
+`pasteText` returned nothing, and gave up silently when the socket was not
+open; the compose box cleared after every send regardless. On a Pixel 7
+taken offline, `echo OFFLINE_MARK_1` was typed, sent, gone from the box, and
+in no pane after the reconnect. Both now return whether anything went; the
+box keeps the text on false and says it was not connected. It does not
+resend on reconnect -- a command typed a minute ago may no longer be the
+one to run, so that is the person's call. `socket.test.ts` pins the return
+for every non-open state; render-check takes the network away at phone
+width and reads the box and the notice.
+
+**A lost connection says so.** The only sign used to be the 6px dot at the
+end of the header going hollow. The session states, the terminal and the
+compose box went on looking live; on a phone the open drawer covered the
+dot; and the token block printed the browser's own "Failed to fetch" into
+the Chinese panel. Three seconds after the socket leaves `open` -- long
+enough that a laptop waking does not flash it -- a strip under the header
+says the panel is not connected and that what is shown is the last known
+state; the session list and the terminal are drawn faded and without colour;
+Send is off (typing a draft is not); and the phone drawer carries the same
+strip. The clock is not restarted by the closed/connecting alternation of
+the retries, or a panel that stayed down would never say so. A request that
+never reached the panel is a `NetworkError` with the panel's own sentence.
+`disconnected.test.ts` pins the grace both ways and the error's words;
+render-check takes the network away at 1280 and 390 and reads the strip, the
+two faded regions, the drawer, and the strip gone after reconnect.
+
+**The bundle is sent compressed.** `internal/webui` served the frontend byte for byte: the main chunk is 1.35 MB
+and a phone on 3G sat on the spinner for about 29 s, with `Accept-Encoding:
+gzip, br` answered by an identical body and no `Content-Encoding`. Vite is not
+asked to precompress, so the handler does it: gzip (level 9, standard library,
+no cgo, no brotli because nothing pure-Go is in `go.mod`) once per file on
+first request, kept in memory and keyed by size and mtime so a rebuilt
+`--static-dir` replaces it. Only js, css, html, svg, json, webmanifest, map,
+txt and wasm; PNG and the like are left alone. Every compressible answer
+carries `Vary: Accept-Encoding`, the gzip form has its own ETag and an explicit
+`Content-Length` (ServeContent omits it once `Content-Encoding` is set), and it
+still goes through ServeContent so HEAD, Range and `If-None-Match` work. Cache
+headers and the SPA fallback are unchanged. `TestBundleIsServedGzippedWhenAccepted`
+and `TestAnImageIsNeverCompressed`; the first goes red with the gzip branch
+removed.
+
+**A wall drew a crashed build as a green check.** A share page made from `wall` showed a `sh -c "exit 2"` session as done: a
+check, counted in the done total, "working → done" in the recent changes, and
+a small grey "exited". The panel itself draws that session as a cross.
+
+The snapshot was not at fault. The state enum has three values and no
+"crashed" (red line 3), so a process that exits non-zero keeps the state it
+died in, and what says it died is `exited` plus `exitStatus` on the row and
+`counts.crashed`, all of which were already on the wire. The templates drew from
+`state` alone. `wall` and `glance` now derive a fifth thing to draw, crashed
+(`exited` and a status that is neither 0 nor the vanished marker -1), with a
+cross and a red of its own, a count of its own taken out of the state it died
+in, a group on `glance`, a place ahead of working on `wall`, and the feed's move
+into the crashed session's current state reads "→ crashed". A clean exit and a
+vanished session stay as they were: nobody watched either one fail.
+
+No contract changed, so nothing in `docs/share-pages.md` or the SDK typings
+moved. `counts.done` still includes crashed sessions, as it always did; the
+templates subtract. A page that wants the old number has it.
+
+Pinned by `TestASessionThatExitedNonZeroReachesTheSnapshotAsCrashed` (the two
+fields a wall depends on arrive, and only for a non-zero status) and, for the
+templates, `pages-check`, which now fails if `wall` or `glance` against the
+`busy` fixture, which has crashed rows, shows no cross and no word "crashed".
+
+**A short phone keeps its terminal.** The compose box and two rows of keys
+were 105-153px whatever the screen. In landscape, or with the keyboard up,
+the terminal on an iPhone SE, an iPhone 13 and a 320 Android came out 0px
+tall; and nothing read `visualViewport`, so on iOS -- which does not shrink
+the layout for its keyboard -- the box and the keys could sit underneath it.
+Now `useViewportFit` sizes `#root` to the visual viewport in the narrow layout
+(not on a pinch-zoom, which also shrinks it), `interactive-widget=
+resizes-content` asks Chrome on Android for the same, and the keys give way
+first: one row below 500px visible or with a keyboard up, none below 320. The
+terminal keeps a floor of 5.5rem. `viewport.test.ts` pins the rule with the
+audit's heights, including iOS's tall-layout-short-viewport case Chromium
+cannot reproduce; render-check measures the terminal and the rows at four
+sizes and that the page does not grow past the screen.
+
+**Enter on Cancel cancels.** A destructive confirmation started with the
+focus on Cancel and answered Enter with "yes" from anywhere: the handler
+called `preventDefault` to swallow the focused button's own click, so the two
+rules would not contradict each other. Together they meant that tabbing to
+the highlighted Cancel and pressing Enter killed the session, in Chromium,
+Firefox and WebKit. A destructive question now leaves Enter to the focused
+button, as every platform does; Enter in its field still answers. A question
+that destroys nothing -- naming a passkey -- keeps Enter-confirms-from-
+anywhere. render-check presses Enter on the focused Cancel when removing a
+project and reads that the project survived, then focuses the destructive
+button and confirms with Enter.
+
+**The dev server connects.** `PanelSocket.close()` set `closed` and nothing
+reset it. App keeps one socket in a `useMemo` and connects it in an effect,
+and StrictMode in development runs effect, cleanup, effect -- so the second
+`connect()` returned at once and under `npm run dev` the panel never
+connected. Found by the other half of this audit (`audit-2026-10/05`, F1).
+`connect()` after `close()` now opens again and listens for the network
+again; `close()` cancels a scheduled retry, which would otherwise have
+reopened a socket somebody closed; and each socket's handlers check that it
+is still the current one, so a closed socket's late `onclose` cannot mark
+its replacement closed. Three cases in `socket.test.ts`, each red with its
+guard removed.
+
+**A session started from the picker is the one shown.** It was selected only
+when a page handed over a prompt, so starting a shell or an agent from the
+picker added a row and left you on the session you were in -- on the iPad and
+on the laptop in the hands-on run. It is selected now, and held: a snapshot
+taken before the create can still arrive after the reply to it, and
+`nextSelection` would have sent the selection back to whatever sorted first,
+so the new id is kept as `wanted` until a snapshot carries it. The selected
+row says so with `aria-current`, which is also what render-check reads after
+picking Shell; `App.test.ts` covers the stale snapshot and a scratch id.
+
+**An input method's Enter chooses a candidate everywhere.** Seven handlers
+read `key === 'Enter'` alone -- the sidebar's rename, the API token name,
+plugins (add a directory, a new plugin, mint a token), a plugin's settings,
+chat peers' rename, sharing's two forms, the page preview's publish -- so the
+Enter that picks a word in a Chinese input method submitted what was
+half-typed. Measured on the rename, which saved a name with a pinyin
+syllable in it, and on the token form, which minted one. Three places had
+the guard, each written by hand. Now one `isEnter` (`isComposing` or
+keyCode 229 is not a submit) used at all ten, and `enter.test.ts` scans the
+source for an event's bare `.key === 'Enter'` so the next form cannot
+reintroduce it.
+
+## 2026-10-13 — The UI and device audit, batch 2
+
+**A tablet tier, and the side panel reachable on a phone.** From 768 up
+there was one layout, the desktop's three columns: on an iPad mini or Air in
+portrait and in Slide Over the terminal was left about 215px, narrower than
+on the phone, and the header's trailing controls were cut off. Between 768
+and 1100 (`COMPACT_QUERY`) the side panel is now a sheet over the terminal,
+opened and closed by the same header toggle, per visit and starting closed;
+at 820 the terminal went from 215 to 548px. The phone had no way to the side
+panel or the bottom strip at all -- files, notes, git, the monitor and tokens
+did not exist there -- and its drawer now opens either as a full-screen
+sheet, closed by the panel's own collapse control. One mechanism, three
+placements: `RightPanel`'s `column`, `sheet` and `fill`, and
+`BottomTerminals`' `fill`.
+
+On any touch screen, not only the phone's drawer, a session row's pin and
+kill are drawn on the selected row only, and a project's archive and remove
+are in one menu: with every 44px control drawn on every row, an iPad's names
+came out "vib…", "dot…" and "pag…" in portrait and in landscape at 1194. The
+menu also takes the destructive remove out from under a thumb next to
+archive. render-check measures the terminal and the sheet at 900 and opens
+both sheets from the phone's drawer; archive-check reaches archive through
+the menu when there is one.
+
+**The keyboard can choose a session, and leave a terminal.** A session row
+was a `div` with a click handler and nothing else: no keyboard could reach,
+choose or rename a session, and the six pin and kill buttons were all called
+"Pin" and "Kill session" to a screen reader. Inside a terminal Tab is the
+terminal's, rightly, so a keyboard that got there stayed there. The hands-on
+run tried Alt+arrows and Ctrl+K as panel keys and they arrived in the agent
+as `^[[1;3B^K` -- which is correct: Alt+arrow is a word jump in a shell and
+Ctrl+K kills to the end of the line, so neither can be taken. The panel's
+keys are Ctrl+Shift with an arrow, which no shell or agent here binds:
+up and down switch session in sidebar order from anywhere, terminal included
+(xterm lets them past), and left leaves the terminal for the session list,
+opening the drawer on a phone. A row takes the focus; Enter or Space chooses,
+F2 renames, the arrows move; pin and kill carry the session's name.
+`shortcuts.test.ts` pins the keys and that Alt+arrow, Ctrl+K and Tab stay the
+terminal's; render-check drives the whole round from inside a real terminal.
+
+**A dialog keeps the keyboard inside it and gives it back.** None of the
+modals trapped focus or returned it: Tab left Settings for the page behind it
+(the directory picker let go on the fifth press), closing left the focus on
+`<body>`, and Escape did nothing while the focus was in Settings' body because
+that handler deferred to any control there. The confirmation and the token view
+had no dialog role. One hook, `components/useDialogFocus.ts`, now records the
+opener while rendering (an `autoFocus` has already moved the focus by the time
+an effect runs), moves focus in only when nothing inside has it, wraps Tab and
+Shift+Tab over the tabbable elements, closes on Escape for the topmost dialog
+only (a module-level stack, so a confirmation raised over Settings does not
+close both), and on unmount restores focus only if it is on the body or inside
+the dying dialog. A click somewhere else after asking to close wins. The pure
+rules are in `dialogFocus.ts` with `dialogFocus.test.ts`; render-check's
+`dialog-focus` step presses Tab 30 times each way in Settings and the picker,
+Escape from inside the body, and asserts the focus is back on the opener.
+Removing the wrap or the restore turns both red. A control that needs Escape
+for itself calls `preventDefault`, which the hook honours.
+
+**Forced colours.** There was no `@media (forced-colors: active)` rule, and
+"chosen" here is carried by a background: the selected session row, the active
+tab, a meter's fill. Windows High Contrast replaces every background with
+Canvas, so the row you are on matched its neighbours and a bar was an empty
+outline. The block names each: an outline on `[aria-current='true']` and on a
+selected tab, a border on `.vp-primary` buttons, an outline around `.vp-bar`
+with `Highlight` for what fills it (and a Canvas gap between the spend mix's
+segments), and `CanvasText` for sparkline strokes. System colours only. Checked
+once in Chromium with `forcedColors: 'active'` on the real rules; pinned in
+`styles.test.ts`, red with the block's media query renamed.
+
+**Contrast.** The light theme's tertiary ink was 2.85-3.0:1 and carried about
+180 pieces of text; the comment beside it said 3.0 as if that were a pass. It
+is 0.75 alpha now (and secondary 0.86 to stay above it), dark tertiary 0.53,
+the light accent `#0062cc`, and the dark accent `#2e90ff` with black ink on it
+(white on the old one was 3.65). `contrast.test.ts` computes WCAG ratios from
+the declarations in all three blocks that hold them, against all three
+surfaces, so a token cannot slide back; red with the old ink-3 alphas and with
+the old accent. Dark secondary was already 6.9.
+
+**Tabs.** `.vp-segmented > .vp-tab` was `flex: 1 1 0; min-width: 0`, so a strip
+with more in it than its row shrank each tab below its label: "Alerts" ran into
+the next icon at 1440px, and at 320px the chat strip and the settings rail
+clipped with nothing saying there was more. A tab sizes to its content now, a
+strip scrolls, and edge shadows (`local`/`scroll` background layers, no
+JavaScript) show which side has more. `chat-check` measures chat and settings
+tabs in four language/width corners (`lib/tabs.mjs`: content fits, nothing
+sticks out, neighbours do not overlap, every tab can be scrolled into view);
+the old rule fails three of them.
+
+**Settings uses its own width.** The rail answered to `sm:`, the window, while
+the dialog is at most 48rem. It is a `@container` and the rail uses `@xl:`.
+`container-queries.test.ts` forbids viewport breakpoints in `Settings.tsx` and
+`settings/`; red against the old file.
+
+**Untranslated strings.** The sign-in refusals reached the page as English
+prose. The server now sends a stable `code` beside the sentence for the
+sign-in and password refusals (`bad_credentials`, `too_many_attempts` with a
+`retryAfter`, `busy`, `bad_setup_token`, `already_configured`,
+`wrong_current_password`, `same_password`) and the page translates the code
+(`errorText`); it never matches prose. The built-in page templates' labels
+live in manifests that hold one English string, so `pages/labels.ts` maps
+exactly those to the dictionary, and a test fails when a template gains a
+label without one. The selection bar, the sidebar's Close/Collapse tooltip,
+the rename tooltip and the compose Enter toggle were English under a Chinese
+UI; the last was found by the new rule, which looks at literals inside a
+conditional `title`. Validation messages from `auth.ValidateCredentials`
+(too short, too long) still go through as the server's sentence.
+`TestAuthRefusalsCarryTheirCode` pins the wire.
+
+**The drawer arrives.** The phone's project drawer was on screen the next
+frame with its scrim popping in. `.vp-drawer-in` slides it from the left for
+220ms on the shared curve and the scrim takes the backdrop's fade; it is an
+entrance only (the drawer unmounts to close) and the global reduced-motion
+rule collapses it to the open state. render-check samples the drawer from the
+menu button frame by frame: first frame off-screen, last at the edge, scrim
+starting transparent, and already open under reduced motion. Each of the
+drawer and the scrim fails with its class removed.
+
+**One Escape closes one dialog.** archive-check caught the dialog-focus change
+closing two: Escape on the archived list's "delete this?" closed the list as
+well. The hook answers Escape from the document; the archived list, which
+keeps its own handler on the window, heard the same press afterwards, and by
+then the confirmation had already left the page, so its "is a question up?"
+guard found nothing. An Escape a dialog has answered now stops there.
+archive-check is the test: it goes red with the `stopPropagation` removed.
+
+**The panel's keys leave a text field alone.** Review caught the
+Ctrl+Shift+arrow listener taking keys that belong to the field the person is
+typing in: Ctrl+Shift+Left and Right select by word in every input and
+textarea, Up and Down by paragraph in some, and the window listener
+preventDefault-ed them and jumped to the sidebar from the notes, a settings
+field, the chat rules or the phone's compose box. `editsText` hands them back
+to any input, textarea or contenteditable -- except xterm's helper textarea,
+which is where a terminal's keyboard focus sits and is the place these keys
+exist for. The listener is also added once now, reading the current handler
+through a ref instead of being re-added on every render. `shortcuts.test.ts`
+covers a textarea, text and search inputs and contenteditable (the field's)
+against the xterm textarea, a button and a checkbox (the panel's); each half
+goes red with its guard removed.
+
+## 2026-10-13 — The release runner needs more than ten minutes a package
+
+v1.29.0's first build died in `internal/httpapi` with `panic: test timed
+out after 10m0s`, one test running and one second into it: the package as a
+whole had crossed go's default per-package budget, not any one test. It took
+500 s on the same runner at v1.28.0 (two cores, `-race`; about two minutes
+here), and the October audit's tests -- fourteen test files, a thousand
+lines -- added the rest. `make test` passes `-timeout 30m` now. That is a
+ceiling for a hung test and not an answer: the two heaviest additions
+(`TestOneFailedWriteDoesNotEndTheTick`, `TestAPassthroughTitleDoesNotStompAManualRename`,
+about nine seconds each here) are the ones to make cheaper next.
+
+## 2026-10-13 — The October audit's refactors
+
+The structural items the audit left for after v1.29.0. Behaviour does not
+change in any of them; each is pinned by a test that walks what it covers.
+
+**The allowlist is asked in one place.** `--allow-from` is enforced per
+route, and it was thirteen hand-copied blocks -- the first finding of the
+first audit was a capability route that forgot one. Three helpers in
+`auth.go` now: `addressAllowed` (the question), `refuseAddress` (audit row
+and 403) and `refuseAddressQuietly` (403 only, for the four callers that
+never wrote a row: a page's files, a plugin frame's page, sign-in, the
+plugin door). `RequireAuth` calls `refuseBlockedWrite` instead of being a
+second copy of it. `TestEveryRouteRefusesAnAddressOffTheAllowlist` walks the
+router from an address off the list and wants 403 from every route except
+`beyondTheAllowlist`, which says why for each: probes, the doors agents in
+sessions use from loopback, callbacks that verify themselves, the SPA
+bundle, and three recorded as they are rather than endorsed -- passkey
+sign-in (audit 04-F7) and setup before the first account, neither of which
+asks the allowlist.
+
+**Migrations have names, and their history is a list a merge conflicts on.**
+Steps are still applied by position (`schemaVersion = len(migrations)`,
+`user_version` after a step is its position); what changed is that each is
+`{name, up}` with the name `NNN-what-it-does`, the number being that
+position, and `migrate` names the step that failed. Positional numbering is
+why two branches that each append a step collide -- it happened on
+2026-09-16 -- and `TestMigrationNamesAreAppendOnly` lists every name in
+order, so the second branch now meets a conflict in that list at merge
+instead of quietly renumbering a step some database may already have run.
+The comment labels had drifted: v25 to v30 were labelled one higher than
+their position (drop-idx-sessions-state said "v26"), which is the same
+collision's leftover; they match now, and the type's comment says so for
+whoever reads the build log's older entries. No step's body changed.
+
+**Setup did not ask the allowlist.** The walk above listed it as one of the
+routes reachable off `--allow-from`, and it was the one that mattered: on a
+panel started with an allowlist and no account yet, anybody outside it who
+held the setup token -- printed to a terminal and to a unit's journal --
+could make the first account. `handleSetup` now refuses an address off the
+list before the throttle, with the same audit row as every other refusal,
+and it comes off `beyondTheAllowlist`. `TestSetupIsRefusedToAnAddressOffTheAllowlist`
+posts the right token from loopback to a panel that allows only
+203.0.113.0/24: 201 and an account before, 403 and a `blocked` row now.
+
+## 2026-10-13 — The UI and device audit, batch 3
+
+**Two console messages on every share page.** Chromium logged
+"Unrecognized feature: 'bluetooth'" on every share page, plugin frame and
+admin page: the Permissions-Policy named a feature it does not know. Firefox
+logged a Content-Security-Policy error on every load of a wall: a page with no
+icon makes the browser ask for `/favicon.ico` at the panel's root, and the
+page's own `img-src` refuses it. `bluetooth` is gone from the header (Web
+Bluetooth asks the person first, from an opaque origin), and
+`TestThePermissionsPolicyNamesOnlyKnownFeatures` holds the header to names
+Chromium recognises. Every built-in template declares an empty `data:` icon,
+which `img-src` already allows, and `TestEveryTemplatePageDeclaresItsIcon`
+covers every template page. A page somebody writes from scratch still gets
+the Firefox message until it names an icon; it is harmless, and the panel
+does not edit an owner's HTML.
+
+**Pinch zoom works.** The viewport said `maximum-scale=1.0, user-scalable=no`.
+iOS has ignored that since iOS 10; Android honoured it, so somebody who
+needed a phone's terminal text larger could not have it. It stood against two
+things, each handled where it belongs now: iOS zooming into a small focused
+field (every field is 16px under a coarse pointer, and render-check measures
+it) and a double-tap on a key read as zoom (`touch-action: manipulation` on
+the root, which keeps pinch). `useViewportFit` already ignores a pinch-zoomed
+visual viewport, so zooming does not shrink the app. `zoom.test.ts`.
+
+**A browser that cannot run the panel is told so.** The boot dot spun
+forever: in a browser older than Safari 16.4, Chrome 111 or Firefox 128 the
+stylesheet's container queries and `color-mix` are dropped and the layout
+falls apart rather than degrading, and without ES modules nothing runs; a
+bundle that failed to load or parse looked exactly the same. A classic
+script in `index.html`, which every browser runs, checks container queries,
+`color-mix` and module support and, if any is missing, says in place of the
+dot that the browser is too old and which versions work, in the browser's
+language; `main.tsx` then does not start the app over it. With support
+present, a script error before the app has drawn anything replaces the dot
+with "the panel did not start" and a reload button; once the app is on
+screen it does nothing. A `<noscript>` line for the rest. render-check opens
+the panel once with container queries denied and once with the bundle
+replaced by something that does not parse, and reads both messages; with
+the script removed both cases go silent and the app draws over an engine
+that cannot lay it out.
 
 ## 2026-10-15 — Keep terminal resizes in the output stream's order
 
@@ -25143,3 +27094,98 @@ not trimmed). The engine was read against the plan: it never writes to the
 xterm buffer, resets on any non-printable input, and only displays after a
 silent confirmation within five seconds, so a password prompt reached by
 Enter starts silent.
+
+## 2026-10-16 — Merge upstream v1.29.1 without renumbering deployed databases
+
+Merged upstream `29f458f` (v1.29.1) into Pantheon `ffa2574`. The command,
+route and wire definitions are the union: plugins and the session's `me`
+commands join Home, boards, workflows, resources, runs and rollover. The
+toolchain is upstream's go1.26.9, with golang.org/x/net v0.60.0. Plugins keep
+their upstream entry points and the default-off unsandboxed switch. Pantheon's
+compile-time refusal of upstream self-update is unchanged; the new CLI and
+plugin paths introduce no call to the panel installer.
+
+Migration positions 031–037 remain Pantheon's project boards, workflow, Home,
+Home threads, Home resources, Home runs and session archive note, in that
+order: the deployed databases are already at 37. Upstream 031–035 map to
+Pantheon 038–042: plugins, plugin frames, plugin tokens, plugin access tokens,
+and session self-description. Their bodies are unchanged. Both the named
+migration list and its append-only history pin this order. Future upstream
+steps append after the fork's steps and are renumbered; released positions
+are never inserted or reordered. Earlier upstream entries above retain their
+historical numbers.
+
+Opening a database at 31–37 now checks for `project_boards` inside the migration
+transaction before applying anything. Pantheon creates that table at 31;
+upstream does not. Its absence refuses the open with an explanation of the
+numbering collision and the need for a separate data directory or a Pantheon
+backup. Tests build the deployed 37-step schema, preserve a session, its archive
+note and a project-board row through 42, and check the new self-description
+defaults. Separate fixtures exercise upstream numbering at every version from
+31 through 37 and prove that refusal changes neither the schema nor its version.
+Session reads and writes carry archive notes alongside summary, progress and
+labels; a new session's create reply now agrees with the stored defaults.
+Saved built-in profile overrides still win over the catalogue, with upstream's
+secret sealing on the same read and write paths. Stale Home messages are still
+reconciled on open.
+
+The terminal retains Pantheon's ordered resize queue, fullscreen gutter and
+paging control, latency chip and local echo, plus upstream's scaled-pointer,
+wheel-per-row, private-mode replay, IME and restore fixes. Home stays beside the
+sidebar's Projects heading. Application pages, including the new plugin pages,
+remain lazy loaded. The API request helper keeps both mounted requests and
+upstream's translated network errors.
+
+Plugin navigation, exports, frame URLs, module imports, theme refreshes and
+notification icons use the mount. The server's plugin grant, CSP, module and
+process URLs include it too, as do the CLI address file, session hook URL and
+new attachment links. The plugin SDK carries the frame's prefix into both
+fetch and EventSource requests. Tests cover root, `/dev` and a nested mount.
+Upstream's per-handler gzip cache handles ordinary files; rewritten mounted
+HTML and manifests bypass it. A regression test warms the original gzip cache
+first and then checks the mounted index, SPA fallback and manifest.
+
+The existing development planning gate still refuses plugin administration;
+this merge does not widen that host-administration policy or add a plugin
+switch. The mounted-handler test checks URL plumbing independently and also
+pins that refusal. Existing share-page preview URLs and share/admin redirects
+and CSP still contain root-relative paths, so those are remaining `/dev`
+limitations. Arbitrary plugin-authored URLs are not rewritten; plugins must use
+the SDK and the process mount/prefix supplied by the panel.
+
+Validation used one check at a time, `nice -n 19`,
+`GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1
+GOMEMLIMIT=600MiB`, with temporary data under this worktree. `go build ./...`
+and `go vet ./internal/store ./internal/webui` passed. Package tests used
+`go test -json ./internal/<package>`: store 140, config 46, webui 9,
+selfupdate 13, tmux 40, parthenon 14, chat 101, chat/feishu 29, secret 2,
+plugins 35 and session 150 top-level tests passed. Session's theme test was
+skipped because tmux 3.4 lacks `client_theme`.
+
+The focused HTTP command was `go test -json ./internal/httpapi -run
+'Update|Elevate|Share|TypeScript|Route|Home|Board|Workflow|Profile|Plugin|BasePath|Mount|Module|Frame|Grant|Door|Capability|ASession(Says|Token|Sends)|RepeatedReport|OutputIsStamped'`:
+136 passed, with the real-sudo container test skipped. The first run found the
+new mounted-plugin test asking a development instance to administer plugins;
+the corrected fixture and the full focused rerun passed. The CLI command was
+`go test -json ./cmd/vibepanel -run 'Service|Plan|Upgrade|Me|CLI|Command|Plugin'`:
+22 passed. Across the final Go runs, 737 top-level tests passed, none failed,
+and two were skipped. The existing tests used disposable listeners and named
+tmux sockets; no installed panel or service was operated.
+
+Frontend dependencies were absent from this worktree. With automatic package
+installation and network access disabled, both `NODE_OPTIONS=--max-old-space-size=900
+nice -n 19 npx tsc -b` and `NODE_OPTIONS=--max-old-space-size=900 nice -n 19
+npx vitest run --pool=forks --maxWorkers=1` exited before starting, with
+`ENOTCACHED`; no frontend test files or tests ran. Dependency installation was
+prohibited, and provisioning was requested from the Conductor. TypeScript and
+the full Vitest suite remain required after provisioning.
+
+The embedded `internal/webui/dist` is exactly `ffa2574`, including removal of
+upstream-only assets. It is intentionally stale relative to the merged source.
+Browser checks, the bundle rebuild and a migration of a production-copy
+database were not run; the Conductor performs those after review. There was no
+Git fetch, push or deployment.
+
+All conflict resolutions are staged. The merge is not committed yet: the task
+requires the tree to compile before a merge commit, and the missing frontend
+dependencies prevent the required TypeScript check.

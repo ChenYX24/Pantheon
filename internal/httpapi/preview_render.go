@@ -40,8 +40,10 @@ import (
 //     unreadable. allow-same-origin is never emitted, in either direction --
 //     with allow-scripts beside it the frame could reach into the parent
 //     document and the whole thing would be theatre. previewSandbox is the only
-//     place the value is built, and a test asserts the two never appear
-//     together. What it does not buy: it does not stop the document *drawing*
+//     place the server builds the value -- previewCSP's directive is made from
+//     it -- and sandboxFor in web/src/components/panels/render.ts is the
+//     attribute's mirror on the page; a test on each side asserts the two
+//     tokens never appear together. What it does not buy: it does not stop the document *drawing*
 //     anything it likes, and it does not stop a click inside it navigating the
 //     frame.
 //
@@ -86,12 +88,14 @@ import (
 //   - Exploit the renderer. A sandbox is not a chroot. Out of scope here in the
 //     same way it is out of scope for every other page the browser loads.
 
-// previewSandbox is the iframe sandbox attribute, and the CSP sandbox directive
-// is built from the same answer.
+// previewSandbox is the CSP sandbox directive's tokens, and the answer the
+// page's iframe attribute (sandboxFor, render.ts) mirrors.
 //
-// One function so the two can never disagree, and so the property that matters
-// -- allow-same-origin is not in it -- is testable rather than spread over a
-// component and a handler.
+// It was written as the one place both were built and then nothing called it:
+// previewCSP spelled the directive out by hand, so the function a test pinned
+// was not the one serving the header. previewCSP builds from it now, which is
+// what makes the property that matters -- allow-same-origin is not in it --
+// a property of the response and not of a helper.
 //
 // The tokens deliberately absent, each of which somebody will suggest adding:
 // allow-same-origin (hands over the panel's origin), allow-popups and
@@ -123,10 +127,13 @@ func previewCSP(scripts bool) string {
 		"font-src data:; style-src 'unsafe-inline'; base-uri 'none'; " +
 		"form-action 'none'; frame-ancestors 'self'"
 	if scripts {
-		policy += "; script-src 'unsafe-inline'; sandbox allow-scripts"
-		return policy
+		policy += "; script-src 'unsafe-inline'"
 	}
-	return policy + "; sandbox"
+	policy += "; sandbox"
+	if tokens := previewSandbox(scripts); tokens != "" {
+		policy += " " + tokens
+	}
+	return policy
 }
 
 // handleRenderPreview serves one markup file as a document, isolated.

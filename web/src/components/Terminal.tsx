@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { attachTouchSelection, wheelReport, WHEEL_NOTCH_ROWS } from './mobile/touchSelect'
+import { panelShortcut } from './shortcuts'
+import { attachTouchSelection, cellAt, wheelReport, WHEEL_NOTCH_ROWS } from './mobile/touchSelect'
+import { wheelReports } from './wheel'
+import { sgrMouseReport, wantsReport } from './mouseReport'
 import { iosInputText, shouldBypassXtermKeydown } from './iosInput'
 import { liveTerminals } from './terminals'
 import { copyText, copyTextInGesture } from '../clipboard'
@@ -294,6 +297,9 @@ export function TerminalView({
       // `\x16` instead is what made an agent go looking for an X11 clipboard
       // on the panel host.
       if (isBrowserPaste(e)) return false
+      // The panel's own keys go past the terminal to the window, where App
+      // acts on them; see shortcuts.ts for why these and not others.
+      if (panelShortcut(e)) return false
       // ctrl+C, only with something selected. Anything else is the interrupt,
       // and the interrupt is not negotiable: it is how a runaway agent gets
       // stopped, and the person pressing it is usually in a hurry.
@@ -400,6 +406,115 @@ export function TerminalView({
       hidden: hiddenRef.current,
     }))
     resetEchoRef.current = localEcho.reset
+
+    // The pointer, for an application that asked for the mouse, while this
+    // viewer is scaled.
+    //
+    // mouseReport.ts has the measurement: at 0.69 scale xterm reported a click
+    // on column 40 as column 28, because it divides by the cell size it
+    // rendered at and the transform is applied after. Only while scaled, and
+    // only for the SGR encoding; everywhere else xterm's own reports are
+    // right and this stays out of the way. Capture on the host runs before
+    // xterm's listener on its element, and stopping the event there is what
+    // keeps xterm from sending a second, wrong report. xterm would have
+    // focused the terminal on that mousedown, so this does too.
+    // Whether the application is tracking the mouse AND encoding reports as
+    // SGR (1006). Both the wheel path and the scaled-pointer path only act for
+    // SGR: `sgrMouseReport`/`wheelReport` emit the SGR form, and sending that
+    // to an app that asked for the legacy X10 encoding is garbage it reads as
+    // stray keystrokes. For anything but SGR, xterm's own reports are correct
+    // and both paths return the event to it untouched.
+    //
+    // The encoding is not in the public modes. Read from the core, every field
+    // optional: an upgrade that moves it leaves this quiet and hands the event
+    // back to xterm, and mouseReport.test.ts reads the installed bundle for the
+    // names so that is noticed.
+    const sgrMouse = () => {
+      if (term.modes.mouseTrackingMode === 'none') return false
+      const core = (term as unknown as { _core?: { coreMouseService?: { activeEncoding?: string } } })._core
+      return core?.coreMouseService?.activeEncoding === 'SGR'
+    }
+    // The CSS scale a passive viewer is rendered at, parsed from the transform
+    // the scaling effect sets (`scale(x)`), or 1 when it owns the grid.
+    const hostScale = () => {
+      const m = /scale\(([0-9.]+)\)/.exec(host.style.transform)
+      return m ? parseFloat(m[1]) || 1 : 1
+    }
+    const scaledMouse = () => {
+      const t = host.style.transform
+      if (t === '' || t === 'none') return false
+      return sgrMouse()
+    }
+    const mouseCell = (ev: MouseEvent) => {
+      const box = host.querySelector('.xterm-screen')?.getBoundingClientRect()
+      if (!box || box.width === 0 || box.height === 0) return null
+      return cellAt({ x: ev.clientX, y: ev.clientY }, box, term.cols, term.rows)
+    }
+    const mods = (ev: MouseEvent) => ({ shift: ev.shiftKey, alt: ev.altKey, ctrl: ev.ctrlKey })
+    let heldButton = -1
+    const sendMouse = (kind: 'down' | 'up' | 'move', ev: MouseEvent) => {
+      if (replayQueue.replaying) return
+      const cell = mouseCell(ev)
+      if (!cell) return
+      const button = kind === 'move' ? heldButton : ev.button
+      socket.writeText(sessionId, sgrMouseReport(kind, button, cell.col, cell.row, mods(ev)))
+    }
+    const scaledMouseMove = (ev: MouseEvent) => {
+      if (!wantsReport(term.modes.mouseTrackingMode, 'move', heldButton >= 0)) return
+      sendMouse('move', ev)
+    }
+    const scaledMouseUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', scaledMouseMove, true)
+      document.removeEventListener('mouseup', scaledMouseUp, true)
+      if (wantsReport(term.modes.mouseTrackingMode, 'up', true)) sendMouse('up', ev)
+      heldButton = -1
+      ev.stopPropagation()
+    }
+    const scaledMouseDown = (ev: MouseEvent) => {
+      // The right button keeps xterm's own handling: it is the paste menu,
+      // not a report.
+      if (!scaledMouse() || ev.button === 2) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      term.focus()
+      heldButton = ev.button
+      if (wantsReport(term.modes.mouseTrackingMode, 'down', true)) sendMouse('down', ev)
+      document.addEventListener('mousemove', scaledMouseMove, true)
+      document.addEventListener('mouseup', scaledMouseUp, true)
+    }
+    host.addEventListener('mousedown', scaledMouseDown, true)
+
+    // The wheel, for an application that asked for the mouse.
+    //
+    // xterm's own report is one per event; wheel.ts says why that is a third
+    // to a twentieth of what a terminal emulator sends and what that did to pi
+    // 1.0's full-screen transcript. Measured in the same pixels the event is
+    // in, from the element both renderers draw into, because the DOM renderer's
+    // rows element is empty under WebGL. Returning false keeps xterm from
+    // adding its own report on top.
+    let wheelCarry = 0
+    term.attachCustomWheelEventHandler((ev) => {
+      // Only for SGR; a legacy-encoding app gets xterm's own, correct report.
+      if (!sgrMouse()) return true
+      const screen = host.querySelector('.xterm-screen')
+      const box = screen?.getBoundingClientRect()
+      if (!box || box.height === 0 || box.width === 0) return true
+      // The row height is unscaled: deltaY is in page pixels the CSS transform
+      // does not touch, while the box is the scaled-down size, so dividing by
+      // the scaled cell height made a shrunk passive viewer scroll 1/scale too
+      // far. A wheel notch is a fixed number of rows at any zoom.
+      const rowHeight = box.height / hostScale() / term.rows
+      const plan = wheelReports(ev.deltaY, ev.deltaMode, rowHeight, term.rows, wheelCarry)
+      wheelCarry = plan.carry
+      ev.preventDefault()
+      if (plan.count === 0 || replayQueue.replaying) return false
+      const cell = cellAt({ x: ev.clientX, y: ev.clientY }, box, term.cols, term.rows)
+      // One frame rather than one per report: they arrive together either way,
+      // and pi treats reports closer than five milliseconds as one notch, a
+      // line each, which is the rate this was sized for.
+      socket.writeText(sessionId, wheelReport(plan.up, cell.col, cell.row).repeat(plan.count))
+      return false
+    })
 
     // iOS Chrome/Safari emits direct punctuation and space input as a keydown
     // with keyCode 229 but no active composition. xterm marks that keydown as
@@ -654,6 +769,9 @@ export function TerminalView({
       detachTouch?.()
       host.removeEventListener('wheel', onWheel, true)
       host.removeEventListener('pointerup', copyOnSelect)
+      host.removeEventListener('mousedown', scaledMouseDown, true)
+      document.removeEventListener('mousemove', scaledMouseMove, true)
+      document.removeEventListener('mouseup', scaledMouseUp, true)
       selSub.dispose()
       dataSub.dispose()
       binarySub.dispose()

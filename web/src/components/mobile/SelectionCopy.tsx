@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Copy } from 'lucide-react'
 import { copyTextInGesture } from '../../clipboard'
+import { t, useLang } from '../../i18n'
 
 /**
  * A copy button that appears while text is selected.
@@ -16,6 +17,7 @@ import { copyTextInGesture } from '../../clipboard'
  * this adds.
  */
 export function SelectionCopy({ selection = '' }: { selection?: string }) {
+  useLang()
   const [domText, setDomText] = useState('')
   // What was last copied rather than a boolean: the confirmation has to fall
   // away by itself when the selection moves on, and deriving it from the text
@@ -47,7 +49,7 @@ export function SelectionCopy({ selection = '' }: { selection?: string }) {
       className="flex shrink-0 items-center gap-2 border-t border-hairline px-3 py-1.5 vp-blur"
     >
       <span className="tabular min-w-0 flex-1 truncate text-vp-sm text-ink-2">
-        {chars} character{chars === 1 ? '' : 's'} selected
+        {chars === 1 ? t('sel.countOne') : t('sel.count', { n: chars })}
       </span>
       <button
         type="button"
@@ -59,7 +61,7 @@ export function SelectionCopy({ selection = '' }: { selection?: string }) {
         style={{ background: 'var(--vp-accent)', color: 'var(--vp-accent-ink)' }}
       >
         <Copy size={12} />
-        {copied ? 'Copied' : 'Copy'}
+        {copied ? t('sel.copied') : t('sel.copy')}
       </button>
     </div>
   )

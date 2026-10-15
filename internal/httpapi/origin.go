@@ -202,13 +202,25 @@ func portOf(addr string) string {
 // change something; the requests without one are curl and the panel's own CLI,
 // which authenticate with a bearer token and are not what a browser can be
 // tricked into making.
+//
+// "null" is not missing: it is a browser saying the origin is opaque, and it
+// is what a cross-origin redirect leaves on the request. A page on another
+// port of this host posting a text/plain form to itself and answering 307 to
+// /api/projects arrived here as Origin: null with the session cookie -- the
+// same site, so SameSite=Strict sends it -- and created a project as the
+// owner; from there, a plugin with a process. Checked in a browser before
+// this changed. A sandboxed frame is the other sender of "null", and nothing
+// in one writes through the session cookie.
 func crossOriginWrite(r *http.Request, allowed []string) bool {
 	if !unsafeMethod(r.Method) {
 		return false
 	}
 	origin := strings.TrimSuffix(r.Header.Get("Origin"), "/")
-	if origin == "" || origin == "null" {
+	if origin == "" {
 		return false
+	}
+	if origin == "null" {
+		return true
 	}
 	from := hostOfOrigin(origin)
 	if from == "" {

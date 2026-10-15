@@ -53,11 +53,15 @@ import (
 //   - it reaches the process through tmux's -e, never through an argv;
 //   - it never reaches the audit log, which records profile names only.
 //
-// What that does not do is encrypt it. It is plaintext in the SQLite file, and
-// the settings page says so in one line rather than leaving the reader to
-// assume otherwise. Encrypting it with a key stored beside the database is not
-// encryption; it is obfuscation with a migration path to maintain, and it
-// would let the same settings page make a promise the file cannot keep.
+//   - it is sealed in the database under the panel's secrets key
+//     (sealed.go), like every other credential the panel keeps.
+//
+// That last line once read the other way: plaintext, on the grounds that a key
+// stored beside the database is obfuscation and not encryption. It was written
+// before secrets.key existed. Since then chat tokens, page and plugin secrets,
+// the hook token and share links' addresses are all sealed under it, so a
+// copied database alone hands over none of them, and this was the one
+// credential it still handed over. The settings page says what is true now.
 
 // LaunchEnvVar is one variable a profile sets.
 type LaunchEnvVar struct {
@@ -457,7 +461,7 @@ func (d *DB) CreateLaunchProfile(ctx context.Context, id string, p LaunchProfile
 	p.Builtin = false
 	p.CreatedAt = now()
 	p.UpdatedAt = p.CreatedAt
-	cmd, env, err := encodeLaunch(p)
+	cmd, env, err := d.encodeLaunch(p.ID, p)
 	if err != nil {
 		return LaunchProfile{}, err
 	}
@@ -473,7 +477,7 @@ func (d *DB) CreateLaunchProfile(ctx context.Context, id string, p LaunchProfile
 
 // UpdateLaunchProfile replaces a profile's name, command and variables.
 func (d *DB) UpdateLaunchProfile(ctx context.Context, id string, p LaunchProfile) error {
-	cmd, env, err := encodeLaunch(p)
+	cmd, env, err := d.encodeLaunch(id, p)
 	if err != nil {
 		return err
 	}
@@ -566,7 +570,7 @@ func (d *DB) listLaunchRows(ctx context.Context) ([]LaunchProfile, error) {
 
 	out := []LaunchProfile{}
 	for rows.Next() {
-		p, err := scanLaunch(rows)
+		p, err := d.scanLaunch(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -584,7 +588,7 @@ func (d *DB) GetLaunchProfile(ctx context.Context, id string) (LaunchProfile, er
 	row := d.sql.QueryRowContext(ctx, `
 		SELECT id, name, command, env, claude_account_id, created_at, updated_at
 		FROM launch_profiles WHERE id = ?`, id)
-	p, err := scanLaunch(row)
+	p, err := d.scanLaunch(row)
 	// Saved edits of built-ins have the same id as the catalogue entry. Reading
 	// the catalogue first loses their keys on launch and on resource import.
 	if err == ErrNotFound {
@@ -601,7 +605,7 @@ func (d *DB) GetLaunchProfile(ctx context.Context, id string) (LaunchProfile, er
 	return p, nil
 }
 
-func scanLaunch(row scanner) (LaunchProfile, error) {
+func (d *DB) scanLaunch(row scanner) (LaunchProfile, error) {
 	var p LaunchProfile
 	var cmd, env string
 	err := row.Scan(&p.ID, &p.Name, &cmd, &env, &p.ClaudeAccountID, &p.CreatedAt, &p.UpdatedAt)
@@ -612,16 +616,35 @@ func scanLaunch(row scanner) (LaunchProfile, error) {
 		return LaunchProfile{}, fmt.Errorf("store: scan launch profile: %w", err)
 	}
 	p.Command = decodeLaunchCommand(cmd)
-	p.Env = decodeLaunchEnv(env)
+	p.Env = decodeLaunchEnv(env, func(name, v string) string {
+		out, _ := d.openString(v, launchEnvContext(p.ID, name))
+		return out
+	})
 	return p, nil
 }
 
-func encodeLaunch(p LaunchProfile) (cmd, env string, err error) {
+// launchEnvContext binds a sealed value to its profile and variable, so one
+// copied onto another row or renamed does not open there.
+func launchEnvContext(profileID, name string) string {
+	return "launch-env:" + profileID + ":" + name
+}
+
+// encodeLaunch is the row's columns, with each secret variable's value sealed
+// (sealed.go). Only the secret ones: a base URL is not a credential, and the
+// settings page shows it back.
+func (d *DB) encodeLaunch(id string, p LaunchProfile) (cmd, env string, err error) {
 	c, err := json.Marshal(emptyIfNil(p.Command))
 	if err != nil {
 		return "", "", fmt.Errorf("store: encode launch command: %w", err)
 	}
-	e, err := json.Marshal(emptyVars(p.Env))
+	vars := make([]LaunchEnvVar, len(p.Env))
+	copy(vars, p.Env)
+	for i := range vars {
+		if vars[i].Secret {
+			vars[i].Value = d.sealString(vars[i].Value, launchEnvContext(id, vars[i].Name))
+		}
+	}
+	e, err := json.Marshal(emptyVars(vars))
 	if err != nil {
 		return "", "", fmt.Errorf("store: encode launch env: %w", err)
 	}
@@ -659,7 +682,11 @@ func decodeLaunchCommand(s string) []string {
 // settings page shows and what the process is given are the same list -- a
 // variable filtered out only on the way to tmux would sit in the form looking
 // like it worked.
-func decodeLaunchEnv(s string) []LaunchEnvVar {
+//
+// open turns a stored value back into the value: sealed secrets are opened
+// before validation, since the sealed form is longer than any limit the value
+// itself is held to.
+func decodeLaunchEnv(s string, open func(name, v string) string) []LaunchEnvVar {
 	if s == "" {
 		return []LaunchEnvVar{}
 	}
@@ -670,6 +697,9 @@ func decodeLaunchEnv(s string) []LaunchEnvVar {
 	out := make([]LaunchEnvVar, 0, len(raw))
 	seen := map[string]bool{}
 	for _, v := range raw {
+		if v.Secret && open != nil {
+			v.Value = open(v.Name, v.Value)
+		}
 		clean, err := ValidateLaunchEnvVar(v)
 		if err != nil || seen[clean.Name] {
 			continue
@@ -779,7 +809,7 @@ func arrange(list []LaunchProfile, order []string) []LaunchProfile {
 // other profile gets a generated id, and a caller that could name one could
 // collide with somebody else's.
 func (d *DB) UpsertLaunchProfile(ctx context.Context, id string, p LaunchProfile) error {
-	cmd, env, err := encodeLaunch(p)
+	cmd, env, err := d.encodeLaunch(id, p)
 	if err != nil {
 		return err
 	}

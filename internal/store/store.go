@@ -32,18 +32,36 @@ var schemaSQL string
 // Additive steps only, and never an edit to an earlier one: a released binary
 // has to be able to open a database written by an older release, and a
 // migration that has already run somewhere cannot be changed.
-var migrations = []func(tx *sql.Tx) error{
-	func(tx *sql.Tx) error {
+// migration is one step of the schema, by name.
+//
+// The name's number is the step's position, which is what user_version is
+// after it runs; the rest says what it does. Positional numbering is what
+// migrate applies and is not changing, and it is why two branches that each
+// append a step collide: TestMigrationNamesAreAppendOnly lists every name in
+// order, so a second branch's step is a conflict in that list at merge rather
+// than a silent renumbering. Comment labels up to v24 always matched; v25 to
+// v30 were labelled one higher than their position until 2026-10-13, so the
+// build log before then calls drop-idx-sessions-state "v26", and so on.
+type migration struct {
+	name string
+	up   func(tx *sql.Tx) error
+}
+
+// Pantheon keeps 031–037: deployed databases are already at 37. Later upstream
+// merges append and renumber new upstream steps after the fork's; never insert
+// or reorder a released step.
+var migrations = []migration{
+	{"001-initial-schema", func(tx *sql.Tx) error {
 		_, err := tx.Exec(schemaSQL)
 		return err
-	},
+	}},
 	// v2: bottom terminals become ordinary sessions with a parent.
 	//
 	// They were their own table, which would have meant a parallel
 	// implementation of everything sessions already have — attaching, replay,
 	// state detection, naming. A nullable parent column gets all of it for
 	// free, and "a terminal is a session" is one fewer concept.
-	func(tx *sql.Tx) error {
+	{"002-bottom-terminals-as-sessions", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE sessions ADD COLUMN parent_session_id TEXT
 			     REFERENCES sessions(id) ON DELETE CASCADE`,
@@ -55,14 +73,14 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 	// v3: browser sessions and an audit trail.
 	//
 	// Login sessions are their own table rather than a signed cookie so they
 	// can be revoked: a panel that hands out a terminal on the public internet
 	// needs a way to say "not that device any more" without changing the
 	// password everywhere.
-	func(tx *sql.Tx) error {
+	{"003-auth-sessions-and-audit", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS auth_sessions (
 			     token_hash   BLOB PRIMARY KEY,
@@ -90,7 +108,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 	// v4: store the whole WebAuthn credential.
 	//
 	// The v1 table decomposed it into columns, which loses the fields the
@@ -98,7 +116,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// list, flags). Keeping the marshalled credential means an upgrade of the
 	// library does not silently drop something a browser relies on; the
 	// individual columns stay for indexing and for the settings page.
-	func(tx *sql.Tx) error {
+	{"004-webauthn-credential-data", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE credentials ADD COLUMN data BLOB NOT NULL DEFAULT x''`,
 			`ALTER TABLE credentials ADD COLUMN user_handle BLOB NOT NULL DEFAULT x''`,
@@ -109,14 +127,14 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 	// v5: a session's process can be gone while the session is still there.
 	//
 	// tmux keeps a dead pane on screen (remain-on-exit), and the panel used to
 	// read that as "done" — the same thing it says about an agent that finished
 	// the job. A crash and a success looked identical in the sidebar, which is
 	// the one comparison the sidebar exists to make.
-	func(tx *sql.Tx) error {
+	{"005-session-exit", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE sessions ADD COLUMN exited INTEGER NOT NULL DEFAULT 0`,
 			`ALTER TABLE sessions ADD COLUMN exit_status INTEGER NOT NULL DEFAULT 0`,
@@ -126,7 +144,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 	// v6: notes get a revision counter.
 	//
 	// The first attempt at "refuse a write that lands on somebody else's" used
@@ -135,7 +153,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// way. Starting at 1 for existing rows so that a client which has never
 	// heard of revisions still fails the check rather than passing it with a
 	// zero.
-	func(tx *sql.Tx) error {
+	{"006-note-revisions", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE notes ADD COLUMN rev INTEGER NOT NULL DEFAULT 0`,
 			`UPDATE notes SET rev = 1`,
@@ -145,7 +163,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v7: the two audit events that did not share a prefix with their pair.
 	//
@@ -161,7 +179,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// rename exists to fix would still return two rows for one thing. Anyone
 	// with a fail2ban rule on the old spelling has to update it, and the README
 	// does not advertise one.
-	func(tx *sql.Tx) error {
+	{"007-audit-event-names", func(tx *sql.Tx) error {
 		for from, to := range map[string]string{
 			"password_changed":        "password.changed",
 			"password_change_refused": "password.change_refused",
@@ -171,7 +189,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v8: API tokens, so a program can drive the panel.
 	//
@@ -185,7 +203,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// Same storage shape as an auth session: the hash, never the token. The
 	// prefix is stored in the clear so the settings page can show you which one
 	// you are about to revoke without being able to reconstruct it.
-	func(tx *sql.Tx) error {
+	{"008-api-tokens", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS api_tokens (
 			     id          TEXT PRIMARY KEY,
@@ -203,7 +221,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v9: enough to rebuild a session the machine took with it.
 	//
@@ -239,7 +257,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// second -- and a few hundred kilobytes of blob per row would be dragged
 	// through all of it. A separate table is read only by the thing that
 	// restores.
-	func(tx *sql.Tx) error {
+	{"009-session-rebuild", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE sessions ADD COLUMN launch_command TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE sessions ADD COLUMN restore_on_boot INTEGER NOT NULL DEFAULT 0`,
@@ -257,7 +275,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v10: read-only share links, for a dashboard on a second screen.
 	//
@@ -275,7 +293,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// expires_at is 0 for "never", not NULL. Every caller handles the
 	// never-expires case anyway, and a NULL that means the same thing as 0 is
 	// one more way to write the comparison wrong.
-	func(tx *sql.Tx) error {
+	{"010-share-links", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS share_links (
 			     id          TEXT PRIMARY KEY,
@@ -296,7 +314,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v11: what the agents recorded about their own token spend.
 	//
@@ -334,7 +352,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// long after the transcripts were written, and baking the answer in at
 	// ingest would mean a project added today never sees the history that
 	// belongs to it.
-	func(tx *sql.Tx) error {
+	{"011-token-usage", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS usage_files (
 			     path        TEXT PRIMARY KEY,
@@ -369,7 +387,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v12: a share link carries the board it opens.
 	//
@@ -403,7 +421,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// rather than either cascading the row away or, far worse, leaving a scope
 	// that matches no project and falling back to showing everything. The
 	// handler decides that, and a test pins it.
-	func(tx *sql.Tx) error {
+	{"012-share-link-board", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE share_links ADD COLUMN board TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE share_links ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
@@ -414,7 +432,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v13: launch profiles -- a name, an argv and an environment.
 	//
@@ -446,7 +464,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// indistinguishable from a session started before profiles existed, which
 	// is exactly the distinction launch_command already had to add a second
 	// column for.
-	func(tx *sql.Tx) error {
+	{"013-launch-profiles", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS launch_profiles (
 			     id         TEXT PRIMARY KEY,
@@ -465,7 +483,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v14: the VNC displays the panel is allowed to reach.
 	//
@@ -487,7 +505,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// that is not in the same 0600 directory as the database, and the protocol
 	// verifies it with single-DES over eight bytes, so encrypting the column
 	// would protect nothing and imply otherwise. See store.VncTarget.
-	func(tx *sql.Tx) error {
+	{"014-vnc-targets", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS vnc_targets (
 			     id         TEXT PRIMARY KEY,
@@ -504,7 +522,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v15: a remark on a share link, and a lock on its board.
 	//
@@ -530,7 +548,7 @@ var migrations = []func(tx *sql.Tx) error{
 	//
 	// Defaulted rather than backfilled: every link written before this step is
 	// an unlocked link with no remark, which is what they all were.
-	func(tx *sql.Tx) error {
+	{"015-share-link-remark-and-lock", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE share_links ADD COLUMN remark TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE share_links ADD COLUMN locked INTEGER NOT NULL DEFAULT 0`,
@@ -540,7 +558,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v16: what a session used to be doing.
 	//
@@ -575,7 +593,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// It is swept rather than kept: see store.EventRetentionDays. Nothing else
 	// in this database grows per event, and a wall that has been up a month is
 	// the case this table has to stay small under.
-	func(tx *sql.Tx) error {
+	{"016-session-events", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS session_events (
 			     at          INTEGER NOT NULL,
@@ -592,7 +610,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v17: drop vnc_targets, because the feature it belonged to is gone.
 	//
@@ -617,12 +635,12 @@ var migrations = []func(tx *sql.Tx) error{
 	// IF EXISTS because both orderings have to work: a database upgraded from
 	// v13 runs v14's CREATE and then this DROP, and one that somehow lacks the
 	// table must not fail on a name it never had.
-	func(tx *sql.Tx) error {
+	{"017-drop-vnc-targets", func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`DROP TABLE IF EXISTS vnc_targets`); err != nil {
 			return fmt.Errorf("drop vnc_targets: %w", err)
 		}
 		return nil
-	},
+	}},
 
 	// v18: one note that belongs to nobody.
 	//
@@ -637,7 +655,7 @@ var migrations = []func(tx *sql.Tx) error{
 	//
 	// A single row, pinned by the CHECK. There is one of these, and a table
 	// that could hold two would eventually hold two.
-	func(tx *sql.Tx) error {
+	{"018-global-note", func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`
 			CREATE TABLE IF NOT EXISTS global_note (
 			    id          INTEGER PRIMARY KEY CHECK (id = 1),
@@ -648,7 +666,7 @@ var migrations = []func(tx *sql.Tx) error{
 			return fmt.Errorf("create global_note: %w", err)
 		}
 		return nil
-	},
+	}},
 
 	// A sign-in is now bound to the origin it was made at.
 	//
@@ -665,13 +683,13 @@ var migrations = []func(tx *sql.Tx) error{
 	// at and the row is bound from then on. Rejecting them instead would have
 	// signed everybody out on upgrade to close a hole they were not being
 	// attacked through.
-	func(tx *sql.Tx) error {
+	{"019-auth-session-origin", func(tx *sql.Tx) error {
 		if _, err := tx.Exec(
 			`ALTER TABLE auth_sessions ADD COLUMN origin TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("add auth_sessions.origin: %w", err)
 		}
 		return nil
-	},
+	}},
 
 	// A scratch terminal belongs to the project, not to a session.
 	//
@@ -694,7 +712,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// finds a use for a "parent" column, and this is exactly the kind of thing
 	// nobody reads a migration to discover. Its index has to go first: SQLite
 	// refuses to drop an indexed column.
-	func(tx *sql.Tx) error {
+	{"020-scratch-terminals", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE sessions ADD COLUMN scratch INTEGER NOT NULL DEFAULT 0`,
 			`UPDATE sessions SET scratch = 1 WHERE parent_session_id IS NOT NULL`,
@@ -708,7 +726,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// v21: a directory served as a page, for previewing what an agent built.
 	//
@@ -726,7 +744,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// rather than inside one — and because a link that survives its project's
 	// deletion is a link that serves a directory nobody is looking after. It
 	// cascades from the user instead, which is the account that vouched for it.
-	func(tx *sql.Tx) error {
+	{"021-preview-links", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS preview_links (
 			     id          TEXT PRIMARY KEY,
@@ -746,7 +764,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// A preview may reach a CDN, if the person who made the link says so.
 	//
@@ -762,11 +780,11 @@ var migrations = []func(tx *sql.Tx) error{
 	// The person turning it on is the owner, looking at a directory they just
 	// picked; the default stays the safe one for every link they do not think
 	// about.
-	func(tx *sql.Tx) error {
+	{"022-preview-allow-external", func(tx *sql.Tx) error {
 		_, err := tx.Exec(
 			`ALTER TABLE preview_links ADD COLUMN allow_external INTEGER NOT NULL DEFAULT 0`)
 		return err
-	},
+	}},
 
 	// v23: share pages -- HTML the owner wrote, served on a share link.
 	//
@@ -794,7 +812,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// points at is refused in the handler instead, because the alternative
 	// cascade -- a wall silently reverting to some other drawing -- is the
 	// failure a wall with nobody at it cannot report.
-	func(tx *sql.Tx) error {
+	{"023-share-pages", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS share_pages (
 			     id                TEXT PRIMARY KEY,
@@ -843,7 +861,7 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
 	// A page with a backend: docs/page-backend.md.
 	//
@@ -857,7 +875,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// change, and a grant whose session row is gone is dead at its next
 	// request because the lookup joins on it -- the same answer as a cascade,
 	// without a second place deciding it.
-	func(tx *sql.Tx) error {
+	{"024-page-backend", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE share_links ADD COLUMN token_enc BLOB NOT NULL DEFAULT x''`,
 			`ALTER TABLE share_links ADD COLUMN interactive INTEGER NOT NULL DEFAULT 0`,
@@ -898,23 +916,23 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
-	// v26: drop idx_sessions_state.
+	// v25: drop idx_sessions_state.
 	//
 	// It was created with the sessions table and never used: no query filters
 	// by state -- the sidebar reads every row and orders by sort_weight -- so
 	// the index was maintained on every state change, the panel's hottest
 	// write, for no reader at all. The first migration is frozen, so every
 	// database still gains the index at v1 and sheds it here.
-	func(tx *sql.Tx) error {
+	{"025-drop-idx-sessions-state", func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`DROP INDEX IF EXISTS idx_sessions_state`); err != nil {
 			return fmt.Errorf("drop idx_sessions_state: %w", err)
 		}
 		return nil
-	},
+	}},
 
-	// v27: chat -- what a session said, and the IM peers it is said to.
+	// v26: chat -- what a session said, and the IM peers it is said to.
 	//
 	// session_messages is what an agent's hook reported it said, one row per
 	// report, so the panel has something to send to a phone besides a state
@@ -940,7 +958,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// None of the chat tables cascade from sessions, for the reason
 	// session_events gives: a session deleted this afternoon must not unmap a
 	// reply somebody is typing right now. Rows that point at nothing are swept.
-	func(tx *sql.Tx) error {
+	{"026-chat", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS session_messages (
 			     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1018,9 +1036,9 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
-	// v28: which reader wrote a transcript's rows.
+	// v27: which reader wrote a transcript's rows.
 	//
 	// The cursor was (size, mtime), which answers "has this file changed" and
 	// not "were these rows read correctly". When a reader is fixed, every file
@@ -1036,24 +1054,24 @@ var migrations = []func(tx *sql.Tx) error{
 	// Deleting instead would be simpler and worse: the panel would report zero
 	// until the first pass finished, where this way each file's old rows stay
 	// on screen until its new ones replace them in one transaction.
-	func(tx *sql.Tx) error {
+	{"027-usage-file-reader", func(tx *sql.Tx) error {
 		_, err := tx.Exec(`ALTER TABLE usage_files ADD COLUMN reader INTEGER NOT NULL DEFAULT 0`)
 		return err
-	},
+	}},
 
-	// v29: a session message can carry the menu it asked with.
+	// v28: a session message can carry the menu it asked with.
 	//
 	// Claude Code's questions with options, and its plan approval, are one
 	// tool call each whose input is the whole menu. Kept beside the text as
 	// JSON rather than in tables of their own: the bridge reads one message's
 	// menu to draw a card and to know which keys an answer is, and nothing
 	// ever queries inside one.
-	func(tx *sql.Tx) error {
+	{"028-session-message-menu", func(tx *sql.Tx) error {
 		_, err := tx.Exec(`ALTER TABLE session_messages ADD COLUMN menu TEXT NOT NULL DEFAULT ''`)
 		return err
-	},
+	}},
 
-	// v30: Claude accounts, and which one a profile and a session use.
+	// v29: Claude accounts, and which one a profile and a session use.
 	//
 	// The account is a row and a directory (internal/claudeaccount); the
 	// directory's path is derived from the id, never stored, because on macOS
@@ -1065,7 +1083,7 @@ var migrations = []func(tx *sql.Tx) error{
 	// environment, which is looked up again. A profile edited to use another
 	// account must not bring an existing session back under a different
 	// person's subscription.
-	func(tx *sql.Tx) error {
+	{"029-claude-accounts", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`CREATE TABLE IF NOT EXISTS claude_accounts (
 			     id         TEXT PRIMARY KEY,
@@ -1082,9 +1100,9 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
+	}},
 
-	// v31: a project can be archived.
+	// v30: a project can be archived.
 	//
 	// Archived means hidden and nothing else: its sessions keep running in
 	// tmux, its notes and todos stay, and restoring it puts it back exactly as
@@ -1097,7 +1115,7 @@ var migrations = []func(tx *sql.Tx) error{
 	//
 	// Not sessions.archived_at, which is a different, unbuilt idea (a session
 	// whose tmux session is gone; see the build log) and is per session.
-	func(tx *sql.Tx) error {
+	{"030-project-archive", func(tx *sql.Tx) error {
 		for _, stmt := range []string{
 			`ALTER TABLE projects ADD COLUMN archived_at INTEGER`,
 			`ALTER TABLE projects ADD COLUMN archived_auto INTEGER NOT NULL DEFAULT 0`,
@@ -1107,17 +1125,195 @@ var migrations = []func(tx *sql.Tx) error{
 			}
 		}
 		return nil
-	},
-	migrateProjectBoards,
-	migrateWorkflow,
-	migrateHome,
-	migrateHomeThreads,
-	migrateHomeResources,
-	migrateHomeRuns,
-	func(tx *sql.Tx) error {
+	}},
+	{"031-project-boards", migrateProjectBoards},
+	{"032-workflow", migrateWorkflow},
+	{"033-home", migrateHome},
+	{"034-home-threads", migrateHomeThreads},
+	{"035-home-resources", migrateHomeResources},
+	{"036-home-runs", migrateHomeRuns},
+	{"037-session-archive-note", func(tx *sql.Tx) error {
 		_, err := tx.Exec(`ALTER TABLE sessions ADD COLUMN archive_note TEXT NOT NULL DEFAULT ''`)
 		return err
-	},
+	}},
+
+	// Plugins: docs/plugins.md.
+	//
+	// A plugin's id is the manifest's id, not a generated one: it is the
+	// namespace everything else is keyed by (routes, data, settings, the
+	// theme attribute, a cgroup leaf), and a second install of the same
+	// plugin is an upgrade of the first rather than a second row.
+	//
+	// Versions and files have the share page's shape, and files share the
+	// page's content-addressed blob table: one file stored once however many
+	// versions of however many things carry it. gcPageBlobs reads both file
+	// tables for that reason.
+	//
+	// plugin_caps is the grant decision -- what the owner ticked on the
+	// install screen -- attached to the id, so a newer version cannot widen
+	// it by being newer. installed_version is the version that runs; 0 is
+	// a plugin that arrived (an import, a draft) and has not been through
+	// the screen. enabled is the switch; both are read by whatever serves a
+	// plugin, and neither is read by currentUser.
+	{"038-plugins", func(tx *sql.Tx) error {
+		for _, stmt := range []string{
+			`CREATE TABLE IF NOT EXISTS plugins (
+			     id                TEXT PRIMARY KEY,
+			     user_id           TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			     enabled           INTEGER NOT NULL DEFAULT 0,
+			     installed_version INTEGER NOT NULL DEFAULT 0,
+			     source_dir        TEXT NOT NULL DEFAULT '',
+			     dev               INTEGER NOT NULL DEFAULT 0,
+			     created_at        INTEGER NOT NULL,
+			     updated_at        INTEGER NOT NULL
+			 )`,
+			`CREATE TABLE IF NOT EXISTS plugin_versions (
+			     plugin_id  TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+			     version    INTEGER NOT NULL,
+			     manifest   TEXT NOT NULL,
+			     note       TEXT NOT NULL DEFAULT '',
+			     bytes      INTEGER NOT NULL DEFAULT 0,
+			     files      INTEGER NOT NULL DEFAULT 0,
+			     hash       TEXT NOT NULL DEFAULT '',
+			     created_at INTEGER NOT NULL,
+			     PRIMARY KEY (plugin_id, version)
+			 )`,
+			`CREATE TABLE IF NOT EXISTS plugin_files (
+			     plugin_id    TEXT NOT NULL,
+			     version      INTEGER NOT NULL,
+			     path         TEXT NOT NULL,
+			     content_type TEXT NOT NULL,
+			     sha256       BLOB NOT NULL REFERENCES share_page_blobs(sha256),
+			     PRIMARY KEY (plugin_id, version, path),
+			     FOREIGN KEY (plugin_id, version)
+			         REFERENCES plugin_versions(plugin_id, version) ON DELETE CASCADE
+			 )`,
+			`CREATE TABLE IF NOT EXISTS plugin_caps (
+			     plugin_id  TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+			     cap        TEXT NOT NULL,
+			     granted_at INTEGER NOT NULL,
+			     granted_by TEXT NOT NULL DEFAULT '',
+			     PRIMARY KEY (plugin_id, cap)
+			 )`,
+			`CREATE TABLE IF NOT EXISTS plugin_settings (
+			     plugin_id  TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+			     key        TEXT NOT NULL,
+			     value      TEXT NOT NULL,
+			     updated_at INTEGER NOT NULL,
+			     PRIMARY KEY (plugin_id, key)
+			 )`,
+			`CREATE TABLE IF NOT EXISTS plugin_secrets (
+			     plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+			     name      TEXT NOT NULL,
+			     value_enc BLOB NOT NULL,
+			     set_at    INTEGER NOT NULL,
+			     PRIMARY KEY (plugin_id, name)
+			 )`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("%s: %w", stmt, err)
+			}
+		}
+		return nil
+	}},
+
+	// Plugin frames: docs/plugins.md §5, rung 1.
+	//
+	// plugin_grants has the admin grant's shape and the admin grant's
+	// revocation: the lookup joins on auth_sessions, so a grant whose session
+	// was signed out resolves to nothing on its next request. What a grant may
+	// reach is read from plugin_caps at each request rather than copied onto
+	// the row, so a box unticked on the settings page is withdrawn from every
+	// open frame at once rather than at its next mint.
+	//
+	// plugin_data is the share page's data table with a plugin for an owner:
+	// the same two namespaces (live for the installed version, draft for dev
+	// mode), the same shapes, checked by the same code.
+	{"039-plugin-frames", func(tx *sql.Tx) error {
+		for _, stmt := range []string{
+			`CREATE TABLE IF NOT EXISTS plugin_grants (
+			     token_hash   BLOB PRIMARY KEY,
+			     plugin_id    TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+			     user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			     session_hash BLOB NOT NULL,
+			     created_at   INTEGER NOT NULL,
+			     expires_at   INTEGER NOT NULL
+			 )`,
+			`CREATE TABLE IF NOT EXISTS plugin_data (
+			     plugin_id  TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+			     ns         TEXT NOT NULL,
+			     key        TEXT NOT NULL,
+			     value      TEXT NOT NULL,
+			     updated_at INTEGER NOT NULL,
+			     updated_by TEXT NOT NULL DEFAULT '',
+			     PRIMARY KEY (plugin_id, ns, key)
+			 )`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("%s: %w", stmt, err)
+			}
+		}
+		return nil
+	}},
+
+	// Plugin processes: docs/plugins.md §5, rung 3.
+	//
+	// A token is the credential a supervised process holds, in its
+	// environment, minted when it starts and deleted when the plugin stops.
+	// Its own table rather than a row in api_tokens: an API token is the
+	// owner, a plugin token reaches /api/plugin/{cred}/v1/ and nothing else,
+	// and currentUser consults neither this table nor plugin_grants.
+	{"040-plugin-tokens", func(tx *sql.Tx) error {
+		for _, stmt := range []string{
+			`CREATE TABLE IF NOT EXISTS plugin_tokens (
+			     token_hash BLOB PRIMARY KEY,
+			     plugin_id  TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+			     created_at INTEGER NOT NULL
+			 )`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("%s: %w", stmt, err)
+			}
+		}
+		return nil
+	}},
+	// A plugin access token is the owner's credential for one plugin's door
+	// on the panel's port (docs/plugins.md §5, "a process on the panel's
+	// port"): minted on the card, named, revoked one at a time. Hash only.
+	{"041-plugin-access-tokens", func(tx *sql.Tx) error {
+		for _, stmt := range []string{
+			`CREATE TABLE IF NOT EXISTS plugin_access_tokens (
+			     id           TEXT PRIMARY KEY,
+			     plugin_id    TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+			     name         TEXT NOT NULL,
+			     token_hash   BLOB NOT NULL UNIQUE,
+			     created_at   INTEGER NOT NULL,
+			     last_used_at INTEGER NOT NULL DEFAULT 0,
+			     revoked_at   INTEGER NOT NULL DEFAULT 0
+			 )`,
+			`CREATE INDEX IF NOT EXISTS plugin_access_tokens_plugin ON plugin_access_tokens(plugin_id)`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("%s: %w", stmt, err)
+			}
+		}
+		return nil
+	}},
+	// What a session says about itself (`vibepanel me`): a summary line, a
+	// progress figure and labels, beside the title and the state it could
+	// already set through its hook token.
+	{"042-session-self-description", func(tx *sql.Tx) error {
+		for _, stmt := range []string{
+			`ALTER TABLE sessions ADD COLUMN summary TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE sessions ADD COLUMN progress INTEGER NOT NULL DEFAULT -1`,
+			`ALTER TABLE sessions ADD COLUMN labels TEXT NOT NULL DEFAULT ''`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("%s: %w", stmt, err)
+			}
+		}
+		return nil
+	}},
 }
 
 // scanner is *sql.Row and *sql.Rows both, so one scan function serves a
@@ -1140,6 +1336,8 @@ type DB struct {
 	// not wait out; one panel process is the only writer, so a mutex is the
 	// whole fix.
 	handleMu sync.Mutex
+	// seal is the secrets key, opened on first use: sealed.go.
+	seal sealer
 }
 
 // Open connects to the database at path, applying the schema if needed.
@@ -1148,10 +1346,21 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	// busy_timeout in particular: without it a concurrent writer fails
 	// immediately with SQLITE_BUSY instead of waiting, which shows up as
 	// random save failures under two browser tabs.
+	//
+	// _txlock=immediate because busy_timeout does not cover the other way two
+	// writers collide. A deferred BEGIN whose first statement is a SELECT
+	// holds a read snapshot; if another connection commits before its first
+	// write, the upgrade fails with SQLITE_BUSY_SNAPSHOT and no busy handler
+	// runs. Installing a plugin, adding a version and publishing a page all
+	// read first, and the poller and the hooks are always writing, so those
+	// failed 426 times in 1000 against a ten-millisecond writer. BEGIN
+	// IMMEDIATE takes the write lock up front, where the timeout does apply.
+	// Reads outside a transaction are untouched.
 	dsn := path + "?_pragma=journal_mode(WAL)" +
 		"&_pragma=busy_timeout(5000)" +
 		"&_pragma=foreign_keys(ON)" +
-		"&_pragma=synchronous(NORMAL)"
+		"&_pragma=synchronous(NORMAL)" +
+		"&_txlock=immediate"
 
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -1171,6 +1380,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	}
 
 	db := &DB{sql: sqlDB}
+	db.seal.path = keyPathFor(path)
 	if err := db.migrate(ctx); err != nil {
 		sqlDB.Close()
 		return nil, err
@@ -1232,17 +1442,55 @@ func (d *DB) migrate(ctx context.Context) error {
 			current, schemaVersion)
 	}
 
-	for v := current; v < schemaVersion; v++ {
+	for {
 		// Each step in its own transaction, and user_version moves inside it:
 		// a migration that fails half way must leave the database on the
 		// version it actually is, not the one it was heading for.
+		//
+		// And the version is read inside it too. It was read once, above,
+		// outside any transaction, and the panel and the CLI both open this
+		// file: the second opener ran every step the first had just run, and
+		// the first ALTER TABLE ADD COLUMN it repeated failed with "duplicate
+		// column". BEGIN takes the write lock (_txlock=immediate), so one
+		// opener migrates while the other waits, then reads where it got to.
 		tx, err := d.sql.BeginTx(ctx, nil)
 		if err != nil {
-			return fmt.Errorf("store: begin migration %d: %w", v+1, err)
+			return fmt.Errorf("store: begin migration: %w", err)
 		}
-		if err := migrations[v](tx); err != nil {
+		var v int
+		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
+			tx.Rollback() //nolint:errcheck
+			return fmt.Errorf("store: read user_version: %w", err)
+		}
+		// Both products default to the same data directory, but their migration
+		// numbers diverge at 31. Every Pantheon schema from 31 onward has this
+		// table; upstream's 31–37 must never be interpreted as fork migrations.
+		if v >= 31 && v <= 37 {
+			var boards bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
+				SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'project_boards'
+			)`).Scan(&boards); err != nil {
+				tx.Rollback() //nolint:errcheck
+				return fmt.Errorf("store: identify Pantheon schema: %w", err)
+			}
+			if !boards {
+				tx.Rollback() //nolint:errcheck
+				return fmt.Errorf("store: schema version %d lacks Pantheon's project_boards table; "+
+					"upstream vibepanel uses different migration numbers from 31; "+
+					"use a separate Pantheon data directory or restore a Pantheon backup", v)
+			}
+		}
+		if v >= schemaVersion {
+			tx.Rollback() //nolint:errcheck // nothing was written
+			if v > schemaVersion {
+				return fmt.Errorf("store: database is version %d but this build only knows %d; "+
+					"upgrade vibepanel or restore an older copy of the database", v, schemaVersion)
+			}
+			break
+		}
+		if err := migrations[v].up(tx); err != nil {
 			tx.Rollback() //nolint:errcheck // the error below is the useful one
-			return fmt.Errorf("store: migration %d: %w", v+1, err)
+			return fmt.Errorf("store: migration %s: %w", migrations[v].name, err)
 		}
 		// PRAGMA does not accept a bound parameter.
 		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", v+1)); err != nil {

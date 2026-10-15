@@ -66,15 +66,16 @@
   /* Text, most to least prominent. */
   --vp-ink: #1d1d1f;
   /* Alpha values verified against the frosted surface they actually sit on,
-     not against a flat white assumption. Apple's own secondaryLabel (0.60) and
-     tertiaryLabel (0.30) measure 3.44:1 and 1.73:1 here — the second of those
-     is barely visible. Secondary carries real content and meets AA at 4.5:1;
-     tertiary is decorative only and meets 3:1. Anything informational uses
-     secondary. See scripts/render-check for the measurement. */
-  --vp-ink-2: rgb(60 60 67 / 0.75); /* 5.2:1 */
-  --vp-ink-3: rgb(60 60 67 / 0.55); /* 3.0:1 */
+     not against a flat white assumption, and against the darkest of the three
+     surfaces they are drawn on (--vp-bg). Secondary and tertiary both carry
+     real content -- hints, timestamps, counts -- so both meet AA at 4.5:1.
+     Tertiary used to be "decorative only" at 3:1 and was then used about 180
+     times for text somebody has to read; styles contrast.test.ts computes the
+     ratios from these values so they cannot slide back. */
+  --vp-ink-2: rgb(60 60 67 / 0.86); /* 6.2:1 on the darkest surface */
+  --vp-ink-3: rgb(60 60 67 / 0.75); /* 4.5:1 on the darkest surface */
 
-  --vp-accent: #007aff;
+  --vp-accent: #0062cc;
   --vp-accent-ink: #ffffff;
   --vp-selection: rgb(0 122 255 / 0.20);
 
@@ -154,10 +155,10 @@
 
     --vp-ink: #f5f5f7;
     --vp-ink-2: rgb(235 235 245 / 0.65); /* 6.9:1 */
-    --vp-ink-3: rgb(235 235 245 / 0.45); /* 4.0:1 */
+    --vp-ink-3: rgb(235 235 245 / 0.53); /* 4.8:1 */
 
-    --vp-accent: #0a84ff;
-    --vp-accent-ink: #ffffff;
+    --vp-accent: #2e90ff;
+    --vp-accent-ink: #000000;
     --vp-selection: rgb(10 132 255 / 0.30);
 
     --vp-state-waiting: #ff9f0a;
@@ -201,10 +202,10 @@
 
   --vp-ink: #f5f5f7;
   --vp-ink-2: rgb(235 235 245 / 0.65); /* 6.9:1 */
-  --vp-ink-3: rgb(235 235 245 / 0.45); /* 4.0:1 */
+  --vp-ink-3: rgb(235 235 245 / 0.53); /* 4.8:1 */
 
-  --vp-accent: #0a84ff;
-  --vp-accent-ink: #ffffff;
+  --vp-accent: #2e90ff;
+  --vp-accent-ink: #000000;
   --vp-selection: rgb(10 132 255 / 0.30);
 
   --vp-state-waiting: #ff9f0a;
@@ -354,6 +355,15 @@ body,
   height: 100%;
 }
 
+/* What is visible, not what is laid out. On a phone the keyboard covers the
+   bottom of a layout that iOS does not shrink, and a 100% root kept the
+   compose box and the keys underneath it. useViewportFit sets the variable
+   from the visual viewport in the narrow layout; everywhere else it is unset
+   and the root is the full height as before. */
+#root {
+  height: var(--vp-app-h, 100%);
+}
+
 /* The canvas, painted explicitly rather than by propagation.
  *
  * A body background propagates to the canvas when `html` has none, which is
@@ -368,6 +378,11 @@ body,
  * that does not depend on the browser having understood it. */
 html {
   background: var(--vp-bg);
+  /* Pinch zoom is allowed (index.html no longer forbids it: blocking it fails
+     WCAG 1.4.4 for somebody who needs the text larger, and Android honoured
+     the block). What is not wanted is a double-tap on a key or a button read
+     as "zoom in" -- manipulation keeps pinch and drops that. */
+  touch-action: manipulation;
 }
 
 body {
@@ -585,8 +600,8 @@ body {
 /* Sixteen pixels in any field a finger will focus.
  *
  * iOS Safari zooms the page when a focused input's text is smaller than 16px.
- * It has ignored `user-scalable=no` since iOS 10, so the meta tag in index.html
- * does not prevent it — and nothing zooms back afterwards. Every field in this
+ * It has ignored `user-scalable=no` since iOS 10, so no meta tag prevents it
+ * (index.html no longer tries) — and nothing zooms back afterwards. Every field in this
  * panel was 12 or 13px, including the compose box, which is the main way to
  * type on a phone: tapping it magnified the terminal behind it and left it that
  * way.
@@ -648,6 +663,34 @@ body {
 
 .vp-panel-in {
   animation: vp-panel-in 220ms var(--vp-ease) both;
+}
+
+/* The phone's project drawer comes in from the edge it is attached to.
+ *
+ * It used to be there on the next frame, with the scrim popping in beside it,
+ * which on a phone reads as the page having been replaced rather than a panel
+ * having been opened -- and gives the thumb that opened it nothing to follow.
+ * The same 220ms and curve as the panels above, and the scrim takes the
+ * backdrop's 160ms fade.
+ *
+ * Entrance only: the drawer is unmounted to close it, so there is no exit to
+ * animate. Neither carries state; the global reduced-motion block collapses
+ * both to their end frame, which is the drawer open. */
+@keyframes vp-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.vp-drawer-in {
+  animation: vp-drawer-in 220ms var(--vp-ease) both;
+}
+
+.vp-scrim-in {
+  animation: vp-backdrop-in 160ms var(--vp-ease) both;
 }
 
 /* A toast arrives from the edge it lives on rather than from behind.
@@ -1017,13 +1060,60 @@ body {
  * aria-selected, and its name is on `title` and `aria-label`; under
  * prefers-reduced-motion the marker simply arrives. */
 .vp-segmented {
+  --vp-scroll-bg: var(--vp-surface-2);
   position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
   border-radius: var(--vp-radius);
-  background: var(--vp-surface-2);
   padding: 0.125rem;
+}
+
+/* A row that scrolls sideways and says so.
+ *
+ * Tabs used to share the track with `flex: 1 1 0; min-width: 0`, so a strip with
+ * more in it than its row simply made each tab narrower than its own label: at
+ * 1440px "Alerts" ran into the next tab's icon, and at 320px the strip clipped
+ * with nothing to say there was more. A tab is now never narrower than what is
+ * in it, and the strip scrolls instead.
+ *
+ * The edge shadows are the affordance. Scrollbars are hidden or overlay on the
+ * devices that need this, so without them a clipped tab is just a missing one.
+ * The `local` layers are the row's own colour and travel with the content, so
+ * they cover a `scroll` shadow exactly when that edge has nothing past it. */
+.vp-segmented {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.vp-segmented::-webkit-scrollbar {
+  display: none;
+}
+
+/* In the components layer so a utility on the element can turn the scrolling
+   back off where the row becomes a column (`@3xl:overflow-visible`): an
+   unlayered rule would beat it and clip the column. */
+@layer components {
+  .vp-scroll-x {
+    --vp-scroll-bg: var(--vp-surface);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .vp-scroll-x::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.vp-scroll-x,
+.vp-segmented {
+  background:
+    linear-gradient(to right, var(--vp-scroll-bg) 30%, transparent) left center / 1.5rem 100% no-repeat local,
+    linear-gradient(to left, var(--vp-scroll-bg) 30%, transparent) right center / 1.5rem 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, var(--vp-hairline-strong), transparent) left center / 0.5rem 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--vp-hairline-strong), transparent) right center / 0.5rem 100% no-repeat scroll,
+    var(--vp-scroll-bg);
 }
 
 /* A tab is as wide as what is in it.
@@ -1042,9 +1132,9 @@ body {
 .vp-segmented > .vp-tab {
   position: relative;
   z-index: 1;
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 1 0 auto;
   justify-content: center;
+  white-space: nowrap;
 }
 
 /* Under a finger the strip spans its row and the pills are shorter, which is
@@ -1460,6 +1550,67 @@ body {
 
 .vp-breathe {
   animation: vp-breathe 2s var(--vp-ease) infinite;
+}
+
+/* What the panel shows while it is not connected is what it last heard, not
+   what is true now: the session states and the terminal are drawn faded and
+   without colour so they stop reading as live. The strip that says why is
+   DisconnectedBar; this is the half that keeps the rest from contradicting it. */
+.vp-disconnected {
+  filter: grayscale(1);
+  opacity: 0.55;
+  transition: opacity 200ms var(--vp-ease), filter 200ms var(--vp-ease);
+}
+
+/* Forced colours (Windows High Contrast and its kin).
+ *
+ * The browser replaces every background and most borders with the user's
+ * palette, and "chosen" in this interface is carried almost entirely by a
+ * background: the selected session row is a slightly darker fill, the active
+ * tab is a lifted one, a meter is a coloured bar in a grey track. All of them
+ * flatten to Canvas, so the row you are on, the tab you are on and how full a
+ * bar is stop being visible while every neighbour looks the same.
+ *
+ * Outlines and borders survive, and system colours are what the user chose, so
+ * the answer is shape: an outline on the chosen thing, a border around the
+ * track, Highlight for the part that is filled. This is the one place a
+ * media query holds component styles on purpose -- it redefines no token and
+ * there is no second theme here for it to drift against (red line 5). */
+@media (forced-colors: active) {
+  [aria-current='true'],
+  .vp-tab[aria-selected='true'],
+  .vp-tab[data-active='true'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .vp-primary {
+    border: 1px solid ButtonText;
+  }
+
+  .vp-bar {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+
+  /* Both the fill of a meter and the segments of the spend mix. Segments are
+     told apart by the Canvas-coloured gap after each one; the legend beside
+     the bar says which is which. */
+  .vp-bar > span {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    border-inline-end: 2px solid Canvas;
+  }
+
+  .vp-spark polyline,
+  .vp-spark path[stroke]:not([stroke='none']) {
+    stroke: CanvasText;
+  }
+
+  .vp-spark polygon,
+  .vp-spark path[fill]:not([fill='none']) {
+    fill: CanvasText;
+  }
 }
 
 /* xterm sizes itself against the element it is given; without an explicit

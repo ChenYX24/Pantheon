@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
-import { CornerDownLeft, Send } from 'lucide-react'
+import { CornerDownLeft, Send, WifiOff } from 'lucide-react'
 import { t, useLang } from '../../i18n'
 import { AttachmentPicker } from './AttachmentPicker'
+import { isEnter } from '../enter'
 
 /**
  * Whether this submission is a new one.
@@ -36,11 +37,15 @@ export function isNewSubmission(text: string, last: string): boolean {
  */
 export function ComposeInput({
   sessionId,
+  disconnected = false,
   onPaste,
   onFiles,
 }: {
   sessionId: string
-  onPaste: (text: string, submit: boolean) => void
+  /** Send is off while the panel is not connected; typing a draft is not. */
+  disconnected?: boolean
+  /** False when nothing was sent, and then the box keeps what was typed. */
+  onPaste: (text: string, submit: boolean) => boolean
   /**
    * Attach files, which on a phone has no other road.
    *
@@ -63,6 +68,9 @@ export function ComposeInput({
   const lastSent = useRef('')
   const [text, setText] = useState('')
   const [newline, setNewline] = useState(true)
+  // Set when a send did not leave: the words stay in the box and this says
+  // why. Cleared by the next edit or the next send that does leave.
+  const [unsent, setUnsent] = useState(false)
 
   // What is in the box belongs to the session it was typed for.
   //
@@ -126,7 +134,15 @@ export function ComposeInput({
     // So there is one road now. It was two because a single line looked like
     // it did not need the paste machinery, which is true of the bracketing and
     // false of the part that matters.
-    onPaste(text, newline)
+    if (!onPaste(text, newline)) {
+      // Not connected. The box used to clear regardless, and the text was in
+      // no pane after the reconnect. Kept, and not queued: whether it still
+      // makes sense to send once the link is back is the person's call.
+      lastSent.current = ''
+      setUnsent(true)
+      return
+    }
+    setUnsent(false)
     setDrafts((d) => {
       const next = { ...d }
       delete next[sessionId]
@@ -136,16 +152,21 @@ export function ComposeInput({
   }
 
   return (
-    <div
-      data-testid="compose"
-      className="flex shrink-0 items-end gap-1 border-t border-hairline px-2 py-1.5 vp-blur"
-    >
+    <div data-testid="compose" className="shrink-0 border-t border-hairline px-2 py-1.5 vp-blur">
+      {unsent && (
+        <p role="alert" data-testid="compose-unsent" className="mb-1 flex items-center gap-1.5 text-vp-sm text-ink">
+          <WifiOff size={14} aria-hidden className="shrink-0" style={{ color: 'var(--vp-state-crashed)' }} />
+          {t('compose.unsent')}
+        </p>
+      )}
+      <div className="flex items-end gap-1">
       <textarea
         value={text}
         onChange={(e) => {
           // Any edit makes the next submission a new one, including retyping
           // the same words on purpose.
           lastSent.current = ''
+          setUnsent(false)
           setText(e.target.value)
         }}
         onKeyDown={(e) => {
@@ -164,7 +185,7 @@ export function ComposeInput({
           // that report it without setting isComposing are the transcription
           // and dictation ones -- the same family as the double-send above.
           if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
-          if (e.key === 'Enter' && !e.shiftKey) {
+          if (isEnter(e) && !e.shiftKey) {
             e.preventDefault()
             send()
           }
@@ -182,7 +203,7 @@ export function ComposeInput({
       <button
         type="button"
         onClick={() => setNewline((v) => !v)}
-        title={newline ? 'Sends with Enter' : 'Sends without Enter'}
+        title={newline ? t('compose.withEnter') : t('compose.withoutEnter')}
         data-testid="compose-newline"
         data-on={newline ? 'true' : 'false'}
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-vp border border-hairline transition-colors duration-150 ease-vp ${
@@ -194,7 +215,7 @@ export function ComposeInput({
       <button
         type="button"
         onClick={send}
-        disabled={!text}
+        disabled={!text || disconnected}
         title={t('compose.send')}
         data-testid="compose-send"
         className="flex h-8 w-9 shrink-0 items-center justify-center rounded-vp transition-opacity duration-150 ease-vp disabled:opacity-40"
@@ -202,6 +223,7 @@ export function ComposeInput({
       >
         <Send size={13} />
       </button>
+      </div>
     </div>
   )
 }

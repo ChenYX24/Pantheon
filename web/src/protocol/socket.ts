@@ -1,6 +1,6 @@
 import { appURL, appSessionStorage } from '../basePath'
 import { decodeData, encodeData } from './wire'
-import type { ClientMessage, LoadTiming, PanelState, ResourceAction, ResourceAlert, ServerMessage, StateMessage } from './wire'
+import type { ClientMessage, LoadTiming, PanelState, ResourceAction, ResourceAlert, ServerMessage, StateMessage, SessionNotice } from './wire'
 
 /** What a subscriber to one session receives. */
 export interface StreamHandlers {
@@ -56,6 +56,16 @@ interface Stream {
    * holds exactly the bytes it broadcasts. Null until the first confirmation.
    */
   position: { stream: string; next: number } | null
+  /**
+   * The server said this stream's attachment ended, and nothing has replaced
+   * it: the tmux session was killed, or went with the machine. The terminal
+   * is still mounted and still wants the session, so when a state push shows
+   * the session running again -- restored, under the same id -- the
+   * subscription is sent again. Without this a restored session showed the
+   * old stream's last frame, "[exited]", until the page was reloaded, and
+   * typing into it went nowhere.
+   */
+  ended: boolean
 }
 
 /** Connection state, for the UI to show honestly rather than pretending. */
@@ -151,6 +161,9 @@ export class PanelSocket {
   private latency: LinkLatency | null = null
   private latencyListeners = new Set<(latency: LinkLatency | null) => void>()
   private closed = false
+  // The pending reconnect, so close() can cancel it. Without that a socket
+  // closed while a retry was scheduled reopened itself a moment later.
+  private retry: ReturnType<typeof setTimeout> | undefined
   /** When the last frame of any kind arrived. See DEAD_AFTER_MS. */
   private lastSeenAt = 0
   private statusListeners = new Set<(s: SocketStatus) => void>()
@@ -160,6 +173,7 @@ export class PanelSocket {
   private stateListeners = new Set<(s: PanelState) => void>()
   private panelListeners = new Set<(projectId: string, kind: string) => void>()
   private resourceListeners = new Set<(alert: ResourceAlert | null, acted: ResourceAction | null) => void>()
+  private noticeListeners = new Set<(n: SessionNotice) => void>()
   private errorListeners = new Set<(sessionId: string, message: string) => void>()
 
   constructor() {
@@ -202,7 +216,19 @@ export class PanelSocket {
   }
 
   connect() {
-    if (this.ws || this.closed) return
+    if (this.ws) return
+    if (this.closed) {
+      // Opened again after close(). React's StrictMode does exactly that in
+      // development -- effect, cleanup, effect -- on the one socket App keeps
+      // in a useMemo, and `closed` was never reset: under `npm run dev` the
+      // panel never connected at all. Production runs the effect once, which
+      // is why nothing else saw it.
+      this.closed = false
+      window.addEventListener('offline', this.onOffline)
+      window.addEventListener('online', this.onOnline)
+    }
+    clearTimeout(this.retry)
+    this.retry = undefined
     this.setStatus('connecting')
 
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -211,6 +237,7 @@ export class PanelSocket {
     this.ws = ws
 
     ws.onopen = () => {
+      if (this.ws !== ws) return
       this.backoff = 500
       this.lastSeenAt = Date.now()
       this.setStatus('open')
@@ -225,6 +252,7 @@ export class PanelSocket {
     }
 
     ws.onmessage = (ev) => {
+      if (this.ws !== ws) return
       // Any frame, of any kind, is proof the connection is alive.
       this.lastSeenAt = Date.now()
       if (ev.data instanceof ArrayBuffer) {
@@ -241,13 +269,16 @@ export class PanelSocket {
     }
 
     ws.onclose = () => {
+      // A socket close() let go of can still report its close afterwards, and
+      // must not take the status or the streams of the one opened since.
+      if (this.ws !== ws) return
       this.ws = null
       this.stopPing()
       for (const stream of this.streams.values()) stream.ref = null
       this.byRef.clear()
       this.setStatus('closed')
       if (!this.closed) {
-        setTimeout(() => this.connect(), this.backoff)
+        this.retry = setTimeout(() => this.connect(), this.backoff)
         this.backoff = Math.min(this.backoff * 2, MAX_BACKOFF_MS)
       }
     }
@@ -265,6 +296,16 @@ export class PanelSocket {
     if (!stream) return
     if (stream.position) stream.position.next += frame.payload.byteLength
     stream.handlers.onData(frame.payload, frame.replay)
+  }
+
+  /**
+   * Whether an end-of-stream message is about a stream this one has already
+   * replaced. Matched by session id alone, an `exit` the server sent for the
+   * subscription a remount had just cancelled ended the new one: a live
+   * session drawn as exited. A message with no ref is believed, as before.
+   */
+  private stale(stream: Stream, ref: number | undefined): boolean {
+    return ref !== undefined && stream.ref !== ref
   }
 
   private handleControl(msg: ServerMessage) {
@@ -285,6 +326,7 @@ export class PanelSocket {
           msg.resumed === true && stream.position !== null && stream.position.stream === msg.replayStream
         if (stream.confirmed && !resumed) stream.handlers.onReset?.()
         stream.confirmed = true
+        stream.ended = false
         stream.ref = msg.ref
         stream.position = msg.replayStream ? { stream: msg.replayStream, next: msg.replayOffset ?? 0 } : null
         this.byRef.set(msg.ref, stream)
@@ -320,14 +362,16 @@ export class PanelSocket {
         // replays from the ring, so the terminal catches up instead of
         // silently going dead.
         const stream = msg.sessionId ? this.streams.get(msg.sessionId) : undefined
-        if (!stream) return
+        if (!stream || this.stale(stream, msg.ref)) return
         stream.ref = null
         this.sendSubscribe(stream)
         break
       }
       case 'exit': {
         const stream = msg.sessionId ? this.streams.get(msg.sessionId) : undefined
-        stream?.handlers.onExit?.()
+        if (!stream || this.stale(stream, msg.ref)) break
+        stream.ended = true
+        stream.handlers.onExit?.()
         break
       }
       case 'panel': {
@@ -346,8 +390,40 @@ export class PanelSocket {
         for (const fn of this.resourceListeners) fn(m.alert ?? null, m.acted ?? null)
         break
       }
+      case 'notice': {
+        // Rebuilt from checked fields: the words are a session's, shown
+        // through safeText by whoever draws them, and the shape is this.
+        const m = msg as Partial<SessionNotice>
+        if (typeof m.sessionId !== 'string' || typeof m.text !== 'string') break
+        const n: SessionNotice = {
+          t: 'notice',
+          sessionId: m.sessionId,
+          title: typeof m.title === 'string' ? m.title : '',
+          project: typeof m.project === 'string' ? m.project : '',
+          level: typeof m.level === 'string' ? m.level : 'info',
+          text: m.text,
+          choices: Array.isArray(m.choices) ? m.choices.filter((c): c is string => typeof c === 'string') : [],
+          url: typeof m.url === 'string' ? m.url : '',
+        }
+        for (const fn of this.noticeListeners) fn(n)
+        break
+      }
       case 'state': {
         const st = msg as unknown as StateMessage
+        // A session this client watched to its end is running again: restored
+        // from its row, with the same id, so the mounted terminal is the right
+        // one and only its stream is stale. Subscribe again, from the start --
+        // the new attachment is a new stream, so there is nothing to resume --
+        // and the confirmation that follows resets the terminal, the same path
+        // a reconnect takes.
+        for (const stream of this.streams.values()) {
+          if (!stream.ended) continue
+          const row = st.sessions.find((x) => x.id === stream.sessionId)
+          if (!row || row.exited) continue
+          stream.ended = false
+          stream.position = null
+          this.sendSubscribe(stream)
+        }
         for (const fn of this.stateListeners) {
           fn({
             projects: st.projects,
@@ -361,6 +437,7 @@ export class PanelSocket {
             hasProjectOrder: st.hasProjectOrder ?? false,
             stateGuessed: st.stateGuessed,
             hooksInstalled: st.hooksInstalled ?? false,
+            pluginsRev: st.pluginsRev ?? 0,
           })
         }
         break
@@ -419,6 +496,14 @@ export class PanelSocket {
     }
   }
 
+  /** A session spoke up: `vibepanel me say` or `notify`. */
+  onNotice(fn: (n: SessionNotice) => void) {
+    this.noticeListeners.add(fn)
+    return () => {
+      this.noticeListeners.delete(fn)
+    }
+  }
+
   /**
    * Called when the memory question changes: a new one, a countdown starting,
    * or null when it has been answered or has gone away on its own.
@@ -464,7 +549,7 @@ export class PanelSocket {
   }
 
   subscribe(sessionId: string, cols: number, rows: number, handlers: StreamHandlers, hidden = false) {
-    const stream: Stream = { sessionId, handlers, ref: null, cols, rows, confirmed: false, hidden, position: null }
+    const stream: Stream = { sessionId, handlers, ref: null, cols, rows, confirmed: false, hidden, position: null, ended: false }
     this.streams.set(sessionId, stream)
     this.sendSubscribe(stream)
     this.updateProbes()
@@ -497,8 +582,8 @@ export class PanelSocket {
   }
 
   /** Sends text, encoded as UTF-8. */
-  writeText(sessionId: string, text: string) {
-    this.write(sessionId, new TextEncoder().encode(text))
+  writeText(sessionId: string, text: string): boolean {
+    return this.write(sessionId, new TextEncoder().encode(text))
   }
 
   /**
@@ -514,20 +599,29 @@ export class PanelSocket {
    * The server routes this through tmux, which brackets it only if the pane's
    * application asked for bracketed paste. See MsgPaste.
    */
-  pasteText(sessionId: string, text: string, submit = false) {
+  pasteText(sessionId: string, text: string, submit = false): boolean {
     const stream = this.streams.get(sessionId)
-    if (!stream || stream.ref === null || this.ws?.readyState !== WebSocket.OPEN) return
+    if (!stream || stream.ref === null || this.ws?.readyState !== WebSocket.OPEN) return false
     // `submit` is the server's job: the paste goes by the tmux command socket
     // and a return would go by the PTY, so sending them from here would be
     // racing two roads to the same pane.
     this.send({ t: 'paste', sessionId, text, submit })
+    return true
   }
 
-  /** Sends raw bytes to a session. */
-  write(sessionId: string, data: Uint8Array) {
+  /**
+   * Sends raw bytes to a session, and says whether they left.
+   *
+   * False means nothing was sent: no socket, or no stream yet. The compose box
+   * cleared itself without asking and the words were simply gone -- typed on a
+   * phone in a lift, sent, the box emptied, and after the reconnect no pane had
+   * them. A caller holding something the person wrote keeps it on false.
+   */
+  write(sessionId: string, data: Uint8Array): boolean {
     const stream = this.streams.get(sessionId)
-    if (!stream || stream.ref === null || this.ws?.readyState !== WebSocket.OPEN) return
+    if (!stream || stream.ref === null || this.ws?.readyState !== WebSocket.OPEN) return false
     this.ws.send(encodeData(stream.ref, data))
+    return true
   }
 
   resize(sessionId: string, cols: number, rows: number, takeControl = false) {
@@ -598,6 +692,8 @@ export class PanelSocket {
 
   close() {
     this.closed = true
+    clearTimeout(this.retry)
+    this.retry = undefined
     window.removeEventListener('offline', this.onOffline)
     window.removeEventListener('online', this.onOnline)
     document.removeEventListener('visibilitychange', this.updateProbes)
