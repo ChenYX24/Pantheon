@@ -1,4 +1,5 @@
 import { appStorage } from '../../basePath'
+import { isEnter } from '../enter'
 import type { HomeExecutor, HomeMessage, HomeModels, HomeSendResult } from '../../protocol/home'
 
 export function modelDefault(models: HomeModels, remembered: HomeExecutor | null): HomeExecutor | null {
@@ -69,5 +70,5 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 export function chatPollInterval(state: ChatState): number { return state.run || state.sending ? 2000 : 10000 }
 export function chatPending(state: ChatState): boolean { return state.sending || !!state.run || state.messages.some((entry) => entry.status === 'pending') }
 export function enterSends(event: { key: string; shiftKey: boolean; isComposing: boolean; keyCode?: number }): boolean {
-  return event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229
+  return isEnter(event) && !event.shiftKey
 }
