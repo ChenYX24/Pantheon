@@ -959,7 +959,10 @@ export function TerminalView({
       // different terminal's screen in any frame where focus was on neither.
       data-session-id={sessionId}
       data-fullscreen={fullscreen ? 'true' : undefined}
-      className={`relative overflow-hidden ${className ?? ''}`}
+      // isolate: the scroll rail's z-index 12 (above xterm's own 11) is about
+      // layers inside this box. Without a stacking context of its own it was
+      // compared with the phone drawer's scrim (z-10) and took its taps.
+      className={`relative isolate overflow-hidden ${className ?? ''}`}
     >
       {!hidden && loadPhase !== 'ready' && (() => {
         const pct = loadPercents(loadCounts)
