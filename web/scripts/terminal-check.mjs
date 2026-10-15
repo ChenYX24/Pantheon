@@ -71,8 +71,8 @@ try {
           if (owner) setTimeout(() => handlers.onSize(cols, rows, true), delay)
         },
       }
-      const render = (hidden = false) => root.render(h(TerminalView, {
-        socket, sessionId: 'fixture', themeKey: 'dark', hidden,
+      const render = (hidden = false, fullscreen = false) => root.render(h(TerminalView, {
+        socket, sessionId: 'fixture', themeKey: 'dark', hidden, fullscreen,
         className: hidden ? 'hidden h-full w-full' : 'h-full w-full',
       }))
       const snapshot = (term) => ({
@@ -160,6 +160,40 @@ try {
       return fixture.requests
     })
     assert.deepEqual(result, [])
+  })
+
+  // Entering a fullscreen program used to add right padding to .xterm, which
+  // made the controlling viewer propose two fewer columns: a real tmux resize
+  // and a full repaint every time Codex or vim opened. The paging control has
+  // to fit in the gutter the normal grid already leaves.
+  await check('a fullscreen program keeps the grid and its paging control clears the text', async () => {
+    const result = await page.evaluate(async () => {
+      const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      fixture.render(false, false)
+      await frames()
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const before = [fixture.term.cols, fixture.term.rows]
+      fixture.requests.length = 0
+      fixture.render(false, true)
+      await frames()
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const during = [fixture.term.cols, fixture.term.rows]
+      const pager = document.querySelector('.vp-terminal-scroll')?.getBoundingClientRect()
+      const screen = document.querySelector('.xterm-screen')?.getBoundingClientRect()
+      fixture.render(false, false)
+      await frames()
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      return {
+        before, during, after: [fixture.term.cols, fixture.term.rows], requests: [...fixture.requests],
+        pager: pager && { left: pager.left, width: pager.width }, textRight: screen?.right,
+      }
+    })
+    assert.deepEqual(result.during, result.before)
+    assert.deepEqual(result.after, result.before)
+    assert.deepEqual(result.requests, [])
+    assert.ok(result.pager && result.pager.width > 0, 'the paging control is shown in fullscreen')
+    assert.ok(result.pager.left >= result.textRight - 0.5,
+      `the paging control starts at ${result.pager.left}, inside text ending at ${result.textRight}`)
   })
 } finally {
   await browser?.close()
