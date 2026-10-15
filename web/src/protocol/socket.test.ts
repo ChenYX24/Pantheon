@@ -32,6 +32,10 @@ function newSocket(): PanelSocket {
   ;(globalThis as unknown as { window: { addEventListener: () => void } }).window = {
     addEventListener: () => {},
   }
+  ;(globalThis as unknown as { document: unknown }).document = {
+    addEventListener: () => {}, removeEventListener: () => {}, querySelector: () => null,
+    visibilityState: 'hidden',
+  }
   return new PanelSocket()
 }
 

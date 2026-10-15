@@ -5,6 +5,7 @@ import { HOME_PATH, PROJECTS_PATH } from './routes'
 import { Tour } from './components/Tour'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Activity,
   ChevronUp,
   House,
   Kanban,
@@ -13,11 +14,12 @@ import {
   PanelRight,
   RotateCcw,
   Settings as SettingsIcon,
+  TriangleAlert,
 } from 'lucide-react'
 
 import { api, UnauthorizedError } from './protocol/api'
 import { PanelSocket } from './protocol/socket'
-import type { SocketStatus } from './protocol/socket'
+import type { LinkLatency, SocketStatus } from './protocol/socket'
 import type {
   ArchivedProject,
   AuthState,
@@ -266,6 +268,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
   const [touchKeys, setTouchKeys] = useState(false)
 
   const [status, setStatus] = useState<SocketStatus>('closed')
+  const [latency, setLatency] = useState<LinkLatency | null>(null)
+  useEffect(() => socket.onLatency(setLatency), [socket])
   const [state, setState] = useState<PanelState>({
     projects: [],
     sessions: [],
@@ -1335,6 +1339,16 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
               >
                 {current.cols}×{current.rows}
               </span>
+              {!narrow && latency && (
+                <span
+                  data-testid="link-latency"
+                  title={`${t('app.linkLatencyWhy')} ${t('app.linkJitter', { ms: Math.round(latency.jitterMs) })}`}
+                  className={`flex shrink-0 items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5 tabular text-vp-xs ${latency.rttMs >= 150 ? 'text-state-waiting' : 'text-ink-2'}`}
+                >
+                  {latency.rttMs >= 150 ? <TriangleAlert size={11} aria-hidden="true" /> : <Activity size={11} aria-hidden="true" />}
+                  {t('app.linkLatency', { ms: Math.round(latency.rttMs) })}
+                </span>
+              )}
             </>
           ) : (
             <span className="text-vp-md text-ink-2">{t('app.noSessionShort')}</span>

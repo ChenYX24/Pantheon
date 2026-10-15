@@ -715,6 +715,12 @@ const DICT = {
   'conn.connecting': { zh: '连接中', en: 'connecting' },
   'conn.closed': { zh: '已断开', en: 'closed' },
   'app.gridSize': { zh: '所有观看端看到的网格', en: 'The grid every viewer of this session is seeing' },
+  'app.linkLatency': { zh: '{ms} 毫秒', en: '{ms} ms' },
+  'app.linkLatencyWhy': {
+    zh: '此浏览器到面板的往返延迟，包含代理；数值越高，打字越慢。',
+    en: 'Round trip from this browser to the panel, including the proxy. Higher values make typing lag.',
+  },
+  'app.linkJitter': { zh: '延迟波动：{ms} 毫秒', en: 'Variation: {ms} ms' },
   'app.restart': { zh: '重启', en: 'restart' },
   'app.hidePanel': { zh: '收起面板', en: 'Hide panel' },
   'app.showPanel': { zh: '展开面板', en: 'Show panel' },
