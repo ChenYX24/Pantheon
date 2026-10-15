@@ -25053,3 +25053,9 @@ The terminal layout effect depends on column and row values rather than each
 size reply's object, and fullscreen no longer retriggers it. The existing
 requested-size suppression is unchanged. All 12 terminal replay tests passed;
 the Conductor's terminal check still covers real resize acknowledgements.
+
+Rollover status reads now poll only while the action is busy or the reply is
+asking, waiting or ending. Visibility and action transitions refresh the status;
+equal replies do not update state. The effect drops timers, listeners and late
+responses on cleanup. TypeScript and all 12 rollover tests passed, including
+fake-timer coverage for idle, completion, visibility and unmount.
