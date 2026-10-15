@@ -263,7 +263,9 @@ try {
   if (!(await link.isVisible())) note('fail', 'rail', 'no Plugins link in the settings rail')
   await link.click()
   await page.waitForURL(`${BASE}/plugins`)
-  if (!(await page.getByTestId('plugins-empty').isVisible())) note('fail', 'page', 'the empty state is not shown')
+  // Waited for: Pantheon loads each page's chunk on demand, so the URL can
+  // change a moment before the page draws.
+  if (!(await page.getByTestId('plugins-empty').waitFor({ timeout: 10_000 }).then(() => true, () => false))) note('fail', 'page', 'the empty state is not shown')
   else pass('rail', 'the settings rail reaches /plugins, empty')
 
   // ── 2. A plugin arrives from a directory, with its screen ─────────────
