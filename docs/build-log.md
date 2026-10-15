@@ -25048,3 +25048,8 @@ control at both pointer sizes without changing the grid on alternate-screen
 entry. The normal-buffer scrollbar remains visible. All 10 style tests passed,
 including the padding invariant and the installed FitAddon's gutter calculation.
 Browser checks are left to the Conductor on this shared host.
+
+The terminal layout effect depends on column and row values rather than each
+size reply's object, and fullscreen no longer retriggers it. The existing
+requested-size suppression is unchanged. All 12 terminal replay tests passed;
+the Conductor's terminal check still covers real resize acknowledgements.

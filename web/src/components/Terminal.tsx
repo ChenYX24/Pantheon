@@ -681,7 +681,8 @@ export function TerminalView({
     return () => cancelAnimationFrame(frame)
   }, [hidden])
 
-  // Resize handling for both modes.
+  // Size replies can repeat the same grid. Depend on its dimensions so those
+  // acknowledgements do not rebuild the observer and schedule another fit.
   useEffect(() => {
     const wrap = wrapRef.current
     const host = hostRef.current
@@ -779,7 +780,7 @@ export function TerminalView({
       ro.disconnect()
       if (frame !== null) cancelAnimationFrame(frame)
     }
-  }, [socket, sessionId, controlling, grid, hidden, fullscreen])
+  }, [socket, sessionId, controlling, grid.cols, grid.rows, hidden])
 
   // Offer to take the grid only when this window would actually render a
   // different one. Two windows the same size see an identical picture, so a
