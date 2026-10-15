@@ -26,9 +26,12 @@ import { describe, expect, it } from 'vitest'
  * exactly the events that attribute covers.
  *
  * A source scan rather than a DOM test, and not only because vitest runs on
- * `node` here: the failure is structural. A fourth listener added anywhere
- * reintroduces it, and testing any surviving handler in isolation would never
- * notice -- each one is correct on its own. That is what made it survive review.
+ * `node` here: the failure is structural. Another uploading listener added
+ * anywhere reintroduces it, and testing any surviving handler in isolation
+ * would never notice -- each one is correct on its own. Local echo now also
+ * observes paste to clear its predictions, including a one-character text
+ * paste. That observer has no upload or input path; the check below pins that
+ * exception instead of allowing terminal paste handlers in general.
  */
 
 const ROOT = new URL('.', import.meta.url).pathname
@@ -59,7 +62,7 @@ function code(rel: string): string {
 }
 
 describe('a pasted screenshot is uploaded once', () => {
-  it('has exactly the two paste listeners, and no more', () => {
+  it('has only the two upload listeners and the local-echo observer', () => {
     const found: string[] = []
     for (const path of sources(ROOT)) {
       const src = readFileSync(path, 'utf8')
@@ -72,8 +75,18 @@ describe('a pasted screenshot is uploaded once', () => {
     }
     expect(found.sort()).toEqual([
       'App.tsx: document',
+      'components/localEchoOverlay.ts: host',
       'components/panels/FileTree.tsx: window',
     ])
+  })
+
+  it('the prediction observer cannot upload, forward input or take over the paste event', () => {
+    const src = code('components/localEchoOverlay.ts')
+    expect(src).toContain("host.addEventListener('paste', paste, { capture: true, passive: true })")
+    expect(src).not.toMatch(/\b(?:clipboardData|filesFrom|uploadInto|fetch|appFetch|preventDefault|stopPropagation)\b/)
+    expect(src).not.toMatch(/\.(?:write|writeText|paste|pasteText|send)\s*\(/)
+    expect([...src.matchAll(/\bsocket\.(\w+)\(/g)].map((match) => match[1]).sort())
+      .toEqual(['getLatency', 'onLatency', 'onStatus'])
   })
 
   it('the file panel claims only what is inside it', () => {

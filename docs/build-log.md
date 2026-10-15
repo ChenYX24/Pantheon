@@ -25098,3 +25098,40 @@ managed line of a Pantheon build and fails if any upstream control appears.
 The same render-check on the pre-change build (6e6addd) has the same two
 clipboard failures (an OSC 52 copy inside tmux) and the same 320-wide phone
 overflow (53px there), so neither comes from this change.
+
+## 2026-10-15 — Show terminal round trips and preview typing on slow links
+
+The session header shows the last ten application round trips as a mean, with
+successive-sample variation in its translated tooltip. A warning triangle joins
+the colour at 150 ms; the chip stays off phone headers. Visible terminals share
+a 2.5-second probe, with one ping outstanding at a time. Hidden tabs keep only
+the existing 25-second heartbeat and 60-second silence check. No wire change.
+
+Local typing preview draws dim, underlined ASCII in a separate screen overlay,
+using FitAddon's cell metrics. It never writes xterm's buffer or changes input
+bytes. Auto requires RTT above 60 ms and a recent confirmed echo; Always on
+removes only the RTT gate. Glitches, timeouts, prompt boundaries and visibility
+changes require silent confirmation again. The browser-scoped choice applies
+immediately under Sessions. This branch had renderer storage but no renderer
+control to place it beside.
+
+Prediction skips existing text, wrapping, wide characters, IME input, replay,
+passive viewers and fullscreen programs. The fullscreen flag comes from tmux's
+alternate-screen state: xterm can still be in its normal buffer, so both gates
+are checked. Echo confidence is a client heuristic, not a server TTY echo flag;
+an unannounced mode change cannot be identified with certainty. Predictions
+cannot fix packet loss.
+
+Validation ran serially at nice 19 with a 900 MiB Node heap and one Vitest
+worker: TypeScript, 133 targeted tests, and 929 tests across the full suite's
+99 files passed. Changed-file ESLint has only the two existing App.tsx Fast
+Refresh warnings. The first full run found the paste-listener count guard;
+it now permits the passive prediction observer while forbidding upload, input
+and event-cancellation paths there. The corrected full run passed.
+
+The Conductor runs `cd web && npm run check:terminal`. Its new cases cover a
+300 ms echo, overlay geometry and buffer separation, a non-echoing password
+prompt after a glitch, Enter, unchanged input bytes, single-character paste,
+IME commits, tmux fullscreen status and the live preference. Only script and
+embedded-fixture syntax were checked here. Browser checks, the embedded bundle
+rebuild and deployment were not run on this shared host.

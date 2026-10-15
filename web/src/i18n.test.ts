@@ -38,9 +38,22 @@ describe('i18n', () => {
         ['monitor.cores', { n: 16 }],
         ['monitor.free', { size: '1 GiB' }],
         ['dir.truncated', { shown: 10, total: 99 }],
+        ['app.linkLatency', { ms: 183 }],
+        ['app.linkJitter', { ms: 20 }],
       ] as const) {
         const out = t(key, params)
         expect(out, `${key} in ${lang}`).not.toMatch(/\{[a-z]+\}/i)
+      }
+    }
+  })
+
+  it('names typing preview and its three choices in both languages', () => {
+    for (const lang of ['en', 'zh'] as const) {
+      setLang(lang)
+      const choices = [t('term.echoAuto'), t('term.echoOff'), t('term.echoOn')]
+      expect(new Set(choices).size).toBe(3)
+      for (const text of [...choices, t('term.echoTitle'), t('term.echoWhy'), t('term.echoPending'), t('app.linkLatencyWhy')]) {
+        expect(text).toMatch(lang === 'zh' ? /[\u4e00-\u9fff]/ : /[A-Za-z]/)
       }
     }
   })

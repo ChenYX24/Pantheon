@@ -6,6 +6,7 @@ import { copyText, copyTextInGesture } from '../clipboard'
 import { isBrowserCopy, isBrowserPaste } from './clipboardKeys'
 import { attachImeCommitFix } from './imeInput'
 import { rendererPreference } from './renderer'
+import { attachLocalEcho } from './localEchoOverlay'
 import { TerminalReplay } from './terminalReplay'
 import { fullscreenWheel } from './terminalWheel'
 import { TerminalScrollBar } from './TerminalScrollBar'
@@ -158,12 +159,16 @@ export function TerminalView({
   const hiddenRef = useRef(hidden)
   const fullscreenRef = useRef(fullscreen)
   const scrollInputRef = useRef<(data: string) => void>(() => {})
+  const resetEchoRef = useRef<() => void>(() => {})
   useEffect(() => {
     onSelectionRef.current = onSelectionChange
     onClipboardRef.current = onClipboard
     hiddenRef.current = hidden
     fullscreenRef.current = fullscreen
   })
+  useEffect(() => {
+    if (hidden || fullscreen) resetEchoRef.current()
+  }, [hidden, fullscreen])
 
   // Terminal lifetime is tied to the session, never to the theme or to
   // callbacks: recreating it would clear the screen and lose the scrollback the
@@ -387,6 +392,14 @@ export function TerminalView({
         showCounts()
       },
     )
+    const localEcho = attachLocalEcho(term, host, socket, () => ({
+      controlling: controllingRef.current,
+      readOnly,
+      replaying: replayQueue.replaying || !finishedRef.current,
+      fullscreen: fullscreenRef.current,
+      hidden: hiddenRef.current,
+    }))
+    resetEchoRef.current = localEcho.reset
 
     // iOS Chrome/Safari emits direct punctuation and space input as a keydown
     // with keyCode 229 but no active composition. xterm marks that keydown as
@@ -416,6 +429,7 @@ export function TerminalView({
       if (text === null) return
       if (replayQueue.replaying) return
       socket.writeText(sessionId, text)
+      localEcho.reset()
       // Prevent xterm's own input listener from seeing the same character. The
       // keyup clears the flag after iOS finishes a space-to-punctuation pair.
       event.stopPropagation()
@@ -430,6 +444,7 @@ export function TerminalView({
     const dataSub = term.onData((data) => {
       if (replayQueue.replaying) return
       socket.write(sessionId, encoder.encode(data))
+      localEcho.input(data)
     })
     // Binary input is what arrives for pasted bytes that are not valid UTF-16
     // text; without this branch those keystrokes vanish.
@@ -438,6 +453,7 @@ export function TerminalView({
       const bytes = new Uint8Array(data.length)
       for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i) & 0xff
       socket.write(sessionId, bytes)
+      localEcho.reset()
     })
 
     socket.subscribe(sessionId, term.cols, term.rows, {
@@ -450,6 +466,7 @@ export function TerminalView({
       // buffer on a server that has just started), clearing here would blank a
       // terminal that still had something worth reading in it.
       onReset: () => {
+        localEcho.reset()
         replayQueue.restart()
         requestedSizeRef.current = null
         resuming = false
@@ -465,6 +482,7 @@ export function TerminalView({
         setLoadPhase('replay')
       },
       onSubscribed: ({ replayBytes, resumed }) => {
+        localEcho.reset()
         if (resumed) {
           // Only what was missed while the connection was down, appended to
           // what is on screen. onReset was not called, so the size and the
@@ -517,6 +535,7 @@ export function TerminalView({
         // the last chunk is parsed and the viewport is on the live screen.
         if (replay && !resuming) setCovering(true)
         if (replay) {
+          localEcho.reset()
           replayReceivedRef.current += bytes.byteLength
           timer.markByte(replayReceivedRef.current >= replayTotalRef.current)
           showCounts()
@@ -526,6 +545,7 @@ export function TerminalView({
         replayQueue.enqueue(bytes, replay)
       },
       onSize: (cols, rows, isControlling) => {
+        if (!isControlling) localEcho.reset()
         if (controllingRef.current !== isControlling) requestedSizeRef.current = null
         controllingRef.current = isControlling
         setControlling(isControlling)
@@ -619,6 +639,8 @@ export function TerminalView({
 
     return () => {
       disposed = true
+      resetEchoRef.current = () => {}
+      localEcho.dispose()
       scrollInputRef.current = () => {}
       // The next terminal starts uncovered and connecting, not in whatever
       // state this one was left. See the reset at the top.

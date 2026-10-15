@@ -19,8 +19,8 @@ import type { ClientMessage, ServerMessage } from './wire'
  * the build, which was measured by adding one. What the compiler cannot say is
  * whether the case actually delivers anything, which is this.
  *
- * Two liberties, both deliberate. The stub is `window.addEventListener` and
- * nothing else: this file's vitest config keeps anything that needs a browser
+ * Two liberties, both deliberate. The stubs only supply event listeners and
+ * a hidden document: this file's vitest config keeps anything that needs a browser
  * in render-check, "because a jsdom approximation of those would pass while the
  * real thing was broken", and that is the right rule for the terminal and for
  * WebAuthn. Dispatching a decoded frame to a set of listeners is not a browser

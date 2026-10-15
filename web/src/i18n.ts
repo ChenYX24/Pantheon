@@ -1797,6 +1797,15 @@ const DICT = {
   'set.activity': { zh: '最近活动', en: 'Recent activity' },
 
   'term.takeControl': { zh: '接管', en: 'take control' },
+  'term.echoTitle': { zh: '本地输入预览', en: 'Local typing preview' },
+  'term.echoWhy': {
+    zh: '仅此浏览器生效。确认字符会回显后才预览；自动模式仅在高延迟时启用。',
+    en: 'This browser only. Preview after confirmed echo; Auto waits for a slow link.',
+  },
+  'term.echoAuto': { zh: '自动', en: 'Auto' },
+  'term.echoOff': { zh: '始终关闭', en: 'Always off' },
+  'term.echoOn': { zh: '始终开启', en: 'Always on' },
+  'term.echoPending': { zh: '带下划线的字符仍在等待服务器确认。', en: 'Underlined characters are waiting for the server.' },
   'term.fitPhone': { zh: '适应手机宽度', en: 'Fit to phone' },
   'term.takeControlWhy': {
     zh: '另一个观看端拥有这个网格（{cols}×{rows}），你这边能放下 {mine}。接管会让所有人重排。',
