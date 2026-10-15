@@ -1,1 +1,0 @@
-import{a as e,m as t,t as n}from"./useHomeResource-jWWUKvbv.js";var r=e=>t.index(!0,e);function i(){let t=n(r);return e(t.data?.available?t.data.projects:[])}export{i as t};
