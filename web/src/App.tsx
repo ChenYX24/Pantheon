@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronUp,
   House,
+  Kanban,
   LogOut,
   Menu,
   PanelRight,
@@ -1214,13 +1215,19 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
       <main className="flex min-w-0 flex-1 flex-col">
         {/* vp-safe-top repeats h-11; the two have to move together. See the
             class for why it is written that way rather than with box-sizing. */}
-        <header className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline px-3 vp-blur vp-safe-top">
+        {/* Narrower gaps on a phone: at 320px the Home link left the header 3px
+            past the screen with the connection dot cut off at the edge. */}
+        <header className={`flex h-11 shrink-0 items-center ${narrow ? 'gap-1.5' : 'gap-2'} border-b border-hairline px-3 vp-blur vp-safe-top`}>
           {narrow && (
             <a href={HOME_PATH} className="vp-control" title={t('home.shell.panelHome')} aria-label={t('home.shell.panelHome')} data-testid="header-home">
               <House size={16} />
             </a>
           )}
-          <a className="vp-control shrink-0" href={PROJECTS_PATH}>{t('pm.boardLink')}</a>
+          {/* An icon on a phone: as text, beside Home and the menu, it pushed
+              the header 89px past a 320-wide screen. */}
+          <a className="vp-control shrink-0" href={PROJECTS_PATH} title={t('pm.boardLink')} aria-label={t('pm.boardLink')}>
+            {narrow ? <Kanban size={16} /> : t('pm.boardLink')}
+          </a>
           {narrow && (
             <button
               type="button"

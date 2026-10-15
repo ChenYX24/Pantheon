@@ -4826,42 +4826,18 @@ browser = await chromium.launch({ headless: true })
     if (!/dev|\d+\.\d+\.\d+/.test(updateCurrent)) {
       note('FAIL', 'settings', `the update section does not show the running version: ${JSON.stringify(updateCurrent)}`)
     }
-    const autoCheck = page.locator('[data-testid="update-auto-check"]')
-    if (!(await autoCheck.isChecked().catch(() => false))) {
-      note('FAIL', 'settings', 'the automatic update check is off on a fresh panel; it is meant to be on until turned off')
-    } else {
-      // The setting is the server's: it has to survive leaving the group.
-      await autoCheck.click()
-      await sleep(500)
-      await settingsGroup(page, 'account')
-      await settingsGroup(page, 'panel')
-      await sleep(800)
-      if (await autoCheck.isChecked().catch(() => true)) {
-        note('FAIL', 'settings', 'the automatic update check came back on after leaving the group; the setting is not the server\'s')
+    // A Pantheon build has no self-update channel (selfupdate.ChannelEnabled):
+    // upstream vibepanel releases do not carry its migrations. The section
+    // says so in one line and offers nothing that would reach GitHub, even
+    // though a fresh database leaves the automatic check "on".
+    const managedLine = await page.locator('[data-testid="update-status"]').innerText().catch(() => '')
+    if (!/deployment runbook|部署脚本更新/.test(managedLine)) {
+      note('FAIL', 'settings', `the update section does not say this build is updated by its runbook: ${JSON.stringify(managedLine.slice(0, 200))}`)
+    }
+    for (const id of ['update-check', 'update-auto-check', 'update-release']) {
+      if (await page.locator(`[data-testid="${id}"]`).isVisible().catch(() => false)) {
+        note('FAIL', 'settings', `a managed build still offers ${id}, which would ask upstream vibepanel`)
       }
-      await autoCheck.click()
-      await sleep(500)
-    }
-    await page.locator('[data-testid="update-check"]').click()
-    let updateSaid = ''
-    for (let i = 0; i < 60; i++) {
-      await sleep(500)
-      updateSaid = await page.locator('[data-testid="update-status"]').innerText().catch(() => '')
-      if (updateSaid && !/Checking|正在检查/.test(updateSaid)) break
-    }
-    const known = [
-      'Up to date', 'is available', 'development build', 'No releases', 'no archive',
-      'cannot be reached', 'did not answer', 'rate-limited',
-    ]
-    if (!known.some((k) => updateSaid.includes(k))) {
-      note('FAIL', 'settings', `the update check ended in no sentence the panel has: ${JSON.stringify(updateSaid.slice(0, 200))}`)
-    }
-    if (/undefined|NaN|\[object/.test(updateSaid)) {
-      note('FAIL', 'settings', `the update status rendered a broken value: ${JSON.stringify(updateSaid)}`)
-    }
-    const checkedLine = await page.locator('[data-testid="update-checked"]').innerText().catch(() => '')
-    if (!/Last checked|上次检查|Checking|正在检查/.test(checkedLine)) {
-      note('FAIL', 'settings', `after a check the section does not say when: ${JSON.stringify(checkedLine)}`)
     }
     await page.screenshot({ path: join(SHOTS, 'settings-update.png') })
 
