@@ -25031,3 +25031,11 @@ field contract and service planner tests passed serially at nice 19 with bounded
 Go resources. HTTP route tests now run in process without tmux; updater HTTP
 fixtures and sudo stand-ins exercise the upstream paths. The real-sudo container
 test was skipped. No installed panel or service was changed.
+
+Settings keeps the current version and shows the managed explanation in English
+or Chinese, without check, install or auto-check controls. The sidebar notice
+also gives managed status precedence over stale release fields. TypeScript,
+31 tests across the update view/component, elevation, i18n, chrome vocabulary and
+dialog checks, and lint on the changed frontend files passed at nice 19. Browser
+checks and the embedded bundle rebuild were not run on this shared host; release
+packaging still needs to rebuild the frontend.

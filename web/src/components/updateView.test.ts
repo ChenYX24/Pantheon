@@ -12,6 +12,17 @@ const base: UpdateStatus = {
 }
 
 describe('what the update section says', () => {
+  it('gives managed builds precedence over saved releases and failures', () => {
+    const managed = {
+      ...base, managed: true, checkedAt: 1, version: 'v1.29.1', newer: true,
+      asset: 'https://example/upstream.tar.gz', unreachable: 'an old failure',
+    }
+    expect(statusLine(managed)).toEqual({ key: 'upd.managed' })
+    expect(statusLine({ ...base, managed: true })).toEqual({ key: 'upd.managed' })
+    expect(canApply(managed)).toBe(false)
+    expect(shouldNotice(managed, null)).toBe(false)
+  })
+
   it('says nothing until something has been asked', () => {
     expect(statusLine(base)).toBeNull()
     expect(statusLine({ ...base, checking: true })).toEqual({ key: 'upd.checking' })

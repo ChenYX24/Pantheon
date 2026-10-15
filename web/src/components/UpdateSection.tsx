@@ -65,7 +65,7 @@ export function UpdateSection() {
     }
   }, [take])
 
-  const active = jobActive(st?.job)
+  const active = !st?.managed && jobActive(st?.job)
 
   // The build that is running, so the wait after a restart can tell a new
   // process from the old one answering. Asked once, up front: by the time
@@ -103,7 +103,7 @@ export function UpdateSection() {
   // Once the job says the panel is restarting, wait for it to come back and
   // reload into it. The websocket and every cached snapshot belong to the
   // process that just went away.
-  const stage = st?.job?.stage
+  const stage = st?.managed ? undefined : st?.job?.stage
   useEffect(() => {
     if (stage !== 'restarting' || waiting.current) return
     waiting.current = true
@@ -118,6 +118,7 @@ export function UpdateSection() {
   }, [stage])
 
   const check = async () => {
+    if (!st || st.managed) return
     setBusy('check')
     try {
       take(await api.checkUpdate())
@@ -129,6 +130,7 @@ export function UpdateSection() {
   }
 
   const setAutoCheck = async (on: boolean) => {
+    if (!st || st.managed) return
     setBusy('setting')
     // Optimistic, so the box moves under the finger; the poll corrects it if
     // the write did not land.
@@ -144,7 +146,7 @@ export function UpdateSection() {
   }
 
   const apply = async (secret?: string) => {
-    if (!st?.version) return
+    if (!st?.version || st.managed) return
     if (
       !(await askConfirm({
         title: t('upd.confirmTitle', { v: st.version }),
@@ -197,6 +199,25 @@ export function UpdateSection() {
   }
 
   const line = st ? statusLine(st) : null
+  // Wait for the build's policy before offering actions. A managed build
+  // must not flash upstream controls while its first status is loading.
+  if (!st || st.managed) {
+    return (
+      <div data-testid="update-section">
+        {st && (
+          <div className="text-vp-base text-ink" data-testid="update-current">
+            <span className="text-ink-2">{t('upd.current')}</span>{' '}
+            <span className="font-mono">{safeText(st.current)}</span>
+          </div>
+        )}
+        {line && (
+          <p className="mt-2 text-vp-sm leading-relaxed text-ink-2" data-testid="update-status">
+            <Said line={line} />
+          </p>
+        )}
+      </div>
+    )
+  }
   const job = st?.job
   const jobSaid = job ? jobLine(job) : null
   const showRelease = Boolean(st?.newer && st.version)

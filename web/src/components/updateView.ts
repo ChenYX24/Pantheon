@@ -35,6 +35,7 @@ export function jobActive(job: UpdateJob | undefined): boolean {
  * the honest amount for a panel that has never looked.
  */
 export function statusLine(st: UpdateStatus): Line | null {
+  if (st.managed) return { key: 'upd.managed' }
   if (st.unreachable) {
     const key: Key =
       st.unreachableKind === 'offline'
@@ -106,7 +107,7 @@ function failureKey(reason: UpdateJob['reason']): Key {
 
 /** Whether the apply button may be offered, in this process. */
 export function canApply(st: UpdateStatus): boolean {
-  return st.newer && Boolean(st.asset) && !st.byHand && !jobActive(st.job)
+  return !st.managed && st.newer && Boolean(st.asset) && !st.byHand && !jobActive(st.job)
 }
 
 /**
@@ -115,7 +116,7 @@ export function canApply(st: UpdateStatus): boolean {
  * while it is being installed -- the section says that.
  */
 export function shouldNotice(st: UpdateStatus | null, skipped: string | null): boolean {
-  if (!st || !st.newer || !st.version) return false
+  if (!st || st.managed || !st.newer || !st.version) return false
   if (skipped === st.version) return false
   return !jobActive(st.job)
 }
