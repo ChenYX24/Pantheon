@@ -1,11 +1,12 @@
 import { RolloverActions } from './components/RolloverActions'
 import { canRollover } from './components/rollover'
 import { appStorage } from './basePath'
-import { PROJECTS_PATH } from './routes'
+import { HOME_PATH, PROJECTS_PATH } from './routes'
 import { Tour } from './components/Tour'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronUp,
+  House,
   LogOut,
   Menu,
   PanelRight,
@@ -1214,6 +1215,11 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
         {/* vp-safe-top repeats h-11; the two have to move together. See the
             class for why it is written that way rather than with box-sizing. */}
         <header className="flex h-11 shrink-0 items-center gap-2 border-b border-hairline px-3 vp-blur vp-safe-top">
+          {narrow && (
+            <a href={HOME_PATH} className="vp-control" title={t('home.shell.panelHome')} aria-label={t('home.shell.panelHome')} data-testid="header-home">
+              <House size={16} />
+            </a>
+          )}
           <a className="vp-control shrink-0" href={PROJECTS_PATH}>{t('pm.boardLink')}</a>
           {narrow && (
             <button

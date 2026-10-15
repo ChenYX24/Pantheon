@@ -25057,8 +25057,9 @@ the Conductor's terminal check still covers real resize acknowledgements.
 Rollover status reads now poll only while the action is busy or the reply is
 asking, waiting or ending. Visibility and action transitions refresh the status;
 equal replies do not update state. The effect drops timers, listeners and late
-responses on cleanup. TypeScript and all 12 rollover tests passed, including
-fake-timer coverage for idle, completion, visibility and unmount.
+responses on cleanup. TypeScript and all 13 rollover tests passed, including
+fake-timer coverage for idle, completion, visibility, transient read failures
+and unmount.
 
 The terminal's home project-link lookup reads on mount and visibility instead
 of polling the full index. Home resources keep their polling intervals and
@@ -25066,3 +25067,17 @@ explicit refresh API; background reads no longer flash loading, and equal JSON
 replies retain their data object. All callers were checked for loading and
 refresh use. TypeScript and 39 focused hook, polling and home rendering tests
 passed, including cancellation and unchanged error recovery.
+
+Home now sits beside the terminal sidebar's Projects heading, with a short
+translated label and an accessible Pantheon home name. Phones also have a Home
+icon before the project-board link in the main header. The old sidebar row is
+removed; the collapsed rail and home AppShell navigation keep their structure.
+The F1 contract and route placement checks reflect the change.
+
+Final validation ran serially at nice 19 with a 900 MiB Node heap and one Vitest
+worker: TypeScript passed, the four changed test files passed 43 tests, and the
+full suite passed once with 864 tests in 95 files. The navigation, i18n, chrome,
+touch, dialog and shell checks passed 35 tests. Changed-file ESLint passed with
+only the two existing App.tsx Fast Refresh warnings, after fixing a rollover
+ref diagnostic. No Go, embedded bundle build or deployment was needed; browser
+checks remain with the Conductor, including terminal and stress checks.

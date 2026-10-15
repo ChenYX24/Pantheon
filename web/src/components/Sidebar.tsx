@@ -362,6 +362,9 @@ export function Sidebar(props: SidebarProps) {
           <ChevronLeft size={15} />
         </button>
         <span className={`${rank.head} font-semibold tracking-tight`}>{t('app.projects')}</span>
+        <a href={HOME_PATH} className="vp-control" title={t('home.shell.panelHome')} aria-label={t('home.shell.panelHome')} data-testid="sidebar-home">
+          <House size={15} />{t('home.shell.home')}
+        </a>
         {/* Two views of the same projects, and switching between them costs
             nothing now. This used to be one button that erased the
             arrangement and then removed itself, so there was no way back and
@@ -401,7 +404,6 @@ export function Sidebar(props: SidebarProps) {
         </button>
       </header>
 
-      <a href={HOME_PATH} className="vp-control mx-3 mb-2" data-testid="sidebar-home"><House size={15} />{t('home.shell.panelHome')}</a>
       <nav className="flex-1 overflow-y-auto px-2 pb-3">
         {projects.length === 0 && (
           <p data-testid="sidebar-empty" className="px-2 py-6 text-vp-base leading-relaxed text-ink-2">

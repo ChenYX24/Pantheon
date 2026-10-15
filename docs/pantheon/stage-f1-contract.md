@@ -39,8 +39,11 @@ same nav entry points (§2).
 
 - `/projects` (legacy workspace) shows a banner "新的项目页在这里 →" linking to
   `/home/p/<id>` for the selected project; the home sidebar does not link to it.
-- Terminal panel sidebar: add a "Pantheon 概览" entry at the top (exists as a house icon —
-  make it labelled) and, per panel project that maps to a cyx project, a "项目页" item.
+- Terminal panel sidebar: place a house-icon "首页" / "Home" link beside the "项目"
+  heading, with "Pantheon 首页" / "Pantheon home" as its accessible name and title.
+  Keep the collapsed rail's house link. On phones, add an icon-only Home link before
+  the project-board link in the main header so it is reachable with the drawer closed.
+  Each panel project that maps to a cyx project keeps its "项目页" item.
 - Every session shown in Pantheon pages links to `/?session=<id>`; every project shown in the
   terminal links back to `/home/p/<id>` when it maps.
 - To-do items deep-link to the exact place (task → project tasks tab with the row expanded;
