@@ -25081,3 +25081,20 @@ touch, dialog and shell checks passed 35 tests. Changed-file ESLint passed with
 only the two existing App.tsx Fast Refresh warnings, after fixing a rollover
 ref diagnostic. No Go, embedded bundle build or deployment was needed; browser
 checks remain with the Conductor, including terminal and stress checks.
+
+Conductor review (same day). The browser terminal check gained a fullscreen
+case: entering and leaving a fullscreen program keeps 120×35 with no resize
+request, and the paging control starts right of the text. It fails on the
+previous commit and passes here, with the four existing terminal cases. The
+real tmux/WebSocket stress check reported 0 failures and 0 warnings: 20,000
+lines in 0.8 s and a local keyboard echo of 35 ms after the flood (47 ms
+before this change; one run each, so this is not a measured improvement).
+
+render-check found the phone header 89px past a 320-wide screen (19px in the
+drawer) once Home joined the project-board link and the menu. The board link
+is an icon on phones and the header's gaps narrow there. render-check's update
+section expected upstream check and install controls; it now expects the
+managed line of a Pantheon build and fails if any upstream control appears.
+The same render-check on the pre-change build (6e6addd) has the same two
+clipboard failures (an OSC 52 copy inside tmux) and the same 320-wide phone
+overflow (53px there), so neither comes from this change.
