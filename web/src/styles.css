@@ -1507,11 +1507,32 @@ body {
   overscroll-behavior: contain;
 }
 
-/* FitAddon subtracts this padding AND xterm's 14px scrollbar allowance, even
-   when the scrollbar is hidden. The existing 22px gutter also fits the 12px
-   paging control (20px on touch screens), without covering terminal text.
-   Normal and fullscreen padding must match: changing it on alternate-screen
-   entry changes the columns, resizes tmux and makes the program repaint. */
+/* And then reserve the width deterministically.
+   The fit addon subtracts the terminal element's horizontal padding when it
+   proposes columns, so this is the one measurement that does not depend on how
+   the platform draws scrollbars.
+
+   14px was xterm's default slider and it was reserving the width twice.
+   Measured on the running panel at 1400px: `.xterm` content box ends at 1089,
+   the scrollbar draws at 1075-1089 -- *inside* the content box, at its right
+   edge -- and the padding then adds fourteen more pixels of black to the right
+   of the scrollbar, out to 1103. Plus the wrapper's own 8px, that is 22px of
+   permanent black beside a 14px scrollbar, which is the reported 进度条旁边还
+   有黑边. The padding is not what keeps text out from under the slider either;
+   what does that today is the fit remainder, which is luck and is 0 at some
+   widths.
+
+   So: one number, and it is the slider's own width. `--vp-scrollbar` is set
+   here and read by the slider rule below, so the reservation and the thing
+   being reserved for cannot drift apart -- which is how they came to be 14 and
+   14 stacked end to end.
+
+   Normal and fullscreen padding must match. FitAddon subtracts this padding
+   and xterm's 14px scrollbar allowance even while the slider is hidden, so a
+   fullscreen program already has 22px beside its grid: room for the 12px
+   paging control (20px on touch screens) without covering text. Adding
+   padding on alternate-screen entry changed the columns, resized tmux and
+   made the program repaint the whole screen. */
 .xterm {
   --vp-scrollbar: 8px;
   padding-right: var(--vp-scrollbar);
