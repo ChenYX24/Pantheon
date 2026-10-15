@@ -25135,3 +25135,11 @@ prompt after a glitch, Enter, unchanged input bytes, single-character paste,
 IME commits, tmux fullscreen status and the live preference. Only script and
 embedded-fixture syntax were checked here. Browser checks, the embedded bundle
 rebuild and deployment were not run on this shared host.
+
+Conductor review (same day): `npm run check:terminal` ran in a bounded scope
+and all thirteen cases passed after two expectations were corrected to the
+prompt text the fixture writes (`'Password: '`, `'$ '`; a written space is
+not trimmed). The engine was read against the plan: it never writes to the
+xterm buffer, resets on any non-printable input, and only displays after a
+silent confirmation within five seconds, so a password prompt reached by
+Enter starts silent.
