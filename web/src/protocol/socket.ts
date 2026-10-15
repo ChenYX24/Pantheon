@@ -61,8 +61,17 @@ interface Stream {
 /** Connection state, for the UI to show honestly rather than pretending. */
 export type SocketStatus = 'connecting' | 'open' | 'closed'
 
+export interface LinkLatency {
+  rttMs: number
+  /** Mean absolute change between consecutive round trips in the window. */
+  jitterMs: number
+  samples: number
+}
+
 const MAX_BACKOFF_MS = 10_000
 const PING_INTERVAL_MS = 25_000
+const PROBE_INTERVAL_MS = 2_500
+const LATENCY_SAMPLES = 10
 
 /**
  * How long without a single byte from the server before the connection is
@@ -136,6 +145,11 @@ export class PanelSocket {
   private byRef = new Map<number, Stream>()
   private backoff = 500
   private pingTimer: number | null = null
+  private probeTimer: number | null = null
+  private pendingPing: { startedAt: number; measure: boolean } | null = null
+  private rtts: number[] = []
+  private latency: LinkLatency | null = null
+  private latencyListeners = new Set<(latency: LinkLatency | null) => void>()
   private closed = false
   /** When the last frame of any kind arrived. See DEAD_AFTER_MS. */
   private lastSeenAt = 0
@@ -157,6 +171,7 @@ export class PanelSocket {
     // this particular application to fail, because nothing looks wrong.
     window.addEventListener('offline', this.onOffline)
     window.addEventListener('online', this.onOnline)
+    document.addEventListener('visibilitychange', this.updateProbes)
   }
 
   private onOffline = () => {
@@ -364,9 +379,7 @@ export class PanelSocket {
         break
       }
       case 'pong':
-        // Nothing to do: any frame refreshes lastSeenAt, which is the whole
-        // purpose of the ping. A case rather than a silent fall-through to the
-        // default below, which is now a compile error.
+        this.recordPong()
         break
       default: {
         // The third hop, pinned by the compiler. TestMessageTypesMatchTheClient
@@ -454,6 +467,7 @@ export class PanelSocket {
     const stream: Stream = { sessionId, handlers, ref: null, cols, rows, confirmed: false, hidden, position: null }
     this.streams.set(sessionId, stream)
     this.sendSubscribe(stream)
+    this.updateProbes()
   }
 
   /**
@@ -479,6 +493,7 @@ export class PanelSocket {
     this.streams.delete(sessionId)
     if (stream.ref !== null) this.byRef.delete(stream.ref)
     this.send({ t: 'unsubscribe', sessionId })
+    this.updateProbes()
   }
 
   /** Sends text, encoded as UTF-8. */
@@ -538,6 +553,7 @@ export class PanelSocket {
     if (!stream || stream.hidden === hidden) return
     stream.hidden = hidden
     this.send({ t: 'visibility', sessionId, hidden })
+    this.updateProbes()
   }
 
   /** Reports how long a terminal took to load. See LoadTiming. */
@@ -570,17 +586,34 @@ export class PanelSocket {
     }
   }
 
+  getLatency(): LinkLatency | null {
+    return this.latency
+  }
+
+  onLatency(fn: (latency: LinkLatency | null) => void): () => void {
+    this.latencyListeners.add(fn)
+    fn(this.latency)
+    return () => { this.latencyListeners.delete(fn) }
+  }
+
   close() {
     this.closed = true
     window.removeEventListener('offline', this.onOffline)
     window.removeEventListener('online', this.onOnline)
+    document.removeEventListener('visibilitychange', this.updateProbes)
     this.stopPing()
     this.ws?.close()
     this.ws = null
+    this.setStatus('closed')
   }
 
   private setStatus(s: SocketStatus) {
     this.status = s
+    if (s !== 'open') {
+      this.rtts = []
+      this.latency = null
+      for (const fn of this.latencyListeners) fn(null)
+    }
     for (const fn of this.statusListeners) fn(s)
   }
 
@@ -600,8 +633,9 @@ export class PanelSocket {
         this.dropConnection()
         return
       }
-      this.send({ t: 'ping' })
+      this.sendPing()
     }, PING_INTERVAL_MS)
+    this.updateProbes()
   }
 
   private stopPing() {
@@ -609,5 +643,51 @@ export class PanelSocket {
       clearInterval(this.pingTimer)
       this.pingTimer = null
     }
+    if (this.probeTimer !== null) clearInterval(this.probeTimer)
+    this.probeTimer = null
+    this.pendingPing = null
+  }
+
+  private updateProbes = () => {
+    const visible = document.visibilityState === 'visible'
+    // A backgrounded tab can defer its message handler by seconds. That is
+    // browser scheduling, not a round trip through the panel's proxy.
+    if (!visible && this.pendingPing) this.pendingPing.measure = false
+    const watching = visible && [...this.streams.values()].some((stream) => !stream.hidden)
+    if (this.status === 'open' && watching && !this.closed) {
+      if (this.probeTimer !== null) return
+      this.sendPing()
+      this.probeTimer = window.setInterval(() => this.sendPing(), PROBE_INTERVAL_MS)
+    } else if (this.probeTimer !== null) {
+      clearInterval(this.probeTimer)
+      this.probeTimer = null
+    }
+  }
+
+  private sendPing() {
+    // No nonce is needed while there is only one outstanding ping. Do not
+    // replace its timestamp on a slow link: the late pong still belongs to it.
+    // The 25s liveness timer keeps checking lastSeenAt even while this waits.
+    if (this.pendingPing || this.ws?.readyState !== WebSocket.OPEN) return
+    this.pendingPing = { startedAt: performance.now(), measure: document.visibilityState === 'visible' }
+    this.send({ t: 'ping' })
+  }
+
+  private recordPong() {
+    const pending = this.pendingPing
+    this.pendingPing = null
+    if (!pending?.measure || document.visibilityState !== 'visible') return
+    const elapsed = performance.now() - pending.startedAt
+    if (!Number.isFinite(elapsed) || elapsed < 0) return
+    this.rtts.push(elapsed)
+    if (this.rtts.length > LATENCY_SAMPLES) this.rtts.shift()
+    const total = this.rtts.reduce((sum, rtt) => sum + rtt, 0)
+    const change = this.rtts.reduce((sum, rtt, i) => sum + (i ? Math.abs(rtt - this.rtts[i - 1]) : 0), 0)
+    this.latency = {
+      rttMs: total / this.rtts.length,
+      jitterMs: this.rtts.length > 1 ? change / (this.rtts.length - 1) : 0,
+      samples: this.rtts.length,
+    }
+    for (const fn of this.latencyListeners) fn(this.latency)
   }
 }

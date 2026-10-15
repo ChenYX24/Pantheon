@@ -1538,6 +1538,25 @@ body {
   padding-right: var(--vp-scrollbar);
 }
 
+/* Predictions live above the screen, never in xterm's buffer or selection.
+   Underlining carries uncertainty in either theme without relying on hue. */
+.vp-local-echo {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+  color: var(--vp-ink);
+}
+
+.vp-local-echo > span {
+  position: absolute;
+  white-space: pre;
+  opacity: 0.65;
+  text-decoration: underline;
+}
+
 /* On a touch screen the browser's own long-press selection is the gesture
    people already know, and it beats anything hand-rolled on top of a grid of
    spans. xterm turns selection off to implement its own, which is the right

@@ -715,6 +715,12 @@ const DICT = {
   'conn.connecting': { zh: '连接中', en: 'connecting' },
   'conn.closed': { zh: '已断开', en: 'closed' },
   'app.gridSize': { zh: '所有观看端看到的网格', en: 'The grid every viewer of this session is seeing' },
+  'app.linkLatency': { zh: '{ms} 毫秒', en: '{ms} ms' },
+  'app.linkLatencyWhy': {
+    zh: '此浏览器到面板的往返延迟，包含代理；数值越高，打字越慢。',
+    en: 'Round trip from this browser to the panel, including the proxy. Higher values make typing lag.',
+  },
+  'app.linkJitter': { zh: '延迟波动：{ms} 毫秒', en: 'Variation: {ms} ms' },
   'app.restart': { zh: '重启', en: 'restart' },
   'app.hidePanel': { zh: '收起面板', en: 'Hide panel' },
   'app.showPanel': { zh: '展开面板', en: 'Show panel' },
@@ -1791,6 +1797,15 @@ const DICT = {
   'set.activity': { zh: '最近活动', en: 'Recent activity' },
 
   'term.takeControl': { zh: '接管', en: 'take control' },
+  'term.echoTitle': { zh: '本地输入预览', en: 'Local typing preview' },
+  'term.echoWhy': {
+    zh: '仅此浏览器生效。确认字符会回显后才预览；自动模式仅在高延迟时启用。',
+    en: 'This browser only. Preview after confirmed echo; Auto waits for a slow link.',
+  },
+  'term.echoAuto': { zh: '自动', en: 'Auto' },
+  'term.echoOff': { zh: '始终关闭', en: 'Always off' },
+  'term.echoOn': { zh: '始终开启', en: 'Always on' },
+  'term.echoPending': { zh: '带下划线的字符仍在等待服务器确认。', en: 'Underlined characters are waiting for the server.' },
   'term.fitPhone': { zh: '适应手机宽度', en: 'Fit to phone' },
   'term.takeControlWhy': {
     zh: '另一个观看端拥有这个网格（{cols}×{rows}），你这边能放下 {mine}。接管会让所有人重排。',
