@@ -25039,3 +25039,12 @@ also gives managed status precedence over stale release fields. TypeScript,
 dialog checks, and lint on the changed frontend files passed at nice 19. Browser
 checks and the embedded bundle rebuild were not run on this shared host; release
 packaging still needs to rebuild the frontend.
+
+## 2026-10-15 — Avoid idle terminal work and move Home into the header
+
+Normal and fullscreen terminals now share the existing 8px padding. FitAddon
+also reserves 14px for xterm's scrollbar, leaving room for the relative paging
+control at both pointer sizes without changing the grid on alternate-screen
+entry. The normal-buffer scrollbar remains visible. All 10 style tests passed,
+including the padding invariant and the installed FitAddon's gutter calculation.
+Browser checks are left to the Conductor on this shared host.
