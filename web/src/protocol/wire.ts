@@ -994,7 +994,9 @@ export interface UpdateStatus {
   current: string
   /** GOOS/GOARCH, for the sentence about a release that has no archive for it. */
   platform: string
-  /** The automatic check: on unless somebody turned it off. */
+  /** This build uses its deployment runbook and has no self-update channel. */
+  managed?: boolean
+  /** The automatic check: off for managed builds or when somebody turned it off. */
   autoCheck: boolean
   /** A check is in flight right now. */
   checking: boolean

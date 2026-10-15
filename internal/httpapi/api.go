@@ -109,6 +109,11 @@ type Server struct {
 	// last check and the apply in progress. See update.go.
 	updates updateState
 
+	// updateChannel is a test-only override so the upstream update and sudo
+	// paths remain exercised. Production uses selfupdate.ChannelEnabled;
+	// no request, setting or environment variable can change it.
+	updateChannel *bool
+
 	// zone caches the configured time zone. Not a field to set: read it with
 	// s.loc(ctx), which resolves the setting the first time and remembers.
 	zone zoneCache

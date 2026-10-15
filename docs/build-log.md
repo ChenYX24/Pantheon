@@ -25016,3 +25016,26 @@ tmux/WebSocket stress check reported zero failures and warnings: 20,000 output
 lines in 0.8 seconds, working scrollback/reconnect, and a local keyboard echo
 of 47 ms after the flood. All checks ran serially in a bounded, low-priority
 user scope with disposable terminal sessions.
+
+## 2026-10-15 — Keep Pantheon updates on its deployment runbook
+
+Pantheon disables its self-update channel at compile time. Manual and background
+checks make no upstream request, and managed status hides saved upstream releases.
+Applying an update refuses before installability checks or sudo; `service upgrade`
+refuses before handing over to an installer. A missing service points to this
+project's runbook. The upstream repository and update paths remain, with explicit
+test overrides, and the database schema is unchanged.
+
+The selfupdate package, focused HTTP update/elevation tests, the Go/TypeScript
+field contract and service planner tests passed serially at nice 19 with bounded
+Go resources. HTTP route tests now run in process without tmux; updater HTTP
+fixtures and sudo stand-ins exercise the upstream paths. The real-sudo container
+test was skipped. No installed panel or service was changed.
+
+Settings keeps the current version and shows the managed explanation in English
+or Chinese, without check, install or auto-check controls. The sidebar notice
+also gives managed status precedence over stale release fields. TypeScript,
+31 tests across the update view/component, elevation, i18n, chrome vocabulary and
+dialog checks, and lint on the changed frontend files passed at nice 19. Browser
+checks and the embedded bundle rebuild were not run on this shared host; release
+packaging still needs to rebuild the frontend.

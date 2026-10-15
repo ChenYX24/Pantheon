@@ -1540,6 +1540,10 @@ const DICT = {
   // you.
   'upd.title': { zh: '更新', en: 'Updates' },
   'upd.current': { zh: '当前版本', en: 'Current version' },
+  'upd.managed': {
+    zh: '此构建通过部署脚本更新，不从上游 vibepanel 自动更新',
+    en: 'This build is updated by its deployment runbook, not from upstream vibepanel releases',
+  },
   'upd.lastChecked': { zh: '上次检查：{when}', en: 'Last checked {when}' },
   'upd.neverChecked': { zh: '尚未检查', en: 'Not checked yet' },
   'upd.autoCheck': { zh: '自动检查更新', en: 'Check for updates automatically' },
