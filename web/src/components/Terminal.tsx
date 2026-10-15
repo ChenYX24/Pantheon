@@ -128,6 +128,7 @@ export function TerminalView({
   const termRef = useRef<Xterm | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const controllingRef = useRef(false)
+  const requestedSizeRef = useRef<{ cols: number; rows: number } | null>(null)
   const [controlling, setControlling] = useState(false)
   const [grid, setGrid] = useState({ cols: 0, rows: 0 })
   // Invisible while a replay snapshot is being parsed. See onData below for
@@ -321,6 +322,7 @@ export function TerminalView({
     // window to phone width and back was enough, and render-check found it by
     // timing out on a click.
     finishedRef.current = false
+    requestedSizeRef.current = null
     replayDoneRef.current = false
     sizedRef.current = false
     replayTotalRef.current = 0
@@ -449,6 +451,7 @@ export function TerminalView({
       // terminal that still had something worth reading in it.
       onReset: () => {
         replayQueue.restart()
+        requestedSizeRef.current = null
         resuming = false
         replayDoneRef.current = false
         finishedRef.current = false
@@ -523,12 +526,14 @@ export function TerminalView({
         replayQueue.enqueue(bytes, replay)
       },
       onSize: (cols, rows, isControlling) => {
+        if (controllingRef.current !== isControlling) requestedSizeRef.current = null
         controllingRef.current = isControlling
         setControlling(isControlling)
-        setGrid({ cols, rows })
-        sizedRef.current = cols > 0 && rows > 0
-        if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows)
-        finishLoad()
+        replayQueue.resize(cols, rows, () => {
+          setGrid({ cols, rows })
+          sizedRef.current = cols > 0 && rows > 0
+          finishLoad()
+        })
       },
       onTitle: (t) => onTitle?.(t),
       onClipboard: (text) => {
@@ -668,7 +673,9 @@ export function TerminalView({
     const term = termRef.current
     if (!term) return
     const frame = requestAnimationFrame(() => {
-      fitRef.current?.fit()
+      // Repainting must not resize a passive viewer. Fitting its max-content
+      // host subtracts the scrollbar again (120 columns became 118) without
+      // telling tmux; the next cursor movement then writes into the wrong cell.
       term.refresh(0, term.rows - 1)
     })
     return () => cancelAnimationFrame(frame)
@@ -695,15 +702,20 @@ export function TerminalView({
       if (hidden) return
 
       if (controllingRef.current) {
-        // We own the grid: fit to the container and publish the result.
+        // Propose the container's grid, then apply the server's answer in the
+        // output queue. A local fit would make in-flight output use the new
+        // width before tmux had even received it.
         wrap.style.overflow = ''
         host.style.transform = ''
         host.style.width = '100%'
         host.style.height = '100%'
         const dims = f.proposeDimensions()
         if (dims && dims.cols > 0 && dims.rows > 0) {
-          f.fit()
-          socket.resize(sessionId, t.cols, t.rows)
+          const requested = requestedSizeRef.current
+          if (requested?.cols !== dims.cols || requested?.rows !== dims.rows) {
+            requestedSizeRef.current = dims
+            socket.resize(sessionId, dims.cols, dims.rows)
+          }
         }
         return
       }
@@ -755,11 +767,19 @@ export function TerminalView({
       host.style.transform = `scale(${scale})`
     }
 
-    apply()
-    const ro = new ResizeObserver(apply)
+    let frame: number | null = null
+    const schedule = () => {
+      if (frame !== null) return
+      frame = requestAnimationFrame(() => { frame = null; apply() })
+    }
+    schedule()
+    const ro = new ResizeObserver(schedule)
     ro.observe(wrap)
-    return () => ro.disconnect()
-  }, [socket, sessionId, controlling, grid.cols, grid.rows, hidden, fullscreen])
+    return () => {
+      ro.disconnect()
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
+  }, [socket, sessionId, controlling, grid, hidden, fullscreen])
 
   // Offer to take the grid only when this window would actually render a
   // different one. Two windows the same size see an identical picture, so a

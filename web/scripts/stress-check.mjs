@@ -506,6 +506,18 @@ try {
     }
   }
 
+  // Measure input echo after the burst through the real socket and PTY. A
+  // terminal can eventually show every output line and still leave keystrokes
+  // waiting behind it. This is local transport latency, not the user's WAN.
+  const echoMarker = 'vp_input_echo_probe'
+  const echoStart = Date.now()
+  await page.keyboard.type(echoMarker)
+  await page.waitForFunction((marker) =>
+    window.vibepanelScreen?.()?.some((row) => row.includes(marker)), echoMarker,
+  { timeout: 5000 })
+  note('INFO', 'input', `local keyboard echo after the flood: ${Date.now() - echoStart}ms`)
+  await page.keyboard.press('Control+u')
+
   // ── replay after the buffer wrapped ──────────────────────────────────────
   // Twenty thousand lines is well past the replay buffer, so reconnecting now
   // exercises the truncated-start path — the one that used to print the tail

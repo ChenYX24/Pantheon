@@ -2,14 +2,25 @@
 export interface ReplayTerminal {
   write(data: Uint8Array, callback: () => void): void
   reset(): void
+  resize(cols: number, rows: number): void
 }
 
-interface Job {
+interface OutputJob {
+  kind: 'output'
   data: Uint8Array
   replay: boolean
   /** Which snapshot this belongs to. See restart. */
   generation: number
 }
+
+interface ResizeJob {
+  kind: 'resize'
+  cols: number
+  rows: number
+  applied: () => void
+}
+
+type Job = OutputJob | ResizeJob
 
 type Schedule = (callback: () => void) => number
 type Cancel = (handle: number) => void
@@ -56,11 +67,23 @@ export class TerminalReplay {
    * from minutes ago, and input sent then answers something that is not there.
    */
   get replaying(): boolean {
-    return this.activeReplay || this.queue.some((job) => job.replay)
+    return this.activeReplay || this.queue.some((job) => job.kind === 'output' && job.replay)
   }
 
   enqueue(data: Uint8Array, replay: boolean): void {
-    this.queue.push({ data, replay, generation: this.generation })
+    if (this.disposed) return
+    this.queue.push({ kind: 'output', data, replay, generation: this.generation })
+    this.drain()
+  }
+
+  /**
+   * Size notifications share the output order. xterm.write parses later, but
+   * resize is synchronous: resizing directly makes queued cursor movements
+   * and line wraps run against a grid the producer was not using yet.
+   */
+  resize(cols: number, rows: number, applied: () => void): void {
+    if (this.disposed) return
+    this.queue.push({ kind: 'resize', cols, rows, applied })
     this.drain()
   }
 
@@ -87,30 +110,38 @@ export class TerminalReplay {
 
   private drain(): void {
     if (this.disposed || this.active || this.yieldHandle !== null) return
-    const job = this.queue.shift()
+    let job = this.queue.shift()
+    while (job?.kind === 'resize') {
+      this.term.resize(job.cols, job.rows)
+      job.applied()
+      if (this.disposed) return
+      job = this.queue.shift()
+    }
     if (!job) return
+    const output = job
 
     this.active = true
-    this.activeReplay = job.replay
-    if (job.replay && this.resetBeforeReplay) {
+    this.activeReplay = output.replay
+    if (output.replay && this.resetBeforeReplay) {
       this.resetBeforeReplay = false
       this.term.reset()
     }
-    this.term.write(job.data, () => {
+    this.term.write(output.data, () => {
       // The callback can arrive after dispose(), and nothing may be scheduled
       // against a terminal that no longer exists.
       if (this.disposed) return
       this.active = false
       this.activeReplay = false
-      if (job.replay && job.generation === this.generation) this.onReplayParsed?.(job.data.byteLength)
-      if (job.replay && !this.queue.some((queued) => queued.replay)) {
+      if (output.replay && output.generation === this.generation) this.onReplayParsed?.(output.data.byteLength)
+      if (output.replay && output.generation === this.generation
+        && !this.queue.some((queued) => queued.kind === 'output' && queued.replay)) {
         this.onReplayDone?.()
       }
       if (this.queue.length === 0) return
 
       // Only replay chunks need a paint boundary. Live output should stay
       // responsive once the snapshot has been consumed.
-      if (job.replay && this.queue[0].replay) {
+      if (output.replay && this.queue[0].kind === 'output' && this.queue[0].replay) {
         this.yieldHandle = this.schedule(() => {
           this.yieldHandle = null
           this.drain()
