@@ -27306,3 +27306,150 @@ remain unknown until one arrives. The Conductor still needs to compare both
 meters with real sessions, especially Codex's cached-input accounting against
 its status line, Claude's pid mapping across versions/accounts, and the
 model-window table. The phone layout also needs browser review after rebuild.
+
+## 2026-10-16 — Pantheon R2: automatic rollover at a safe boundary
+
+R1's context reading now feeds a pure transition table in `internal/rollover`.
+The table receives time and observations and returns state, audit events and one
+execution decision. HTTP glue runs observations in a single bounded worker off
+the tmux poller; the long-running handoff has a separate execution seam. R3 can
+replace that seam with acknowledgement and delayed release without changing
+threshold, cancellation or countdown decisions.
+
+The five `rollover.auto.*` policy settings are cached only after a successful,
+validated read and saved in one settings transaction. Missing values use the
+contract defaults; read errors and corrupt values cannot enable a default or
+be silently overwritten. The session off switch is a small JSON settings map,
+pruned when session rows disappear. No schema migration was added. Owner-authenticated
+GET/PUT `/api/settings/rollover` and POST `/api/sessions/{id}/rollover/auto` are
+on the explicit development-terminal allow-list, alongside manual rollover;
+planning-only previews cannot run the worker or invoke these routes.
+
+The boundary is deliberately conservative. Only detector `done` qualifies;
+`waiting` never means idle for R2. A heuristic/manual reading, or a Codex log-only
+reading with no received hook, also needs two minutes without visible output.
+The detector calls log evidence `SourceHook`, so checking that source alone
+would have skipped the quiet gate on hook-free Codex. Fresh process observations
+start both the 15-second threshold confirmation and the input-idle grace: a
+persisted done row is not evidence that nobody typed while the panel was down.
+Working, waiting, recent input, a draft or known background work keeps a due
+request waiting and withdraws an unsafe countdown. Memory alerts, freezes and
+the existing E2 per-session operation take precedence.
+
+Claude's main-thread `Stop` document sometimes supplies `background_tasks`.
+Running or pending entries, including background shells the display intentionally
+ignores, block rollover until a later explicit inventory clears them. There is
+no complete process/sub-agent inventory across all agents. Missing hook fields
+and unreported tasks remain unknown; an old running inventory may conservatively
+hold rollover until another main-thread Stop. This is a known limit, not an
+inference that an unobserved task has finished.
+
+Compose had no server signal. It now sends `draft {sessionId,hasText}` over the
+existing authenticated socket, debounced by 150 ms and suppressed when the
+boolean is unchanged. Draft contents stay in the browser. Each connection owns
+its set, including drafts for sessions no longer displayed; reconnect replays it,
+and disconnect clears just that connection. Absence means no draft, so an offline
+browser cannot hold a session indefinitely. Every input frame and paste records
+input before delivery and cancels an active countdown without dropping input.
+Cancellation is an audit event followed by absent/ok socket state, with the next
+threshold raised by ten points. Disabling policy does not raise that threshold.
+The settings lock is rechecked at the transition, so a poll that read old policy
+cannot outrun a saved disable or never preference.
+
+PreCompact is a separate `precompact` signal, not a new session state. It is
+installed, merged, inspected and uninstalled through the existing Claude event
+table. The reporter clears `state` and backgrounds its bounded HTTP request;
+the hook cannot wait for the panel before compacting. The handler authenticates
+the same session-scoped token and never touches displayed state or detector
+history for this signal. The assumed payload is Claude's command-hook document
+with `hook_event_name: PreCompact` and `trigger: auto|manual`. Unknown fields
+are ignored; absent or unfamiliar triggers do nothing. Tests use hand-written
+documents and a fake curl, not real transcripts or installed hook files.
+
+The snapshot's `rollover` map captures percentage, reason and deadline only on
+transitions. The deadline is fixed Unix milliseconds; browsers count down
+locally. A clock glyph accompanies the amber context meter, and a wrapping
+bilingual strip sits below the header, including on the 320 px phone layout.
+Settings puts the global controls beside memory policy and explains that old
+session retention is reserved for confirmation support. `now` means request the
+next safe boundary with the full cancellable countdown, even below threshold;
+it never bypasses the boundary. `later`, `cancel` and `never` remove the strip.
+
+R2 deliberately invokes E2 exactly as `reason: long, resume: true`: write the
+handoff, end/archive the old session, then start the replacement. R3's new-session
+confirmation, retention timer and recovery promise are not present. Consequently,
+a failure after E2 ended the old process cannot bring it back; the existing
+operation-status endpoint retains the handoff/error/new id. No new home to-do
+was added. `rolloverAfterHours` remains editable through project meta PATCH,
+not this global settings form: adding a project selector, Home-id mapping and
+revision handling would be a separate UI change. The three-attempt rolling-day
+cap follows replacement ids within this panel process, but, like the derived
+state, resets on restart. A failed attempt requires explicit retry or restart.
+
+Validation used one process at a time. Each Go command below ran from the
+worktree root with this prefix (temporary files and the build cache stayed in
+the worktree):
+
+```sh
+TMPDIR="$PWD/.r2-tmp/tmp" GOCACHE="$PWD/.r2-tmp/go-cache" GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB nice -n 19
+```
+
+```sh
+go test ./internal/rollover
+go test ./internal/hooks
+go test ./internal/store
+go test ./internal/resources
+go test ./internal/agentctx
+go test ./internal/ws -run 'TestDraftPresenceAndDisconnect|TestMessageTypesMatchTheClient|TestBinaryFrameLayoutMatchesTheClient'
+go test ./internal/httpapi -run 'Rollover|Context|Snapshot|TypeScriptRows|Hook|Setting|Route|EveryAuditEvent|APIDoc'
+go test -json ./internal/httpapi -run '.' > .r2-tmp/httpapi-full.jsonl 2>&1
+```
+
+The first seven passed (respectively 0.002 s, 2.080 s, 14.508 s, 0.526 s,
+0.047 s, 0.004 s and 45.276 s). The complete HTTP package ran once, in
+358.875 s: 525 top-level tests passed, one skipped and three failed. The known
+main failure was `TestABellThatRangWhileThePumpWasDownIsSeen` on tmux 3.4.
+`TestGitEndpoint/says_a_plain_directory_is_not_a_repository_rather_than_failing`
+and `TestARepositoryIsNamedOnlyOnAProjectLinkThatAlreadyNamesThings/a_directory_that_is_not_a_checkout`
+also failed: their plain-directory fixtures inherited the enclosing worktree's
+Git repository because `TMPDIR` was intentionally inside it. Both passed in
+2.504 s with Git discovery stopped at the fixture root, without source changes:
+
+```sh
+GIT_CEILING_DIRECTORIES="$PWD/.r2-tmp/tmp" TMPDIR="$PWD/.r2-tmp/tmp" GOCACHE="$PWD/.r2-tmp/go-cache" GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1 GOMEMLIMIT=600MiB nice -n 19 go test ./internal/httpapi -run 'TestGitEndpoint|TestARepositoryIsNamedOnlyOnAProjectLinkThatAlreadyNamesThings'
+```
+
+Frontend commands ran from `web`. A temporary Vitest config used the same
+`src/**/*.test.ts` include and node environment, with its cache in
+`.r2-tmp/vite-cache` and `--configLoader runner`, so Vite did not write through
+the shared `node_modules` symlink. No packages were installed.
+
+```sh
+NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npx tsc -b
+NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npx vitest run --pool=forks --maxWorkers=1 --config ../.r2-tmp/vitest.config.mjs --configLoader runner src/App.test.ts src/components/AutoRolloverStrip.test.ts src/components/ContextMeter.test.ts src/components/Sidebar.test.ts src/components/settings/AutoRolloverSettings.test.ts src/components/settings/resources.test.ts src/components/settings/groups.test.ts src/components/settings/wiring.test.ts src/components/mobile/compose.test.ts src/protocol/socket.test.ts src/i18n.test.ts src/chrome-vocabulary.test.ts
+NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npx vitest run --pool=forks --maxWorkers=1 --config ../.r2-tmp/vitest.config.mjs --configLoader runner
+NODE_OPTIONS=--max-old-space-size=900 nice -n 19 npx eslint src/App.tsx src/App.test.ts src/components/AutoRolloverStrip.tsx src/components/AutoRolloverStrip.test.ts src/components/ContextMeter.tsx src/components/ContextMeter.test.ts src/components/Sidebar.tsx src/components/Sidebar.test.ts src/components/mobile/ComposeInput.tsx src/components/rollover.ts src/components/settings/AutoRolloverSettings.tsx src/components/settings/AutoRolloverSettings.test.ts src/components/settings/ResourcesGroup.tsx src/components/settings/groups.ts src/protocol/api.ts src/protocol/socket.ts src/protocol/socket.test.ts src/protocol/wire.ts src/i18n.ts
+```
+
+Type checking passed. The focused run passed 12 files / 102 tests. The first
+full run caught two new help texts exceeding the prose-length limit; after
+shortening them and updating two render assertions that expected the old
+wording, the final full run passed 117 files / 1125 tests in 17.24 s. Focused
+ESLint had no errors and four existing warnings: three in App (fast-refresh
+exports and the pane-layout effect dependency), one in ComposeInput (the
+existing helper export). The test fixtures and temporary caches were removed.
+
+The Conductor must build the bundle and inspect a disposable, panel-started
+Claude/Codex session with a known context window. Set threshold 30, countdown 5
+and input idle 10 seconds; usage still has to reach 30 percent on observations
+at least 15 seconds apart. `now` can force due below threshold, but never skips
+the boundary or countdown. Verify working/waiting and compose drafts hold due;
+after done and the idle interval, verify countdown, terminal key/paste cancel
+without dropping input or focus, later's ten-point margin, and never surviving
+a restart. Check multiple tabs, session-switched drafts and reconnect replay.
+Check both languages and themes at 320 px and desktop widths: the strip wraps
+below the header, and the drawer meter has its clock cue. Check a PreCompact
+signal leaves the displayed session state unchanged, and completion follows
+E2's existing write/end/start order. Browser checks, bundle builds, deployment
+and real conversation reads were excluded from this worker's scope; the
+embedded bundle is unchanged.

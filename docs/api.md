@@ -102,6 +102,23 @@ rows, `at` is RFC 3339: the usage event's timestamp, or the observation time
 when it has none. It stays unchanged until the rounded count, window, model
 or source changes, so an identical reading does not cause a socket broadcast.
 
+`rollover` is the automatic context-rollover map, separate from the E2 operation
+status. Missing session ids mean `ok`. Only visible, unexited, non-scratch
+sessions whose automatic state is not `ok` are included:
+
+```json
+{"rollover":{"s_abc":{"state":"countdown","pct":72,
+  "endsAt":1792108830000,"reason":"threshold"}}}
+```
+
+States are `due`, `countdown`, `handing_off` and `failed`. Cancellation is an
+audit event followed immediately by `ok` (the entry disappears). `pct` is the
+rounded percentage at the last transition; `reason` describes that transition
+(`threshold`, `precompact`, `now`, or a failure message). `endsAt` is present only
+during a countdown and is **Unix milliseconds**, fixed until the state changes.
+The client computes remaining seconds; ticking does not rebroadcast snapshots.
+This map is also present in WebSocket `state` messages.
+
 Claude counts the last non-sidechain assistant entry's input, cache-read input
 and cache-creation input. Codex counts `last_token_usage.input_tokens`, which
 already includes cached input; neither source uses output or cumulative spend.
@@ -405,6 +422,74 @@ boot restoration, records a session event and writes a report for cyx projects.
 A resumed session uses the original launch command, profile and Claude account,
 with a fresh id, and receives the continuation prompt only after it is ready.
 If that fails, GET retains the error and any new session id for recovery.
+
+### `POST /api/sessions/{id}/rollover/auto`
+
+Authenticated, with the same development-terminal allow-list as manual rollover.
+Body: `{"action":"now"|"later"|"never"|"cancel"}`. Success is `204`; unknown
+actions or fields are `400`, a missing session is `404`, and a handoff already
+started is `409`. `now` also returns `409` when the session is ineligible,
+disabled, hidden, already rolling over, or at the three-attempt daily cap.
+
+- `now` marks the session due below the threshold too. It requests the next safe
+  boundary and retains the full cancellable countdown; it never interrupts work.
+- `later` and `cancel` remove the banner and raise this session's next threshold
+  by ten percentage points (not ten percent of the threshold). Further cancels
+  do not compound this margin.
+- `never` does the same and persists an off switch in `rollover.auto.never`, a
+  JSON settings map of session ids to `true`. Deleted session ids are pruned on
+  the next successful poll. Archiving retains the preference with the session.
+
+Automatic rollover requires a recorded Claude Code/Codex launch command, a known
+context window, and a live, non-scratch session outside archived projects and
+home workers. Ordinary threshold entry requires two qualifying observations at
+least 15 seconds apart. A below-threshold reading resets confirmation. A due
+session stays due if compaction subsequently lowers usage. Restart loses the
+derived state and requires fresh observations and the input-idle interval.
+
+Only detector `done` can open the boundary: `working` and all `waiting` states
+block it. Without a received hook backing the detector reading, including a
+Codex log-only reading, two minutes without visible output are also required.
+There must be no browser input for `idleInputSeconds`, no reported compose
+draft in any connected browser, and no known running/pending background task.
+A changed boundary during countdown returns to due. Any terminal input frame
+or paste cancels and postpones immediately; the input is still delivered.
+Known background tasks come from an explicit main-thread Claude `Stop` inventory;
+an empty/completed inventory clears that block. Unreported tasks are unknown.
+An active memory-governor alert, frozen session or E2 handoff takes precedence.
+
+On expiry R2 invokes the existing primitive with `reason: "long", resume: true`.
+It saves a handoff, ends the old session and opens the replacement, as E2 does
+today. New-session acknowledgement and delayed release are R3, not implemented
+here; an error after the old session ends cannot restore its process. Failed
+automatic requests stay failed until an explicit `now`, cancellation or restart.
+Attempts are capped at three per rolling 24 hours in memory, carried into a
+replacement session so a chain cannot reset the cap. Restart loses this history.
+
+Audit events `rollover.due`, `rollover.countdown`, `rollover.cancelled` and
+`rollover.failed` carry JSON detail `{sessionId,pct,reason}`.
+
+### `GET /api/settings/rollover`
+### `PUT /api/settings/rollover`
+
+Authenticated; both are available in development only with manual terminal
+sessions enabled. GET returns the policy; PUT accepts the same fields, retaining
+omitted fields, validates them and saves the policy atomically. Unknown fields,
+non-integer limits and out-of-range values return `400`. Unreadable or invalid
+stored policy returns `503`, is not cached as a default, and cannot be overwritten
+through this endpoint until the stored fault is repaired. Changes are audited
+as `rollover.policy`. Disabling withdraws pending due/countdown requests.
+
+| Response/body field | Settings key | Default | Range |
+|---|---|---|---|
+| `enabled` | `rollover.auto.enabled` | `true` | boolean |
+| `thresholdPct` | `rollover.auto.thresholdPct` | `70` | 30–95 |
+| `countdownSeconds` | `rollover.auto.countdownSeconds` | `30` | 5–300 |
+| `keepOldMinutes` | `rollover.auto.keepOldMinutes` | `10` | 1–120 |
+| `idleInputSeconds` | `rollover.auto.idleInputSeconds` | `120` | 10–1800 |
+
+`keepOldMinutes` is stored and editable now, reserved for the release timer after
+the replacement confirms in R3. It does not delay ending the old session in R2.
 
 ### `POST /api/sessions`
 ### `PATCH /api/sessions/{id}`
@@ -2349,6 +2434,18 @@ moves on or somebody sends it a line, because that line never reports the next
 turn starting. Any other state or source is refused, and a refused token is
 audited as `hook.rejected`.
 
+Claude's `PreCompact` entry runs the reporter with `precompact`, a state-neutral
+signal. The reporter sends
+`?sessionId=…&signal=precompact&state=&source=` with the original hook document
+as its body. Authentication is unchanged. A signal combined with a state/source
+or an unknown signal is `400`. The server accepts only a recorded Claude launch
+and a document with `hook_event_name: "PreCompact"` and `trigger: "auto"` or
+`"manual"`; unknown fields are ignored, and missing/unknown triggers do nothing.
+The signal marks due regardless of percentage while retaining eligibility,
+policy, cap and boundary checks. It cannot change the session row or detector
+state. The reporter backgrounds the bounded HTTP request and never waits for
+the panel before allowing compaction.
+
 ## The WebSocket
 
 ### `GET /ws`
@@ -2361,12 +2458,20 @@ state broadcasts, and panel notifications.
 - **Text frames** are JSON control messages with a `t` discriminator.
 
 From the client: `subscribe`, `unsubscribe`, `resize`, `takeControl`,
-`visibility`, `paste`, `ping`. From the server: `subscribed`, `size`, `title`, `clipboard`, `exit`,
+`visibility`, `paste`, `draft`, `ping`. From the server: `subscribed`, `size`, `title`, `clipboard`, `exit`,
 `dropped`, `error`, `pong`, `state`, `panel`.
 
 The handshake takes the same credential as everything else. `Origin` must match
 `Host`, which is what stops another page opening this socket with your cookies
 attached.
+
+`{"t":"draft","sessionId":"…","hasText":true}` reports an unsent compose
+draft. Only its presence is sent, never its content. The compose box debounces
+reports by 150 ms; duplicate booleans are suppressed. Drafts for other selected
+sessions remain reported, even after unsubscribing from their terminal. Each
+connection owns its own set, reconnect replays that browser's current drafts,
+and disconnect discards only that connection's set. An absent signal means no
+draft; a disconnected browser's local draft is therefore not a server-side block.
 
 ## Attaching a harness
 
