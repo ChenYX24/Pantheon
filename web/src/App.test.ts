@@ -18,7 +18,8 @@ const session = (id: string, scratch = false): Session => ({ id, scratch }) as S
 it('keeps the context meter out of the 320px phone header', () => {
   const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
   const header = app.match(/<header\b[^>]*>([\s\S]*?)<\/header>/)?.[1] ?? ''
-  expect(header).toMatch(/\{!narrow && <ContextMeter usage=\{state.context\[current.id\]\} \/>\}/)
+  expect(header).toMatch(/\{!narrow && <ContextMeter usage=\{state.context\[current.id\]\} rollover=\{state.rollover\[current.id\]\} \/>\}/)
+  expect(header).not.toContain('<AutoRolloverStrip')
 })
 
 const term = (id: string, projectId: string, createdAt = 0): Session =>

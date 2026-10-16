@@ -61,6 +61,8 @@ import type {
   ResourceAlert,
   ResourcePolicy,
   RolloverStatus,
+  AutoRolloverPolicy,
+  AutoRolloverAction,
   ResourcesView,
   PluginDetail,
   PluginModule,
@@ -1098,6 +1100,11 @@ export const api = {
   /** The question alone, for a page that has just opened. */
   resourceAlert: () => request<{ alert: ResourceAlert | null }>('/api/resources/alert'),
   rolloverStatus: (id: string) => request<RolloverStatus>(`/api/sessions/${encodeURIComponent(id)}/rollover`),
+  autoRollover: (id: string, action: AutoRolloverAction) =>
+    request<void>(`/api/sessions/${encodeURIComponent(id)}/rollover/auto`, { method: 'POST', body: JSON.stringify({ action }) }),
+  autoRolloverPolicy: () => request<AutoRolloverPolicy>('/api/settings/rollover'),
+  setAutoRolloverPolicy: (policy: AutoRolloverPolicy) =>
+    request<AutoRolloverPolicy>('/api/settings/rollover', { method: 'PUT', body: JSON.stringify(policy) }),
   rolloverSession: (id: string, resume: boolean, reason: 'manual' | 'long' = 'manual') =>
     request<Pick<RolloverStatus, 'handoff' | 'newSessionId'>>(`/api/sessions/${encodeURIComponent(id)}/rollover`, { method: 'POST', body: JSON.stringify({ reason, resume }) }),
   setResourcePolicy: (p: ResourcePolicy) =>

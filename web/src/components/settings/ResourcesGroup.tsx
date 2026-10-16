@@ -32,6 +32,7 @@ import { policyOnly, pollStillCurrent, wholeNumber } from './resourcesPolicy'
 import { StateDot } from '../StateDot'
 import { safeText } from '../text'
 import { Section } from './parts'
+import { AutoRolloverSettings } from './AutoRolloverSettings'
 
 /** How often the page reads the governor while it is open. Its own tick is two seconds. */
 const POLL_MS = 2000
@@ -102,6 +103,7 @@ export function ResourcesGroup({ sessions, focus }: { sessions: Session[]; focus
   return (
     <div className="@container" data-testid="resources">
       <MemorySection view={view} />
+      <AutoRolloverSettings />
       {view.supported && (
         <>
           <AllocationSection view={view} lang={lang} onView={changed} />

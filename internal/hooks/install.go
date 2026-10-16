@@ -118,7 +118,7 @@ type Status struct {
 	OpencodeInstalled bool   `json:"opencodeInstalled"`
 }
 
-// events maps a hook event to the state it reports.
+// events maps a hook event to its state or the state-neutral PreCompact signal.
 var events = map[string]string{
 	"Notification": "waiting",
 	// PermissionRequest fires before the prompt is drawn and carries the
@@ -140,6 +140,9 @@ var events = map[string]string{
 	"PostToolUseFailure": "working",
 	"StopFailure":        "waiting",
 	"SessionStart":       "done",
+	// A signal, not a fourth session state. The reporter sends it separately
+	// so compaction never changes the sidebar's working/waiting/done glyph.
+	"PreCompact": SignalPreCompact,
 }
 
 // Inspect reports what is installed without changing anything.

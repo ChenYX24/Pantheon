@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CornerDownLeft, Send, WifiOff } from 'lucide-react'
 import { t, useLang } from '../../i18n'
 import { AttachmentPicker } from './AttachmentPicker'
@@ -40,12 +40,14 @@ export function ComposeInput({
   disconnected = false,
   onPaste,
   onFiles,
+  onDraft,
 }: {
   sessionId: string
   /** Send is off while the panel is not connected; typing a draft is not. */
   disconnected?: boolean
   /** False when nothing was sent, and then the box keeps what was typed. */
   onPaste: (text: string, submit: boolean) => boolean
+  onDraft?: (sessionId: string, hasText: boolean) => void
   /**
    * Attach files, which on a phone has no other road.
    *
@@ -97,6 +99,25 @@ export function ComposeInput({
     setShownFor(sessionId)
     setText(drafts[sessionId] ?? '')
   }
+
+  const reported = useRef(new Set<string>())
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      for (const [id, value] of Object.entries({ ...drafts, [sessionId]: text })) {
+        onDraft?.(id, value.length > 0)
+        if (value.length > 0) reported.current.add(id)
+        else reported.current.delete(id)
+      }
+    }, 150)
+    return () => window.clearTimeout(timer)
+  }, [drafts, sessionId, text, onDraft])
+  useEffect(() => {
+    const ids = reported.current
+    return () => {
+      for (const id of ids) onDraft?.(id, false)
+      ids.clear()
+    }
+  }, [onDraft])
 
   const send = () => {
     if (!isNewSubmission(text, lastSent.current)) return

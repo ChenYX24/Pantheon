@@ -64,6 +64,9 @@ func TestEveryStateAHookReportsIsARealState(t *testing.T) {
 	}
 
 	for event, state := range events {
+		if event == "PreCompact" && state == SignalPreCompact {
+			continue // Pinned separately as a state-neutral signal.
+		}
 		if !valid[state] {
 			t.Errorf("the %s hook reports %q, which is not a state the server accepts (%v). "+
 				"Nothing would say so at runtime: the server rejects it, the script swallows "+

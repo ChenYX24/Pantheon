@@ -24,6 +24,7 @@ it('puts context only on the session whose id has a reading, including the phone
     expanded: true, overlay: true, touch: true, disconnected: false, projectOrder: 'auto', hasProjectOrder: false,
     stateGuessed: false, hooksInstalled: false, updateAvailable: null,
     context: { known: { used: 62_000, window: 100_000, model: '', source: 'codex-rollout', at: '2026-10-16T00:00:00Z' } },
+    rollover: {},
     onToggle: noop, onSelect: noop, onAddProject: noop, onNewSession: noop, onRenameProject: noop,
     onRemoveProject: noop, onArchiveProject: noop, onOpenArchived: noop, onRenameSession: noop,
     onPinSession: noop, onSetSessionState: noop, onKillSession: noop, onRestartSession: noop,

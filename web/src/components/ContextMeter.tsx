@@ -1,4 +1,5 @@
-import type { ContextUsage } from '../protocol/wire'
+import type { ContextUsage, AutoRollover } from '../protocol/wire'
+import { Clock } from 'lucide-react'
 import { t, useLang } from '../i18n'
 
 function tokens(n: number): string {
@@ -7,14 +8,15 @@ function tokens(n: number): string {
   return String(n)
 }
 
-export function ContextMeter({ usage, compact = false }: { usage?: ContextUsage; compact?: boolean }) {
+export function ContextMeter({ usage, compact = false, rollover }: { usage?: ContextUsage; compact?: boolean; rollover?: AutoRollover }) {
   useLang()
   if (!usage) return null
   const percent = usage.window > 0 ? usage.used / usage.window * 100 : null
   const figure = percent === null ? tokens(usage.used) : `${Math.round(percent)}%`
   const detail = percent === null ? tokens(usage.used) : `${tokens(usage.used)} / ${tokens(usage.window)}`
   const label = `${t('context.label')}: ${detail}`
-  const color = percent !== null && percent >= 85 ? 'text-state-crashed'
+  const due = rollover?.state === 'due' || rollover?.state === 'countdown'
+  const color = due ? 'text-state-waiting' : percent !== null && percent >= 85 ? 'text-state-crashed'
     : percent !== null && percent >= 70 ? 'text-state-waiting' : 'text-ink-2'
   return (
     <span
@@ -23,6 +25,7 @@ export function ContextMeter({ usage, compact = false }: { usage?: ContextUsage;
       aria-label={label}
       className={`inline-flex shrink-0 items-center gap-1 tabular text-vp-xs ${color} ${compact ? '' : 'rounded-md bg-surface-2 px-1.5 py-0.5'}`}
     >
+      {due && <Clock size={11} aria-label={t('autoRollover.pending')} />}
       {!compact && <span>{t('context.label')}</span>}
       {figure}
       {percent !== null && (

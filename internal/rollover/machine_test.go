@@ -1,0 +1,253 @@
+package rollover
+
+import (
+	"errors"
+	"reflect"
+	"testing"
+	"time"
+)
+
+var epoch = time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
+
+func observation() Observation {
+	return Observation{Recorded: true, Agent: "claude", Used: 72, Window: 100,
+		Done: true, HookBacked: true, QuietSince: epoch.Add(-time.Hour)}
+}
+
+func TestTransitions(t *testing.T) {
+	p := DefaultPolicy()
+	ready := Memory{View: View{State: Due, Pct: 72, Reason: "threshold"}, SeenAt: epoch.Add(-time.Hour)}
+	counting := Step(ready, observation(), p, epoch).Memory
+	for _, tc := range []struct {
+		name  string
+		m     Memory
+		o     Observation
+		at    time.Time
+		want  State
+		start bool
+	}{
+		{"first observation", Memory{}, observation(), epoch, OK, false},
+		{"second too early", Memory{AboveAt: epoch}, observation(), epoch.Add(14 * time.Second), OK, false},
+		{"second at 15 seconds", Memory{AboveAt: epoch}, observation(), epoch.Add(15 * time.Second), Due, false},
+		{"due at boundary", ready, observation(), epoch, Countdown, false},
+		{"countdown running", counting, observation(), epoch.Add(29 * time.Second), Countdown, false},
+		{"countdown elapsed", counting, observation(), epoch.Add(30 * time.Second), HandingOff, true},
+		{"handoff never runs twice", Memory{View: View{State: HandingOff}}, observation(), epoch, HandingOff, false},
+		{"failure does not retry automatically", Memory{View: View{State: Failed}, AboveAt: epoch.Add(-time.Hour)}, observation(), epoch, Failed, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := Step(tc.m, tc.o, p, tc.at)
+			if r.Memory.State != tc.want || r.Start != tc.start {
+				t.Fatalf("%+v, start %v; want %s, %v", r.Memory, r.Start, tc.want, tc.start)
+			}
+		})
+	}
+}
+
+func TestBoundaryWaits(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*Observation)
+	}{
+		{"working", func(o *Observation) { o.Done = false }},
+		{"waiting on permission choice or question", func(o *Observation) { o.Done = false }},
+		{"recent input", func(o *Observation) { o.LastInput = epoch.Add(-119 * time.Second) }},
+		{"compose draft", func(o *Observation) { o.Draft = true }},
+		{"background command", func(o *Observation) { o.Background = true }},
+		{"heuristic not quiet", func(o *Observation) { o.HookBacked = false; o.QuietSince = epoch.Add(-119 * time.Second) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := observation()
+			tc.edit(&o)
+			m := Memory{View: View{State: Due}, SeenAt: epoch.Add(-time.Hour)}
+			if r := Step(m, o, DefaultPolicy(), epoch); r.Memory.State != Due || r.Start {
+				t.Fatalf("unsafe boundary: %+v", r)
+			}
+			m.View = View{State: Countdown, EndsAt: epoch.UnixMilli()}
+			m.CountdownAt = epoch.Add(-30 * time.Second)
+			r := Step(m, o, DefaultPolicy(), epoch)
+			if r.Memory.State != Due || r.Start || r.Memory.EndsAt != 0 {
+				t.Fatalf("lost boundary completed countdown: %+v", r)
+			}
+		})
+	}
+	for _, hook := range []bool{true, false} {
+		o := observation()
+		o.HookBacked, o.QuietSince, o.LastInput = hook, epoch.Add(-2*time.Minute), epoch.Add(-2*time.Minute)
+		m := Memory{View: View{State: Due}, SeenAt: epoch.Add(-time.Hour)}
+		if r := Step(m, o, DefaultPolicy(), epoch); r.Memory.State != Countdown {
+			t.Fatalf("quiet done boundary held back (hook %v): %+v", hook, r)
+		}
+	}
+}
+
+func TestEligibilityAndPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*Observation, *Policy)
+	}{
+		{"disabled", func(_ *Observation, p *Policy) { p.Enabled = false }},
+		{"never", func(o *Observation, _ *Policy) { o.Never = true }},
+		{"unrecorded", func(o *Observation, _ *Policy) { o.Recorded = false }},
+		{"shell", func(o *Observation, _ *Policy) { o.Agent = "shell" }},
+		{"other agent", func(o *Observation, _ *Policy) { o.Agent = "kimi" }},
+		{"scratch", func(o *Observation, _ *Policy) { o.Scratch = true }},
+		{"archived", func(o *Observation, _ *Policy) { o.Archived = true }},
+		{"exited", func(o *Observation, _ *Policy) { o.Exited = true }},
+		{"home worker", func(o *Observation, _ *Policy) { o.HomeWorker = true }},
+		{"unknown window", func(o *Observation, _ *Policy) { o.Window = 0 }},
+		{"negative usage", func(o *Observation, _ *Policy) { o.Used = -1 }},
+		{"memory or existing handoff", func(o *Observation, _ *Policy) { o.Busy = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, p := observation(), DefaultPolicy()
+			tc.edit(&o, &p)
+			o.PreCompact = true
+			for _, state := range []State{OK, Due, Countdown} {
+				m := Memory{View: View{State: state}, SeenAt: epoch.Add(-time.Hour), AboveAt: epoch.Add(-time.Hour)}
+				if r := Step(m, o, p, epoch); r.Memory.State != OK || r.Start {
+					t.Fatalf("%s remained eligible: %+v", state, r)
+				}
+			}
+		})
+	}
+}
+
+func TestThresholdNeedsConsecutiveObservationsAndRestartGrace(t *testing.T) {
+	o, p := observation(), DefaultPolicy()
+	m := Step(Memory{}, o, p, epoch).Memory
+	o.Used = 69
+	m = Step(m, o, p, epoch.Add(15*time.Second)).Memory
+	o.Used = 70
+	m = Step(m, o, p, epoch.Add(30*time.Second)).Memory
+	if m.State != OK {
+		t.Fatal("a below-threshold poll did not reset confirmation")
+	}
+	m = Step(m, o, p, epoch.Add(45*time.Second)).Memory
+	if m.State != Due {
+		t.Fatal("second qualifying poll did not mark due")
+	}
+	m = Step(m, o, p, epoch.Add(46*time.Second)).Memory
+	if m.State != Due {
+		t.Fatal("restart assumed there had been no input before observation")
+	}
+	m = Step(m, o, p, epoch.Add(120*time.Second)).Memory
+	if m.State != Countdown {
+		t.Fatal("boundary did not open after startup input grace")
+	}
+	if r := Step(Memory{}, o, p, epoch.Add(time.Hour)); r.Memory.State != OK || r.Start {
+		t.Fatal("restart reused prior confirmation")
+	}
+}
+
+func TestCancelInputAndCooldown(t *testing.T) {
+	o, p := observation(), DefaultPolicy()
+	m := Memory{View: View{State: Due}, SeenAt: epoch.Add(-time.Hour)}
+	m = Step(m, o, p, epoch).Memory
+	o.LastInput = epoch.Add(time.Second)
+	r := Step(m, o, p, epoch.Add(time.Second))
+	if r.Memory.State != OK || !r.Memory.Postponed || len(r.Events) != 1 || r.Events[0].State != Cancelled {
+		t.Fatalf("input did not cancel: %+v", r)
+	}
+	m = r.Memory
+	for _, used := range []int64{70, 79} {
+		o.Used = used
+		m = Step(m, o, p, epoch.Add(time.Hour)).Memory
+		m = Step(m, o, p, epoch.Add(time.Hour+15*time.Second)).Memory
+		if m.State != OK {
+			t.Fatal("cancelled threshold lost its ten-point margin")
+		}
+	}
+	o.Used = 80
+	m = Step(m, o, p, epoch.Add(2*time.Hour)).Memory
+	m = Step(m, o, p, epoch.Add(2*time.Hour+15*time.Second)).Memory
+	if m.State != Due {
+		t.Fatal("threshold + 10 did not become due")
+	}
+}
+
+func TestPreCompactAndNow(t *testing.T) {
+	for _, tc := range []struct {
+		name, agent string
+		window      int64
+		signal, now bool
+		want        State
+	}{
+		{"Claude below threshold", "claude", 100, true, false, Due},
+		{"Codex has no hook", "codex", 100, true, false, OK},
+		{"unknown window even with hook", "claude", 0, true, false, OK},
+		{"explicit now", "codex", 100, false, true, Due},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := observation()
+			o.Agent, o.Used, o.Window, o.PreCompact, o.Now, o.Done = tc.agent, 10, tc.window, tc.signal, tc.now, false
+			r := Step(Memory{}, o, DefaultPolicy(), epoch)
+			if r.Memory.State != tc.want || r.Start {
+				t.Fatalf("%+v", r)
+			}
+			if r.Memory.State == Due {
+				o.PreCompact, o.Now = false, false
+				if r = Step(r.Memory, o, DefaultPolicy(), epoch.Add(time.Hour)); r.Memory.State != Due {
+					t.Fatal("signal bypassed working boundary")
+				}
+			}
+		})
+	}
+}
+
+func TestCapFinishAndStableSnapshot(t *testing.T) {
+	o, p := observation(), DefaultPolicy()
+	m := Memory{View: View{State: Due, Pct: 72}, SeenAt: epoch.Add(-time.Hour)}
+	for i := range 3 {
+		at := epoch.Add(time.Duration(i) * time.Hour)
+		m = Step(m, o, p, at).Memory
+		original := m
+		for j := 1; j < 30; j++ {
+			r := Step(m, o, p, at.Add(time.Duration(j)*time.Second))
+			if !reflect.DeepEqual(r.Memory.View, original.View) || len(r.Events) != 0 {
+				t.Fatal("countdown churned")
+			}
+		}
+		r := Step(m, o, p, at.Add(30*time.Second))
+		if !r.Start || len(r.Memory.Attempts) != i+1 {
+			t.Fatalf("attempt %d: %+v", i, r)
+		}
+		m = Finish(r.Memory, nil).Memory
+		m.State = Due
+	}
+	if r := Step(m, o, p, epoch.Add(3*time.Hour)); r.Memory.State != OK || r.Start {
+		t.Fatal("fourth rollover allowed")
+	}
+	m.State = Due
+	if r := Step(m, o, p, epoch.Add(24*time.Hour+30*time.Second)); r.Memory.State != Countdown {
+		t.Fatal("24h cap did not expire")
+	}
+	r := Finish(Memory{View: View{State: HandingOff}}, errors.New("could not start replacement"))
+	if r.Memory.State != Failed || r.Events[0].Reason != "could not start replacement" {
+		t.Fatal(r)
+	}
+}
+
+func TestPolicyRanges(t *testing.T) {
+	if err := DefaultPolicy().Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []struct {
+		name     string
+		min, max int
+		set      func(*Policy, int)
+	}{
+		{"threshold", 30, 95, func(p *Policy, n int) { p.ThresholdPct = n }},
+		{"countdown", 5, 300, func(p *Policy, n int) { p.CountdownSeconds = n }},
+		{"idle", 10, 1800, func(p *Policy, n int) { p.IdleInputSeconds = n }},
+		{"keep", 1, 120, func(p *Policy, n int) { p.KeepOldMinutes = n }},
+	} {
+		for _, n := range []int{field.min - 1, field.min, field.max, field.max + 1} {
+			p := DefaultPolicy()
+			field.set(&p, n)
+			if err := p.Validate(); (err == nil) != (n >= field.min && n <= field.max) {
+				t.Errorf("%s=%d: %v", field.name, n, err)
+			}
+		}
+	}
+}

@@ -36,6 +36,7 @@ import (
 	"github.com/jiangmuran/vibepanel/internal/pantheon/home"
 	"github.com/jiangmuran/vibepanel/internal/parthenon"
 	"github.com/jiangmuran/vibepanel/internal/resources"
+	"github.com/jiangmuran/vibepanel/internal/rollover"
 	"github.com/jiangmuran/vibepanel/internal/selfupdate"
 	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/store"
@@ -73,9 +74,10 @@ type Server struct {
 
 	// Resources is the memory governor. Nil where there is nothing to govern
 	// (not Linux) and in tests that do not build one.
-	Resources *resources.Governor
-	res       resourcesState
-	rollovers rolloverState
+	Resources    *resources.Governor
+	res          resourcesState
+	rollovers    rolloverState
+	autoRollover autoRolloverState
 
 	// installable answers whether this binary can be replaced in place. A
 	// field so a test can force the answer: the real one asks about the
@@ -518,6 +520,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/sessions/{id}/restart", s.handleRestartSession)
 			r.Post("/sessions/{id}/rollover", s.handleRollover)
 			r.Get("/sessions/{id}/rollover", s.handleRolloverStatus)
+			r.Post("/sessions/{id}/rollover/auto", s.handleAutoRollover)
 			s.registerSessionIORoutes(r)
 			s.registerSessionNoticeRoutes(r)
 			s.registerAttachmentRoutes(r)
@@ -598,11 +601,14 @@ func (s *Server) Routes() http.Handler {
 	// library default reached by writing nothing, and nothing about writing
 	// nothing announces itself when the library changes.
 	r.With(s.RequireAuth).Handle("/ws", &ws.Handler{
-		Manager:  s.Manager,
-		Resolve:  resolver{db: s.DB},
-		Hub:      s.Hub,
-		Log:      s.Log,
-		Snapshot: s.snapshot,
+		Manager:      s.Manager,
+		Resolve:      resolver{db: s.DB},
+		Hub:          s.Hub,
+		Log:          s.Log,
+		Snapshot:     s.snapshot,
+		Input:        s.noteResourceInput,
+		Draft:        s.noteAutoDraft,
+		Disconnected: s.forgetAutoDrafts,
 		// A socket is authorised once, at the handshake, and then lives for
 		// hours. Without this, signing out, a session expiring, an
 		// administrator revoking one, or changing the password left the
@@ -896,6 +902,7 @@ func (s *Server) HookToken(ctx context.Context) (string, error) {
 type hookStateRequest struct {
 	SessionID string `json:"sessionId"`
 	State     string `json:"state"`
+	Signal    string `json:"signal"`
 	// Source is which agent's hook is calling, where that changes how the
 	// report is read: "" (Claude Code, opencode, or anything else), "codex" for
 	// Codex's hooks, "codex-notify" for Codex's older notify line. Checked
@@ -934,6 +941,7 @@ func (s *Server) handleHookState(w http.ResponseWriter, r *http.Request) {
 	var req hookStateRequest
 	if q := r.URL.Query(); q.Get("sessionId") != "" {
 		req.SessionID, req.State, req.Source = q.Get("sessionId"), q.Get("state"), q.Get("source")
+		req.Signal = q.Get("signal")
 	} else if err := json.Unmarshal(body, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "malformed JSON: "+err.Error())
 		return
@@ -974,6 +982,22 @@ func (s *Server) handleHookState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Signal != "" {
+		if req.Signal != hooks.SignalPreCompact || req.State != "" || req.Source != "" {
+			writeErr(w, http.StatusBadRequest, "unknown or conflicting hook signal")
+			return
+		}
+		row, err := s.DB.GetSession(ctx, req.SessionID)
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		if hooks.CompactionImminent(body) {
+			s.signalAutoCompaction(ctx, row)
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if !session.State(req.State).Valid() {
 		writeErr(w, http.StatusBadRequest, "unknown state "+req.State)
 		return
@@ -995,6 +1019,9 @@ func (s *Server) handleHookState(w http.ResponseWriter, r *http.Request) {
 	var note hookNote
 	if len(body) <= hooks.MaxPayload {
 		note = s.recordHookMessage(ctx, prev, body)
+		if running, known := hooks.BackgroundWork(body); known {
+			s.noteAutoBackground(prev.ID, running)
+		}
 	}
 	// What the hook was installed to report, corrected by what its document
 	// says happened. See hooks.Read for the cases, each one measured.
@@ -1084,6 +1111,7 @@ func (s *Server) HandleKey(sessionID string) {
 	if s.Detector != nil {
 		s.Detector.Key(sessionID, time.Now())
 	}
+	s.noteResourceInput(sessionID)
 }
 
 // outputTouchEvery is how often a printing session's last_output_at is
@@ -1160,6 +1188,7 @@ type stateResponse struct {
 	Sessions []store.Session           `json:"sessions"`
 	Live     []string                  `json:"live"`
 	Context  map[string]agentctx.Usage `json:"context"`
+	Rollover map[string]rollover.View  `json:"rollover"`
 
 	// Archived is the projects that are not in the sidebar. Their sessions
 	// are left out of Sessions -- hidden means not sent, so no view has to
@@ -1255,6 +1284,7 @@ func (s *Server) buildState(ctx context.Context) (stateResponse, error) {
 		Projects:        emptyIfNil(projects),
 		Sessions:        emptyIfNil(sessions),
 		Context:         s.contexts.snapshot(sessions),
+		Rollover:        s.autoRolloverSnapshot(sessions),
 		Archived:        archived,
 		Live:            emptyIfNil(s.Manager.LiveIDs()),
 		Fullscreen:      emptyIfNil(fullscreenNow(&s.fullscreen)),
@@ -2724,6 +2754,7 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		}
 	}
 	s.fullscreen.Store(&fullscreen)
+	s.queueAutoRollovers(ctx, rows, byName)
 	return firstErr
 }
 

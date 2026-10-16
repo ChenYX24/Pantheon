@@ -84,7 +84,8 @@ type ClientMessage struct {
 
 	// Text carries a MsgPaste body. Input otherwise arrives as binary frames;
 	// a paste is not keystrokes and does not travel as them.
-	Text string `json:"text,omitempty"`
+	Text    string `json:"text,omitempty"`
+	HasText *bool  `json:"hasText,omitempty"`
 
 	// Dark carries a MsgScheme body, and rides along on MsgSubscribe so the
 	// answer is right before an application has a chance to ask. A pointer
@@ -160,6 +161,9 @@ const (
 	// whether it wants the markers — so this goes through tmux, which tracks
 	// that per pane, instead of through the PTY.
 	MsgPaste = "paste"
+
+	// MsgDraft reports only presence, never the contents of a compose draft.
+	MsgDraft = "draft"
 
 	// MsgResize reports the viewer's viewport. Honoured only if this viewer
 	// controls the session; otherwise the server ignores it and the viewer
@@ -296,6 +300,6 @@ var (
 	}
 	AllClientMessages = []string{
 		MsgSubscribe, MsgUnsubscribe, MsgResize, MsgTakeControl, MsgPing,
-		MsgPaste, MsgScheme, MsgVisibility, MsgLoadTiming,
+		MsgPaste, MsgDraft, MsgScheme, MsgVisibility, MsgLoadTiming,
 	}
 )

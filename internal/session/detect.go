@@ -335,6 +335,17 @@ func (d *Detector) LastHook(id string) time.Time {
 	return time.Time{}
 }
 
+// LastOutput is visible activity, including redraws. An automatic handoff
+// needs actual quiet when its done reading is not backed by a hook.
+func (d *Detector) LastOutput(id string) time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if t := d.track[id]; t != nil {
+		return t.lastOutput
+	}
+	return time.Time{}
+}
+
 // SetManual records a state the user chose by clicking the indicator.
 func (d *Detector) SetManual(id string, st State, now time.Time) {
 	if !st.Valid() {

@@ -32,6 +32,7 @@ import type {
 import { TerminalView } from './components/Terminal'
 import { StateDot } from './components/StateDot'
 import { ContextMeter } from './components/ContextMeter'
+import { AutoRolloverStrip } from './components/AutoRolloverStrip'
 import { Sidebar } from './components/Sidebar'
 import { BottomTerminals } from './components/BottomTerminals'
 import { RightPanel } from './components/RightPanel'
@@ -307,6 +308,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     sessions: [],
     live: [],
     context: {},
+    rollover: {},
     archived: [],
     fullscreen: [],
     frozen: [],
@@ -1373,6 +1375,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           labels={labels}
           live={state.live}
           context={state.context}
+          rollover={state.rollover}
           frozen={state.frozen}
           selected={selected}
           expanded={narrow ? true : docked}
@@ -1563,7 +1566,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
               </span>
               {/* Like latency, this stays out of the 320px phone header;
                   the drawer still carries each session's reading. */}
-              {!narrow && <ContextMeter usage={state.context[current.id]} />}
+              {!narrow && <ContextMeter usage={state.context[current.id]} rollover={state.rollover[current.id]} />}
               {!narrow && latency && (
                 <span
                   data-testid="link-latency"
@@ -1641,6 +1644,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             <ConnectionDot status={status} />
           </div>
         </header>
+
+        {current && <AutoRolloverStrip key={current.id} sessionId={current.id} status={state.rollover[current.id]} disconnected={disconnected} />}
 
         {disconnected && <DisconnectedBar />}
 
@@ -1933,6 +1938,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
               sessionId={current.id}
               disconnected={disconnected}
               onPaste={pasteToCurrent}
+              onDraft={socket.setDraft}
               // The same road a dropped or pasted file takes: into the project,
               // then the path on the command line.
               onFiles={(files) => void uploadInto(files)}

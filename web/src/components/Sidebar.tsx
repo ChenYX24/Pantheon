@@ -19,7 +19,7 @@ import {
   X,
 } from 'lucide-react'
 
-import type { ArchivedProject, ContextUsage, GitRemote, Project, Session, SessionState } from '../protocol/wire'
+import type { ArchivedProject, AutoRollover, ContextUsage, GitRemote, Project, Session, SessionState } from '../protocol/wire'
 import { useDragList } from '../hooks/useDragList'
 import { projectLabel, sessionLabel } from './label'
 import { StateDot } from './StateDot'
@@ -45,6 +45,7 @@ export interface SidebarProps {
   labels: Map<string, string>
   live: string[]
   context: Record<string, ContextUsage>
+  rollover: Record<string, AutoRollover>
   /**
    * Sessions paused from the resources page. Marked here because a paused
    * session's terminal just stops responding, and one that looks like every
@@ -592,7 +593,7 @@ export function Sidebar(props: SidebarProps) {
                       else setRenaming((cur) => (cur === s.id ? null : cur))
                     }}
                   />
-                  <ContextMeter usage={props.context[s.id]} compact />
+                  <ContextMeter usage={props.context[s.id]} rollover={props.rollover[s.id]} compact />
                   {props.frozen.includes(s.id) && (
                     <span
                       data-testid="session-frozen"

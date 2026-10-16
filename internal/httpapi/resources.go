@@ -129,8 +129,15 @@ func (s *Server) noteResourceInput(sessionID string) {
 	if s.res.lastInput == nil {
 		s.res.lastInput = map[string]time.Time{}
 	}
-	s.res.lastInput[sessionID] = time.Now()
+	s.res.lastInput[sessionID] = s.autoRollover.clock()
 	s.res.mu.Unlock()
+	s.cancelAutoRollover(sessionID, "input", true)
+}
+
+func (s *Server) lastResourceInput(sessionID string) time.Time {
+	s.res.mu.Lock()
+	defer s.res.mu.Unlock()
+	return s.res.lastInput[sessionID]
 }
 
 // storedPolicy reads the stored policy, cached, and says when the read failed.

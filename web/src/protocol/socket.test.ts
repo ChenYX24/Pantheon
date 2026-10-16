@@ -54,6 +54,35 @@ it('carries context to state listeners and tolerates older snapshots', () => {
   expect(seen.map((s) => s.context)).toEqual([context, {}])
 })
 
+it('carries rollover to state listeners and defaults missing maps to ok', () => {
+  const sock = newSocket()
+  const seen: PanelState[] = []
+  sock.onState((state) => seen.push(state))
+  const rollover = { s: { state: 'countdown', pct: 72, endsAt: 30_000 } }
+  const state = { t: 'state' as const, sessions: [], projects: [], live: [] }
+  deliver(sock, { ...state, rollover } as ServerMessage)
+  deliver(sock, state)
+  expect(seen.map((s) => s.rollover)).toEqual([rollover, {}])
+})
+
+it('reports draft presence once per change and remembers every session for reconnect', () => {
+  const sock = newSocket()
+  const privateSocket = sock as unknown as { send: (msg: ClientMessage) => void; drafts: Set<string> }
+  const sent: ClientMessage[] = []
+  privateSocket.send = (msg) => sent.push(msg)
+  sock.setDraft('one', true)
+  sock.setDraft('one', true)
+  sock.setDraft('two', true)
+  sock.setDraft('one', false)
+  sock.setDraft('one', false)
+  expect(sent).toEqual([
+    { t: 'draft', sessionId: 'one', hasText: true },
+    { t: 'draft', sessionId: 'two', hasText: true },
+    { t: 'draft', sessionId: 'one', hasText: false },
+  ])
+  expect([...privateSocket.drafts]).toEqual(['two'])
+})
+
 describe('error frames', () => {
   it('reaches the listener with the message and the session it belongs to', () => {
     const sock = newSocket()

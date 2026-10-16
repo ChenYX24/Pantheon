@@ -72,6 +72,10 @@ type Handler struct {
 	// it connects. See where it is called for why that is not optional.
 	Snapshot func(context.Context) []byte
 
+	Input        func(sessionID string)
+	Draft        func(ctx context.Context, connection, sessionID string, hasText bool)
+	Disconnected func(connection string)
+
 	// StillAuthorized, if set, is asked periodically whether the request that
 	// opened this connection would still be allowed. See revalidate.
 	StillAuthorized func(*http.Request) bool
@@ -98,6 +102,7 @@ type Conn struct {
 	h        *Handler
 	ws       *websocket.Conn
 	clientID string
+	draftID  string
 
 	// writeMu serialises writes. The websocket library allows one writer at a
 	// time, and events arrive from one goroutine per subscribed session.
@@ -288,6 +293,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h:         h,
 		ws:        c,
 		clientID:  clientIDFrom(r),
+		draftID:   id.New(),
 		stateWake: make(chan struct{}, 1),
 		streams:   map[uint32]*stream{},
 		byID:      map[string]*stream{},
@@ -490,6 +496,9 @@ func (c *Conn) handleBinary(frame []byte) {
 	if s == nil {
 		return
 	}
+	if len(payload) > 0 && c.h.Input != nil {
+		c.h.Input(s.sessionID)
+	}
 	// Input does not claim the grid: see session.Live.Write for why. A viewer
 	// answering "y" from a phone must not reflow the desktop it is shared with.
 	if _, err := s.live.Write(c.clientID, payload); err != nil {
@@ -529,6 +538,9 @@ func (c *Conn) handleControl(ctx context.Context, msg ClientMessage) {
 		if s == nil || msg.Text == "" {
 			return
 		}
+		if c.h.Input != nil {
+			c.h.Input(msg.SessionID)
+		}
 		if err := c.h.Manager.Paste(ctx, msg.SessionID, msg.Text); err != nil {
 			c.sendError(msg.SessionID, "paste failed: "+err.Error())
 			return
@@ -537,6 +549,13 @@ func (c *Conn) handleControl(ctx context.Context, msg ClientMessage) {
 			if _, err := s.live.Write(c.clientID, []byte("\r")); err != nil {
 				c.sendError(msg.SessionID, "write failed: "+err.Error())
 			}
+		}
+
+	case MsgDraft:
+		// A compose box retains drafts for sessions it no longer displays.
+		// The HTTP callback validates the id; subscription is not required.
+		if msg.HasText != nil && c.h.Draft != nil {
+			c.h.Draft(ctx, c.draftID, msg.SessionID, *msg.HasText)
 		}
 
 	case MsgResize, MsgTakeControl:
@@ -876,6 +895,9 @@ func (c *Conn) unsubscribe(sessionID string) {
 }
 
 func (c *Conn) closeAll() {
+	if c.h.Disconnected != nil {
+		c.h.Disconnected(c.draftID)
+	}
 	c.mu.Lock()
 	all := make([]*stream, 0, len(c.streams))
 	for _, s := range c.streams {

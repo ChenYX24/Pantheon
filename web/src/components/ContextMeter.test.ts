@@ -11,6 +11,13 @@ const usage: ContextUsage = { used: 620_000, window: 1_000_000, model: 'claude-o
 const render = (value?: ContextUsage, compact = false) => renderToStaticMarkup(createElement(ContextMeter, { usage: value, compact }))
 
 describe('context usage', () => {
+  it('uses the policy due state even below the default 70% colour band', () => {
+    setLang('en')
+    const html = renderToStaticMarkup(createElement(ContextMeter, { usage: { ...usage, used: 30_000 }, rollover: { state: 'due', pct: 3 } }))
+    expect(html).toContain('text-state-waiting')
+    expect(html).toContain('lucide-clock')
+    expect(html).toContain('Handoff pending after this turn')
+  })
   it('shows nothing until a usage event is known', () => {
     expect(render()).toBe('')
   })

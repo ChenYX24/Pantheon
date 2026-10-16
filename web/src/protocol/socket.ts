@@ -152,6 +152,7 @@ const DEAD_AFTER_MS = 60_000
 export class PanelSocket {
   private ws: WebSocket | null = null
   private streams = new Map<string, Stream>()
+  private drafts = new Set<string>()
   private byRef = new Map<number, Stream>()
   private backoff = 500
   private pingTimer: number | null = null
@@ -249,6 +250,7 @@ export class PanelSocket {
         this.sendSubscribe(stream)
       }
       this.startPing()
+      for (const sessionId of this.drafts) this.send({ t: 'draft', sessionId, hasText: true })
     }
 
     ws.onmessage = (ev) => {
@@ -430,6 +432,7 @@ export class PanelSocket {
             sessions: st.sessions,
             live: st.live,
             context: st.context ?? {},
+            rollover: st.rollover ?? {},
             archived: st.archived ?? [],
             fullscreen: st.fullscreen ?? [],
             frozen: st.frozen ?? [],
@@ -608,6 +611,15 @@ export class PanelSocket {
     // racing two roads to the same pane.
     this.send({ t: 'paste', sessionId, text, submit })
     return true
+  }
+
+  // Drafts survive reconnects and switching sessions, but their contents never
+  // leave the compose box. Only changes of presence need a socket message.
+  setDraft = (sessionId: string, hasText: boolean) => {
+    if (this.drafts.has(sessionId) === hasText) return
+    if (hasText) this.drafts.add(sessionId)
+    else this.drafts.delete(sessionId)
+    this.send({ t: 'draft', sessionId, hasText })
   }
 
   /**

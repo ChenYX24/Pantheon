@@ -18,6 +18,7 @@ import (
 	"github.com/jiangmuran/vibepanel/internal/pages"
 	"github.com/jiangmuran/vibepanel/internal/plugins"
 	"github.com/jiangmuran/vibepanel/internal/resources"
+	"github.com/jiangmuran/vibepanel/internal/rollover"
 	"github.com/jiangmuran/vibepanel/internal/store"
 	"github.com/jiangmuran/vibepanel/internal/sysmon"
 )
@@ -49,6 +50,8 @@ func TestTypeScriptRowsMatchWhatIsSent(t *testing.T) {
 	}{
 		{"Session", store.Session{}},
 		{"RolloverStatus", rolloverStatus{}},
+		{"AutoRollover", rollover.View{}},
+		{"AutoRolloverPolicy", rollover.Policy{}},
 		{"Project", store.Project{}},
 		{"Note", store.Note{}},
 		{"Todo", store.Todo{}},
@@ -404,9 +407,14 @@ func TestExitVanishedMatchesTheStore(t *testing.T) {
 // edit somebody has to look at.
 func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 	want := map[string]bool{
-		"blocked":         true,
-		"hooks.installed": true,
-		"hooks.removed":   true,
+		"rollover.policy":    true,
+		"rollover.due":       true,
+		"rollover.countdown": true,
+		"rollover.cancelled": true,
+		"rollover.failed":    true,
+		"blocked":            true,
+		"hooks.installed":    true,
+		"hooks.removed":      true,
 		// Same file as hooks.installed and hooks.removed, so the same prefix:
 		// "what did the panel write into an agent's configuration" is one
 		// question and one GROUP BY.

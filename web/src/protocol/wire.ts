@@ -51,8 +51,9 @@ export function decodeData(
 }
 
 export interface ClientMessage {
-  t: 'subscribe' | 'unsubscribe' | 'resize' | 'takeControl' | 'ping' | 'paste' | 'scheme' | 'visibility' | 'loadTiming'
+  t: 'subscribe' | 'unsubscribe' | 'resize' | 'takeControl' | 'ping' | 'paste' | 'draft' | 'scheme' | 'visibility' | 'loadTiming'
   sessionId?: string
+  hasText?: boolean
   /** MsgLoadTiming only. */
   timing?: LoadTiming
   /**
@@ -310,6 +311,8 @@ export interface PanelState {
   live: string[]
   /** Latest context input, rounded to 1,000 tokens. Absent sessions are unknown. */
   context: Record<string, ContextUsage>
+  /** Absent session ids are ok; endsAt is a fixed Unix millisecond deadline. */
+  rollover: Record<string, AutoRollover>
   /** Projects not in the sidebar, most recently archived first. */
   archived: ArchivedProject[]
   /**
@@ -2205,6 +2208,23 @@ export interface RolloverStatus {
   error: string
   newSessionId?: string
 }
+
+export interface AutoRollover {
+  state: 'ok' | 'due' | 'countdown' | 'handing_off' | 'cancelled' | 'failed'
+  pct: number
+  endsAt?: number
+  reason?: string
+}
+
+export interface AutoRolloverPolicy {
+  enabled: boolean
+  thresholdPct: number
+  countdownSeconds: number
+  keepOldMinutes: number
+  idleInputSeconds: number
+}
+
+export type AutoRolloverAction = 'now' | 'later' | 'never' | 'cancel'
 
 // ─── plugins (docs/plugins.md) ───────────────────────────────────────────
 //

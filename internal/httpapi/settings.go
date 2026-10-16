@@ -26,6 +26,8 @@ var started = time.Now()
 
 func (s *Server) registerSettingsRoutes(r chi.Router) {
 	r.Get("/settings", s.handleSettings)
+	r.Get("/settings/rollover", s.handleAutoRolloverPolicy)
+	r.Put("/settings/rollover", s.handlePutAutoRolloverPolicy)
 	r.Get("/settings/audit", s.handleAudit)
 	r.Get("/settings/hooks", s.handleHooksStatus)
 	r.Get("/settings/tokens", s.handleListTokens)

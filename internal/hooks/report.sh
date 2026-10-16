@@ -9,7 +9,7 @@
 # variables below are absent and this exits immediately, so agents you start
 # from an ordinary terminal are unaffected.
 #
-# Usage: vibepanel-report.sh <working|waiting|done> [codex|codex-notify]
+# Usage: vibepanel-report.sh <working|waiting|done|precompact> [codex|codex-notify]
 #
 # The second argument says which agent's hook is calling, where that changes how
 # the panel reads the report: `codex-notify` is Codex's older `notify` line,
@@ -29,8 +29,10 @@
 [ -n "$VIBEPANEL_URL" ] || exit 0
 
 state="$1"
+signal=""
 case "$state" in
   working|waiting|done) ;;
+  precompact) signal="$state"; state="" ;;
   *) exit 0 ;;
 esac
 
@@ -56,11 +58,20 @@ fi
 # --insecure is safe and necessary here: the destination is 127.0.0.1, and when
 # the panel is serving TLS its certificate is issued for the public hostname,
 # which a loopback address will never match.
+report() {
 curl --silent --show-error --insecure --max-time 2 --output /dev/null \
-  --request POST "$VIBEPANEL_URL/api/hook/state?sessionId=$VIBEPANEL_SESSION_ID&state=$state&source=$source" \
+  --request POST "$VIBEPANEL_URL/api/hook/state?sessionId=$VIBEPANEL_SESSION_ID&state=$state&source=$source&signal=$signal" \
   --header "Authorization: Bearer $VIBEPANEL_TOKEN" \
   --header 'Content-Type: application/json' \
   --data-binary "$body" \
   >/dev/null 2>&1
+}
+
+if [ -n "$signal" ]; then
+  # Compaction cannot wait on the panel, even for curl's bounded timeout.
+  report </dev/null >/dev/null 2>&1 &
+else
+  report
+fi
 
 exit 0

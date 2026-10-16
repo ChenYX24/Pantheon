@@ -40,7 +40,7 @@ func developmentTerminalRoute(method, path string) bool {
 	}
 	if method == http.MethodGet {
 		switch path {
-		case "/api/system", "/api/usage", "/api/resources", "/api/resources/alert", "/api/token-usage", "/api/settings", "/api/browse", "/api/notes":
+		case "/api/system", "/api/usage", "/api/resources", "/api/resources/alert", "/api/token-usage", "/api/settings", "/api/settings/rollover", "/api/browse", "/api/notes":
 			return true
 		}
 	}
@@ -52,13 +52,16 @@ func developmentTerminalRoute(method, path string) bool {
 	}
 	if method == http.MethodPut {
 		switch path {
-		case "/api/notes", "/api/settings/paste", "/api/settings/timezone", "/api/settings/archive":
+		case "/api/notes", "/api/settings/paste", "/api/settings/timezone", "/api/settings/archive", "/api/settings/rollover":
 			return true
 		}
 	}
 	parts := strings.Split(strings.TrimPrefix(path, "/api/"), "/")
 	if len(parts) < 2 || parts[1] == "" {
 		return false
+	}
+	if len(parts) == 4 && parts[0] == "sessions" && parts[2] == "rollover" && parts[3] == "auto" {
+		return method == http.MethodPost
 	}
 	if len(parts) == 2 {
 		switch parts[0] {
