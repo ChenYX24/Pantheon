@@ -69,6 +69,7 @@ Optional per-project setting in `pantheon.json` (meta PATCH): `rolloverAfterHour
 (0 = off, default 0). When an idle agent session in that project has run longer than that,
 the home to-do list shows `session_rollover` for it (stage A kind) with actions
 "交接并新开" (`resume: true`) — never automatic.
+Context-based automatic rollover is a separate, opt-out mechanism: see `stage-r-contract.md`.
 
 ## 4. UI hooks (small; the main redesign is F1)
 
