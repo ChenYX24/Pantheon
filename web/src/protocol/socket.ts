@@ -429,6 +429,7 @@ export class PanelSocket {
             projects: st.projects,
             sessions: st.sessions,
             live: st.live,
+            context: st.context ?? {},
             archived: st.archived ?? [],
             fullscreen: st.fullscreen ?? [],
             frozen: st.frozen ?? [],

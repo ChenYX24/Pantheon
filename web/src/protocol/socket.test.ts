@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PanelSocket } from './socket'
 import { encodeData, FRAME_REPLAY } from './wire'
-import type { ClientMessage, ServerMessage } from './wire'
+import type { ClientMessage, PanelState, ServerMessage } from './wire'
 
 /**
  * The frame the client used to drop on the floor.
@@ -42,6 +42,17 @@ function newSocket(): PanelSocket {
 function deliver(sock: PanelSocket, msg: ServerMessage) {
   ;(sock as unknown as { handleControl(m: ServerMessage): void }).handleControl(msg)
 }
+
+it('carries context to state listeners and tolerates older snapshots', () => {
+  const sock = newSocket()
+  const seen: PanelState[] = []
+  sock.onState((state) => seen.push(state))
+  const context = { s: { used: 620_000, window: 1_000_000, model: '', source: 'claude-transcript', at: '2026-10-16T00:00:00Z' } }
+  const state = { t: 'state' as const, sessions: [], projects: [], live: [] }
+  deliver(sock, { ...state, context } as ServerMessage)
+  deliver(sock, state)
+  expect(seen.map((s) => s.context)).toEqual([context, {}])
+})
 
 describe('error frames', () => {
   it('reaches the listener with the message and the session it belongs to', () => {

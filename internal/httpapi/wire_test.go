@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jiangmuran/vibepanel/internal/agentctx"
 	"github.com/jiangmuran/vibepanel/internal/browse"
 	"github.com/jiangmuran/vibepanel/internal/git"
 	"github.com/jiangmuran/vibepanel/internal/pages"
@@ -58,6 +59,7 @@ func TestTypeScriptRowsMatchWhatIsSent(t *testing.T) {
 		// home of this test could not import without a cycle — so the rows
 		// were pinned and the envelope carrying them was not.
 		{"PanelState", stateResponse{}},
+		{"ContextUsage", agentctx.Usage{}},
 		{"ArchivedProject", archivedProject{}},
 		// The rest of the hand-written surface. These went uncovered only
 		// because the test could not see this package from where it lived;

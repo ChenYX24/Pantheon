@@ -31,6 +31,7 @@ import type {
 } from './protocol/wire'
 import { TerminalView } from './components/Terminal'
 import { StateDot } from './components/StateDot'
+import { ContextMeter } from './components/ContextMeter'
 import { Sidebar } from './components/Sidebar'
 import { BottomTerminals } from './components/BottomTerminals'
 import { RightPanel } from './components/RightPanel'
@@ -305,6 +306,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     projects: [],
     sessions: [],
     live: [],
+    context: {},
     archived: [],
     fullscreen: [],
     frozen: [],
@@ -1370,6 +1372,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           sessions={mainSessions}
           labels={labels}
           live={state.live}
+          context={state.context}
           frozen={state.frozen}
           selected={selected}
           expanded={narrow ? true : docked}
@@ -1558,6 +1561,9 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
               >
                 {current.cols}×{current.rows}
               </span>
+              {/* Like latency, this stays out of the 320px phone header;
+                  the drawer still carries each session's reading. */}
+              {!narrow && <ContextMeter usage={state.context[current.id]} />}
               {!narrow && latency && (
                 <span
                   data-testid="link-latency"

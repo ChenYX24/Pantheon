@@ -718,6 +718,7 @@ const DICT = {
   'net.unreachable': { zh: '连不上面板', en: 'Cannot reach the panel' },
   'app.gridSize': { zh: '所有观看端看到的网格', en: 'The grid every viewer of this session is seeing' },
   'app.linkLatency': { zh: '{ms} 毫秒', en: '{ms} ms' },
+  'context.label': { zh: '上下文', en: 'Context' },
   'app.linkLatencyWhy': {
     zh: '此浏览器到面板的往返延迟，包含代理；数值越高，打字越慢。',
     en: 'Round trip from this browser to the panel, including the proxy. Higher values make typing lag.',

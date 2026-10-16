@@ -84,6 +84,33 @@ are installed, and any storage warning.
 This is the one to poll if you are not using the WebSocket. It is also what the
 socket pushes, so the shapes are identical.
 
+`context` maps session ids to the latest context input usage of live Claude
+Code and Codex sessions. It is read-only, held in memory, and separate from
+the stored session row. An absent entry means unknown; a known zero is sent:
+
+```json
+{"context":{"s_abc":{"used":620000,"window":1000000,
+  "model":"claude-opus-5-5","source":"claude-transcript",
+  "at":"2026-10-16T01:02:03Z"}}}
+```
+
+`used` is rounded to the nearest 1,000 tokens for the snapshot. `window: 0`
+means the model's window is unknown; show the tokens without a percentage.
+`model` is empty when the source does not report it. `source` is
+`claude-transcript` or `codex-rollout`. Unlike the Unix timestamps on stored
+rows, `at` is RFC 3339: the usage event's timestamp, or the observation time
+when it has none. It stays unchanged until the rounded count, window, model
+or source changes, so an identical reading does not cause a socket broadcast.
+
+Claude counts the last non-sidechain assistant entry's input, cache-read input
+and cache-creation input. Codex counts `last_token_usage.input_tokens`, which
+already includes cached input; neither source uses output or cumulative spend.
+The poller checks at most once every 15 seconds per session, reading only
+changed files with bounded tails. Claude's hook-recorded path takes precedence;
+without hooks the live pid's `sessions/<pid>.json` supplies the conversation.
+Missing files, unsupported agents and sessions with no usage event in the tail
+are unknown. Scratch, exited and archived sessions are absent from this map.
+
 Archived projects are not in `projects`, and their sessions are not in
 `sessions`, although those sessions are still running. They are listed in
 `archived` instead: `id`, `name`, `path`, `archivedAt`, `archivedAuto` (the

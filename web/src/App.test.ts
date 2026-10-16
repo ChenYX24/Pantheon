@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 
 import type { Session } from './protocol/wire'
 import { nextSelection, stripFor } from './App'
@@ -13,6 +14,12 @@ import { nextSelection, stripFor } from './App'
  * with a session list beside an empty frame, remembered in localStorage.
  */
 const session = (id: string, scratch = false): Session => ({ id, scratch }) as Session
+
+it('keeps the context meter out of the 320px phone header', () => {
+  const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+  const header = app.match(/<header\b[^>]*>([\s\S]*?)<\/header>/)?.[1] ?? ''
+  expect(header).toMatch(/\{!narrow && <ContextMeter usage=\{state.context\[current.id\]\} \/>\}/)
+})
 
 const term = (id: string, projectId: string, createdAt = 0): Session =>
   ({ id, projectId, createdAt, scratch: true }) as Session

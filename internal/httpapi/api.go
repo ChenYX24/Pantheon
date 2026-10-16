@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/jiangmuran/vibepanel/internal/agentctx"
 	"github.com/jiangmuran/vibepanel/internal/auth"
 	"github.com/jiangmuran/vibepanel/internal/chat"
 	"github.com/jiangmuran/vibepanel/internal/claudeaccount"
@@ -67,6 +68,7 @@ type Server struct {
 	// claudeLogs follows each Claude Code session's transcript for the one
 	// thing its hooks never report, an interrupt.
 	claudeLogs claudelog.Watcher
+	contexts   contextMeter
 	Sampler    *sysmon.Sampler
 
 	// Resources is the memory governor. Nil where there is nothing to govern
@@ -822,25 +824,26 @@ func (s *Server) notifyState() {
 		// database while holding up every other viewer's update.
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		payload := s.snapshot(ctx)
-		if payload == nil {
-			return nil
-		}
 		// The same test the poller makes. Every hook report calls this, and
 		// most repeat the state already stored: rebuilding and sending the
 		// whole snapshot to every viewer for those was measured at 40 KB/s per
 		// viewer of bytes identical to what each already had.
-		s.snapMu.Lock()
-		changed := !bytes.Equal(payload, s.lastSnapshot)
-		if changed {
-			s.lastSnapshot = payload
-		}
-		s.snapMu.Unlock()
-		if !changed {
-			return nil
-		}
-		return payload
+		return s.changedSnapshot(ctx)
 	})
+}
+
+func (s *Server) changedSnapshot(ctx context.Context) []byte {
+	payload := s.snapshot(ctx)
+	if payload == nil {
+		return nil
+	}
+	s.snapMu.Lock()
+	defer s.snapMu.Unlock()
+	if bytes.Equal(payload, s.lastSnapshot) {
+		return nil
+	}
+	s.lastSnapshot = payload
+	return payload
 }
 
 // HookToken returns the shared secret that authenticates state reports,
@@ -1153,9 +1156,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // would let it render a session list against a project list from a different
 // instant.
 type stateResponse struct {
-	Projects []store.Project `json:"projects"`
-	Sessions []store.Session `json:"sessions"`
-	Live     []string        `json:"live"`
+	Projects []store.Project           `json:"projects"`
+	Sessions []store.Session           `json:"sessions"`
+	Live     []string                  `json:"live"`
+	Context  map[string]agentctx.Usage `json:"context"`
 
 	// Archived is the projects that are not in the sidebar. Their sessions
 	// are left out of Sessions -- hidden means not sent, so no view has to
@@ -1250,6 +1254,7 @@ func (s *Server) buildState(ctx context.Context) (stateResponse, error) {
 	return stateResponse{
 		Projects:        emptyIfNil(projects),
 		Sessions:        emptyIfNil(sessions),
+		Context:         s.contexts.snapshot(sessions),
 		Archived:        archived,
 		Live:            emptyIfNil(s.Manager.LiveIDs()),
 		Fullscreen:      emptyIfNil(fullscreenNow(&s.fullscreen)),
@@ -2478,17 +2483,7 @@ func (s *Server) Poll(ctx context.Context) {
 			// Push only when the picture actually changed. A tick that
 			// broadcasts regardless is polling again, just with the cost moved
 			// onto every connected viewer.
-			payload := s.snapshot(ctx)
-			if payload == nil {
-				continue
-			}
-			s.snapMu.Lock()
-			changed := !bytes.Equal(payload, s.lastSnapshot)
-			if changed {
-				s.lastSnapshot = payload
-			}
-			s.snapMu.Unlock()
-			if changed && s.Hub != nil {
+			if payload := s.changedSnapshot(ctx); payload != nil && s.Hub != nil {
 				s.Hub.Broadcast(payload)
 			}
 		}
@@ -2563,6 +2558,7 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		return err
 	}
 	s.publishResourceSessions(rows)
+	s.refreshContexts(ctx, rows, byName)
 	if s.Detector != nil {
 		ids := make([]string, 0, len(rows))
 		for _, row := range rows {

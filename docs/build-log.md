@@ -27216,3 +27216,93 @@ context, so a tap beside the open drawer scrolled the terminal instead of
 closing it. That was Pantheon's own bug, found by upstream's new check; the
 terminal root is now `isolate`. Render then passed 39 with the same two
 clipboard failures it had before the merge.
+
+### 2026-10-16 — R1: context usage beside each agent session
+
+The session header and sidebar now show the latest context input usage for
+Claude Code and Codex. Known windows show a percentage, a small filled bar and
+the token counts in the tooltip; unknown windows show tokens alone. The bands
+change at 70% and 85%, with the number and bar carrying the meaning without
+colour. The header meter is omitted on phones, preserving the space reserved
+by S2 at 320px; the drawer still shows each session's figure. Labels use the
+existing English/Chinese dictionary.
+
+`internal/agentctx` scans hand-written JSONL fixtures and follows a bounded
+tail per session: 256 KiB initially, at most 4 MiB per refresh, complete lines
+only, non-blocking opens without taking a controlling terminal, and resets on
+path change, replacement or observed truncation. Oversized lines are skipped
+through their newline. Claude uses the last main-chain assistant's input plus
+both input-cache counts. Its model-window table is local and must follow model
+changes. Codex uses the last non-null token-count info's input and reported
+window; cached input is already part of that input count, not an extra term.
+
+The existing poller refreshes eligible live sessions at most every 15 seconds.
+Claude prefers its hook-recorded path, otherwise walks the pane's process tree
+to its live pid record. That cache retains the pid and its config directory,
+including a process's `CLAUDE_CONFIG_DIR`. Codex uses `FindRollout`, retaining
+the path for a done session and re-resolving while active. An unchanged
+transcript costs one stat and no open per refresh. Hook-free Claude also reads
+its small pid record and checks process names at that interval: otherwise a
+`/clear` or `--resume` could leave the old, unchanged path cached forever. Thus
+the one-stat budget applies to the transcript, not to all discovery I/O.
+
+Usage lives only in memory, outside the stored session row; there is no schema
+change, new setting or rollover action. REST and socket state carry the same
+`context` map, omitting unknown, scratch, exited and archived sessions. The
+snapshot rounds input to 1,000 tokens and retains the previous timestamp when
+the displayed reading is equal. The hook and poll broadcast paths now share
+their existing byte-comparison gate. Tests exercise that gate without a
+listener: equal rounded readings send nothing, while a new count, a changed
+window and a removed reading produce a new snapshot.
+
+Validation ran serially at `nice -n 19`, using only synthetic files and
+temporary databases under this worktree. Go used
+`GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1
+GOMEMLIMIT=600MiB`, with `TMPDIR` and `GOCACHE` under `.r1-tmp`:
+
+```sh
+nice -n 19 go test -json ./internal/agentctx
+nice -n 19 go test -json ./internal/claudelog
+nice -n 19 go test -json ./internal/codexlog
+nice -n 19 go test -json ./internal/store
+nice -n 19 go test -json ./internal/httpapi -run '^(TestContext|TestTypeScriptRowsMatchWhatIsSent$|TestTheRolloutIsReadOnlyForAQuietCodex$)'
+```
+
+All passed: 13, 10, 7, 140 and 8 top-level tests respectively (178 total;
+388 including subtests). Coverage includes the model table, null info,
+sidechains, partial and oversized lines, append/truncate/replace, pid mapping
+under a temporary HOME and config directory, hook precedence and hook-free
+polling, clock-driven throttling, idle stat/open counts, and both wire shapes.
+The selected HTTP tests use no listener or tmux. The existing integration
+tests that start those were not run on this shared host.
+
+Frontend commands used `NODE_OPTIONS=--max-old-space-size=900`, offline npm,
+and worktree-local temporary/cache directories. `nice -n 19 npx tsc -b`
+passed. A temporary Vitest config copied the repository's include pattern and
+Node environment, changing only `root` and `cacheDir` to keep writes away from
+the shared `web/node_modules`; `--configLoader runner` avoids the shared
+`.vite-temp` directory too. From `web`:
+
+```sh
+nice -n 19 npx vitest run --pool=forks --maxWorkers=1 --config ../.r1-tmp/vitest.config.mjs --configLoader runner src/components/ContextMeter.test.ts src/components/Sidebar.test.ts src/App.test.ts src/protocol/socket.test.ts src/i18n.test.ts src/chrome-vocabulary.test.ts
+nice -n 19 npx vitest run --pool=forks --maxWorkers=1 --config ../.r1-tmp/vitest.config.mjs --configLoader runner
+```
+
+The focused run passed 6 files / 60 tests; its first run exposed missing
+summary fields in the new sidebar fixture, corrected before rerunning. The
+full suite ran once and passed 115 files / 1109 tests. Final type checking then
+required that fixture to supply the complete `Session` shape; after that
+fixture-only correction, `tsc -b` and the 6-file / 60-test focused run passed
+again. `nice -n 19 npx eslint src/components/ContextMeter.tsx
+src/components/ContextMeter.test.ts src/components/Sidebar.tsx
+src/components/Sidebar.test.ts src/App.tsx src/App.test.ts
+src/protocol/socket.ts src/protocol/socket.test.ts src/protocol/wire.ts
+src/i18n.ts` reported no errors and three existing App warnings (two fast
+refresh exports and the `setPaneLayout` effect dependency). Header visibility is
+pinned in a source check, not a browser measurement. Browser checks, a bundle
+build, deployment and real conversation reads were prohibited; the embedded
+bundle is unchanged. Initial tails can contain no usable usage event and then
+remain unknown until one arrives. The Conductor still needs to compare both
+meters with real sessions, especially Codex's cached-input accounting against
+its status line, Claude's pid mapping across versions/accounts, and the
+model-window table. The phone layout also needs browser review after rebuild.

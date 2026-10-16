@@ -294,10 +294,22 @@ export interface Session {
   scratch: boolean
 }
 
+export interface ContextUsage {
+  used: number
+  /** Zero means the model's window is unknown. */
+  window: number
+  model: string
+  source: 'claude-transcript' | 'codex-rollout'
+  /** RFC 3339 time of the last change to this rounded reading. */
+  at: string
+}
+
 export interface PanelState {
   projects: Project[]
   sessions: Session[]
   live: string[]
+  /** Latest context input, rounded to 1,000 tokens. Absent sessions are unknown. */
+  context: Record<string, ContextUsage>
   /** Projects not in the sidebar, most recently archived first. */
   archived: ArchivedProject[]
   /**
