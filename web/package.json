@@ -19,7 +19,8 @@
     "check:chat": "node scripts/chat-check.mjs",
     "check:resources": "node scripts/resources-check.mjs",
     "check:archive": "node scripts/archive-check.mjs",
-    "check:plugins": "node scripts/plugins-check.mjs"
+    "check:plugins": "node scripts/plugins-check.mjs",
+    "check:rollover": "node scripts/rollover-check.mjs"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.5",

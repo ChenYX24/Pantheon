@@ -59,6 +59,10 @@ tmux-notice:
 panes-check:          ## The side panel's pane layout: drag, drop, merge, restore
 	cd web && npm run check:panes
 
+.PHONY: rollover-check
+rollover-check:       ## The automatic rollover strip: pending, countdown, cancel. No binary, no tmux
+	cd web && npm run check:rollover
+
 .PHONY: first-run-check
 first-run-check: build ## The setup wizard and the first project, in a browser
 	cd web && npm run check:first-run

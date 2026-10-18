@@ -27453,3 +27453,38 @@ signal leaves the displayed session state unchanged, and completion follows
 E2's existing write/end/start order. Browser checks, bundle builds, deployment
 and real conversation reads were excluded from this worker's scope; the
 embedded bundle is unchanged.
+
+## 2026-10-18 — Click the automatic rollover strip in a browser
+
+R2 was merged with a green Go suite and a strip that nothing had ever clicked.
+The first attempt to try it by hand stalled for a reason no test could have
+shown: the only session open was at 8%, the threshold's floor is 30%, so the
+session could never become pending and there was nothing on screen to press.
+
+`make rollover-check` (`web/scripts/rollover-check.mjs`) mounts the real
+`AutoRolloverStrip` under Vite with `fetch` replaced, so it needs no binary,
+no tmux and no session. It checks that nothing renders for ok, cancelled or a
+missing status; that pending offers exactly *Hand off now / Later / Never*
+and each sends exactly its own action to `/rollover/auto`; that a countdown
+offers only *Cancel*, falls, and holds at 0 rather than going negative; that a
+second press during the request sends nothing; that Tab then Enter reaches
+Cancel; that a refused action shows the server's words and gives the button
+back; that handing off has no buttons; that failed is a triangle and pending a
+clock, so the difference is not only colour (red line 4); that a dropped
+connection disables everything; and that none of it overflows at 320, 768 and
+1200 px in both languages and both themes.
+
+The check was made to fail once on purpose: removing *Cancel* from the
+countdown stopped it at the countdown step, with the source restored after.
+
+Two things worth knowing for manual testing. A dev-only "simulate pending"
+switch is not needed: `POST /api/sessions/{id}/rollover/auto` with
+`{"action":"now"}` marks any eligible, non-busy session due whatever its usage
+(`o.Now`), and the boundary and the countdown still apply. The UI has no button
+for it while the state is ok, so it is an API call, from a signed-in page.
+And the plan's table says the countdown defaults to 60 s; the contract and
+`rollover.DefaultPolicy` say 30, and those are what count.
+
+```sh
+NODE_OPTIONS=--max-old-space-size=700 systemd-run --user --scope -p MemoryMax=1000M --nice=19 npm run check:rollover
+```
