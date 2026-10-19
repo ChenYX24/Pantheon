@@ -26,6 +26,11 @@ Unknown is not zero. Rounded to 1k so the snapshot does not churn.
 Only panel-started sessions with a recorded claude/codex LaunchCommand are eligible. Per
 session: at most 3 automatic rollovers per 24 h; after a cancel, due again at threshold + 10 %.
 Memory-pressure rollover (E2 governor) keeps its own rules and takes precedence.
+The switch, the per-session off and the daily cap restrain the *automatic* trigger only. An
+explicit request (the header's Hand off button, `POST …/rollover/auto {"action":"now"}`) is a
+person's decision: it works with the switch off, with "never" set and past the cap, and is
+remembered across polls. It is still refused for an ineligible or busy session, still waits
+for the boundary, still counts down, and a keystroke still cancels it.
 
 ## 4. State machine (per session, in memory; derived from files, not stored)
 `ok → due → countdown → handing_off → verifying → handed_off → released`

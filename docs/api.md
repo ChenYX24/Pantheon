@@ -428,11 +428,18 @@ If that fails, GET retains the error and any new session id for recovery.
 Authenticated, with the same development-terminal allow-list as manual rollover.
 Body: `{"action":"now"|"later"|"never"|"cancel"}`. Success is `204`; unknown
 actions or fields are `400`, a missing session is `404`, and a handoff already
-started is `409`. `now` also returns `409` when the session is ineligible,
-disabled, hidden, already rolling over, or at the three-attempt daily cap.
+started is `409`. `now` also returns `409` when the session is ineligible
+(not panel-started, not claude/codex, usage window unknown), hidden, or already
+rolling over.
 
 - `now` marks the session due below the threshold too. It requests the next safe
   boundary and retains the full cancellable countdown; it never interrupts work.
+  It is the header's *Hand off* button, so it is a person's decision and is not
+  held back by what holds back the automatic trigger: the global switch, the
+  session's `never`, and the three-per-day cap. The request is remembered
+  (`Requested`) until it completes or is cancelled, so later polls with the
+  switch off do not withdraw it. The view's `reason` is `now`, which the
+  browser reads to show "Handoff requested" and offer only *Cancel*.
 - `later` and `cancel` remove the banner and raise this session's next threshold
   by ten percentage points (not ten percent of the threshold). Further cancels
   do not compound this margin.

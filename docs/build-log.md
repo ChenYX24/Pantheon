@@ -27488,3 +27488,35 @@ And the plan's table says the countdown defaults to 60 s; the contract and
 ```sh
 NODE_OPTIONS=--max-old-space-size=700 systemd-run --user --scope -p MemoryMax=1000M --nice=19 npm run check:rollover
 ```
+
+## 2026-10-19 — A Hand off button that does not depend on the automatic switch
+
+The check above found the first real problem by *not* being able to start:
+the strip needed a pending session, a pending session needed 30% usage, and
+the only session to hand was at 8%. The action that bypasses the threshold
+(`now`) existed, but only as an API call that needed the session id, and the
+header's manual handoff sat behind an unlabelled "…" menu that did not count
+down. Asked for a button, the owner added a requirement that changed the
+design: it must work when automatic rollover is **off**, because a person
+who turns the automation off still wants to say "this one is too long".
+
+So `now` now outranks the three things that hold back the *automatic*
+trigger -- the global switch, the session's "never", and the three-per-day
+cap -- and nothing else. `rollover.Step` keeps `Requested` across polls
+(`o.Now` is true only on the request that carried it, so honouring only that
+would be cancelled as "unavailable" on the next tick, which a test now pins).
+Eligibility, the busy flag, the boundary, the countdown and keystroke
+cancellation are untouched. The earlier test `now bypassed never` asserted the
+opposite and was reversed on purpose, not worked around.
+
+`HandoffButton` is the visible control: an icon and the word *Hand off*
+beside the session title, icon-only on a narrow header, disabled while a
+handoff is already underway, and reporting a refusal as a toast. A requested
+(`reason: "now"`) pending state reads "Handoff requested" and offers only
+*Cancel*; "Later" and "Never" are about the automatic trigger.
+
+Writing the check's fixture surfaced one trap worth keeping: a React render
+that is only *scheduled* lets the next assertion read the previous state's
+DOM, so a check can pass on stale markup. The fixture uses `flushSync`, and
+waits for a press to finish before reading the button again; the check was
+run repeatedly and against three deliberate breakages of the component.
