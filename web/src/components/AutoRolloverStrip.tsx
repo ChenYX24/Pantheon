@@ -31,14 +31,17 @@ export function AutoRolloverStrip({ sessionId, status, disconnected = false }: {
     finally { setBusy(false) }
   }
   const failed = status.state === 'failed'
+  // The person asked for this one. Its percentage is beside the point, and
+  // "Never" and "Later" are about the automatic trigger they are not using.
+  const asked = status.reason === 'now' && status.state === 'due'
   const text = counting ? t('autoRollover.countdown', { n: rolloverSeconds(status.endsAt ?? now, now) })
     : status.state === 'handing_off' ? t('autoRollover.handingOff')
-      : failed ? t('autoRollover.failed') : t('autoRollover.due', { pct: status.pct })
+      : failed ? t('autoRollover.failed') : asked ? t('autoRollover.requested') : t('autoRollover.due', { pct: status.pct })
   return <div data-testid="auto-rollover" className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline bg-surface-2 px-3 py-2 text-vp-sm">
     {failed ? <TriangleAlert size={14} className="shrink-0 text-state-crashed" aria-hidden="true" /> : <Clock size={14} className="shrink-0 text-state-waiting" aria-hidden="true" />}
     <span role="status" className="min-w-0 flex-1 text-ink-2">{text}</span>
     <span className="flex min-w-0 flex-wrap gap-1">
-      {(counting ? ['cancel'] as const : status.state === 'handing_off' ? [] : ['now', 'later', 'never'] as const).map((action) =>
+      {(counting || asked ? ['cancel'] as const : status.state === 'handing_off' ? [] : ['now', 'later', 'never'] as const).map((action) =>
         <button key={action} type="button" className="vp-control" disabled={busy || disconnected} onClick={() => void act(action)}>{t(`autoRollover.${action}`)}</button>,
       )}
     </span>

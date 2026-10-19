@@ -25,6 +25,16 @@ describe('automatic rollover strip', () => {
     expect(html).not.toContain('autoFocus')
   })
 
+  it('says a requested handoff was requested and offers only Cancel', () => {
+    setLang('en')
+    const html = render({ state: 'due', pct: 8, reason: 'now' })
+    expect(html).toContain('Handoff requested')
+    expect(html).toContain('Cancel')
+    // Later and Never are about the automatic trigger, which this is not.
+    for (const gone of ['Later', 'Never for this session', 'Hand off now', '8%']) expect(html).not.toContain(gone)
+    expect(render({ state: 'due', pct: 72, reason: 'threshold' })).toContain('Never for this session')
+  })
+
   it('counts down locally with a cancel action', () => {
     setLang('en')
     const html = render({ state: 'countdown', pct: 72, endsAt: Date.now() + 28_000 })

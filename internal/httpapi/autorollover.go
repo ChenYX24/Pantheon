@@ -485,7 +485,10 @@ func (s *Server) handleAutoRollover(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
-	if !p.Enabled || never[row.ID] || hidden || !o.Eligible() || o.Busy {
+	// The switch and the session's "never" hold back automatic triggers, not
+	// this request: it is the person deciding. rollover.Step applies the same
+	// rule on every later poll.
+	if hidden || !o.Eligible() || o.Busy {
 		writeErr(w, http.StatusConflict, "session is not eligible for automatic rollover")
 		return
 	}

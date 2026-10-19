@@ -33,6 +33,7 @@ import { TerminalView } from './components/Terminal'
 import { StateDot } from './components/StateDot'
 import { ContextMeter } from './components/ContextMeter'
 import { AutoRolloverStrip } from './components/AutoRolloverStrip'
+import { HandoffButton } from './components/HandoffButton'
 import { Sidebar } from './components/Sidebar'
 import { BottomTerminals } from './components/BottomTerminals'
 import { RightPanel } from './components/RightPanel'
@@ -1497,6 +1498,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
                 exitStatus={current.exitStatus}
                 onToggle={(st) => void guard(() => api.patchSession(current.id, { state: st }))}
               />
+              {canRollover(current) && <HandoffButton key={`handoff-${current.id}`} sessionId={current.id} status={state.rollover[current.id]} compact={narrow} disabled={current.exited || current.archivedAt !== null || disconnected} />}
               {canRollover(current) && <RolloverActions key={current.id} id={current.id} menu disabled={current.exited || current.archivedAt !== null} />}
               <span data-testid="session-title" className="truncate text-vp-md font-medium">
                 {labelOf(current)}

@@ -251,3 +251,66 @@ func TestPolicyRanges(t *testing.T) {
 		}
 	}
 }
+
+// The button is a person's decision. It must work with the switch off, with
+// "never for this session" set and after the daily cap, and it must keep
+// working on the polls after the one that carried it -- while still waiting
+// for the turn to end and still counting down.
+func TestAnExplicitRequestOutranksTheAutomaticSwitches(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*Observation, *Policy, *Memory)
+	}{
+		{"switch off", func(_ *Observation, p *Policy, _ *Memory) { p.Enabled = false }},
+		{"never for this session", func(o *Observation, _ *Policy, _ *Memory) { o.Never = true }},
+		{"daily cap", func(_ *Observation, _ *Policy, m *Memory) {
+			m.Attempts = []time.Time{epoch.Add(-3 * time.Hour), epoch.Add(-2 * time.Hour), epoch.Add(-time.Hour)}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, p, m := observation(), DefaultPolicy(), Memory{}
+			o.Used = 8 // far below the threshold: this is not the threshold's doing
+			tc.edit(&o, &p, &m)
+
+			busy := o
+			busy.Done, busy.Now = false, true
+			r := Step(m, busy, p, epoch)
+			if r.Memory.State != Due || r.Start {
+				t.Fatalf("the request while working: %+v", r)
+			}
+			// Later polls carry no Now; the request must survive them.
+			busy.Now = false
+			if r = Step(r.Memory, busy, p, epoch.Add(time.Minute)); r.Memory.State != Due {
+				t.Fatalf("the request was forgotten by the next poll: %+v", r)
+			}
+			quiet := o
+			quiet.QuietSince = epoch.Add(-time.Hour)
+			at := epoch.Add(5 * time.Minute)
+			if r = Step(r.Memory, quiet, p, at); r.Memory.State != Countdown {
+				t.Fatalf("the boundary did not start the countdown: %+v", r)
+			}
+			if r = Step(r.Memory, quiet, p, at.Add(time.Duration(p.CountdownSeconds)*time.Second)); r.Memory.State != HandingOff || !r.Start {
+				t.Fatalf("the countdown did not hand off: %+v", r)
+			}
+		})
+	}
+}
+
+// Without a request the same switches still hold, and ineligible sessions are
+// refused whatever was asked.
+func TestWithoutARequestTheSwitchesStillHold(t *testing.T) {
+	o, p := observation(), DefaultPolicy()
+	p.Enabled = false
+	if r := Step(Memory{}, o, p, epoch); r.Memory.State != OK {
+		t.Fatalf("%+v", r)
+	}
+	o, p = observation(), DefaultPolicy()
+	o.Now, o.Exited = true, true
+	if r := Step(Memory{}, o, p, epoch); r.Memory.State != OK {
+		t.Fatalf("an exited session accepted a request: %+v", r)
+	}
+	o.Exited, o.Busy = false, true
+	if r := Step(Memory{}, o, p, epoch); r.Memory.State != OK {
+		t.Fatalf("a busy session accepted a request: %+v", r)
+	}
+}

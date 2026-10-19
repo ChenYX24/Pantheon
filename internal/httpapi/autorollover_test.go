@@ -179,8 +179,13 @@ func TestAutoRolloverActionsAndPersistentNever(t *testing.T) {
 	if err != nil || !never[row.ID] {
 		t.Fatal("never did not survive cache reset", never, err)
 	}
-	if w := homeRequest(t, s, "POST", "/api/sessions/agent/rollover/auto", `{"action":"now"}`, true); w.Code != 409 {
-		t.Fatal("now bypassed never", w.Code)
+	// "Never" holds back the automatic trigger. A person pressing the button
+	// is not that, and the request must stand on the next poll too.
+	if w := homeRequest(t, s, "POST", "/api/sessions/agent/rollover/auto", `{"action":"now"}`, true); w.Code != 204 {
+		t.Fatal("never refused an explicit request", w.Code)
+	}
+	if s.autoRollover.entries[row.ID].State != rollover.Due {
+		t.Fatal("an explicit request under never did not mark due")
 	}
 	if err := s.DB.DeleteSession(context.Background(), row.ID); err != nil {
 		t.Fatal(err)

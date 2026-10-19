@@ -114,7 +114,15 @@ func Step(m Memory, o Observation, p Policy, now time.Time) Result {
 	if m.State == HandingOff {
 		return Result{Memory: m}
 	}
-	if !p.Enabled || !o.Eligible() || o.Never || o.Busy || len(m.Attempts) >= 3 {
+	// A person pressing the button decided this session should be handed off.
+	// The switch, the per-session "never" and the daily cap all exist to hold
+	// back *automatic* triggers; applying them to an explicit request meant a
+	// panel with auto-rollover off had a button that could never do anything.
+	// Requested is the memory of that decision across polls, because o.Now is
+	// true only on the call that carried it. The session still has to be
+	// eligible and quiet: the boundary and the countdown are not skipped.
+	manual := o.Now || m.Requested
+	if !o.Eligible() || o.Busy || !manual && (!p.Enabled || o.Never || len(m.Attempts) >= 3) {
 		m.AboveAt, m.Compaction, m.Requested = time.Time{}, false, false
 		if m.State == Due || m.State == Countdown {
 			return cancel(m, "unavailable", false)

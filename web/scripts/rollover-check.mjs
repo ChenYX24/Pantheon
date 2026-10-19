@@ -64,7 +64,9 @@ try {
       window.__vite_plugin_react_preamble_installed__ = true
       const { createElement: h } = (await import('/node_modules/.vite/deps/react.js')).default
       const { createRoot } = (await import('/node_modules/.vite/deps/react-dom_client.js')).default
+      const { flushSync } = (await import('/node_modules/.vite/deps/react-dom.js')).default
       const { AutoRolloverStrip } = await import('/src/components/AutoRolloverStrip.tsx')
+      const { HandoffButton } = await import('/src/components/HandoffButton.tsx')
       const { setLang } = await import('/src/i18n.ts')
       await import('/src/styles.css')
       const root = createRoot(document.querySelector('#root'))
@@ -72,7 +74,11 @@ try {
         requests,
         reply(next) { reply = { status: 200, body: {}, delay: 0, ...next } },
         lang(next) { setLang(next) },
-        show(status, props = {}) { root.render(h(AutoRolloverStrip, { sessionId: 'fixture', status, ...props })) },
+        // Flushed before returning: a render that is only scheduled leaves
+        // the next assertion reading the previous state's DOM, and a check
+        // that passes on stale markup passes whatever the component does.
+        button(status, props = {}) { flushSync(() => root.render(h(HandoffButton, { sessionId: 'fixture', status, ...props }))) },
+        show(status, props = {}) { flushSync(() => root.render(h(AutoRolloverStrip, { sessionId: 'fixture', status, ...props }))) },
       }
     </script></body></html>
   ` }))
@@ -80,6 +86,7 @@ try {
   const strip = page.locator('[data-testid=auto-rollover]')
   const buttons = () => strip.locator('button').allInnerTexts()
   const show = (status, props) => page.evaluate(([s, p]) => window.fixture.show(s, p), [status, props])
+  const button = (status, props) => page.evaluate(([s, p]) => window.fixture.button(s, p), [status, props])
   const requests = () => page.evaluate(() => window.fixture.requests.slice())
   const reset = () => page.evaluate(() => {
     window.fixture.requests.length = 0
@@ -156,6 +163,58 @@ try {
   await strip.getByRole('alert').waitFor()
   assert.match(await strip.getByRole('alert').innerText(), /not counting down/)
   assert.equal(await strip.getByRole('button', { name: 'Cancel' }).isDisabled(), false)
+
+  step = 'a requested handoff: no percentage, no automatic-only buttons, Cancel sends cancel'
+  await reset()
+  await show({ state: 'due', pct: 8, reason: 'now' })
+  assert.match(await strip.innerText(), /Handoff requested/)
+  assert.deepEqual(await buttons(), ['Cancel'])
+  await strip.getByRole('button', { name: 'Cancel' }).click()
+  await page.waitForFunction(() => window.fixture.requests.length === 1)
+  assert.deepEqual(await requests(), [{ url: '/api/sessions/fixture/rollover/auto', method: 'POST', body: { action: 'cancel' } }])
+
+  step = 'the hand-off button: one press, one request, whatever the policy'
+  await reset()
+  const handoff = page.getByTestId('handoff-now')
+  await button(undefined)
+  assert.match(await handoff.innerText(), /Hand off/)
+  await handoff.click()
+  await page.waitForFunction(() => window.fixture.requests.length === 1)
+  assert.deepEqual(await requests(), [{ url: '/api/sessions/fixture/rollover/auto', method: 'POST', body: { action: 'now' } }])
+  // The request leaving is not the press finishing: the button stays disabled
+  // until the response, and the next step must not read it in between.
+  await page.waitForFunction(() => !document.querySelector('[data-testid=handoff-now]')?.disabled)
+
+  step = 'the hand-off button: unavailable while a handoff is underway, exited or disconnected'
+  for (const [status, props] of [
+    [{ state: 'due', pct: 8, reason: 'now' }, {}], [{ state: 'countdown', pct: 8, endsAt: Date.now() + 9000 }, {}],
+    [{ state: 'handing_off', pct: 8 }, {}], [undefined, { disabled: true }],
+  ]) {
+    await button(status, props)
+    assert.equal(await handoff.isDisabled(), true, `still pressable for ${JSON.stringify([status?.state, props])}`)
+  }
+  for (const status of [undefined, { state: 'ok', pct: 8 }, { state: 'failed', pct: 8 }, { state: 'cancelled', pct: 8 }]) {
+    await button(status)
+    const why = await handoff.evaluate((b) => ({ disabled: b.disabled, html: b.outerHTML.slice(0, 120) }))
+    assert.equal(why.disabled, false, `not pressable for ${status?.state}: ${JSON.stringify(why)}`)
+  }
+
+  step = 'the hand-off button: a refusal is reported and the button comes back'
+  await reset()
+  await page.evaluate(() => window.fixture.reply({ status: 409, body: { error: 'session is not eligible for automatic rollover' } }))
+  await button(undefined)
+  await handoff.click()
+  await page.waitForFunction(() => window.fixture.requests.length === 1)
+  await page.waitForFunction(() => !document.querySelector('[data-testid=handoff-now]')?.disabled)
+  await reset()
+
+  step = 'the hand-off button: reachable by keyboard, icon-only when compact still has a name'
+  await button(undefined, { compact: true })
+  assert.equal(await handoff.getAttribute('aria-label'), 'Hand off')
+  assert.equal((await handoff.innerText()).trim(), '')
+  await page.evaluate(() => document.activeElement?.blur())
+  await page.keyboard.press('Tab')
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-testid')), 'handoff-now')
 
   step = 'handing off: nothing to press'
   await show({ state: 'handing_off', pct: 72 })
