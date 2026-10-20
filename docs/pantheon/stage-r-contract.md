@@ -38,6 +38,11 @@ side exits: `cancelled` (back to ok, postponed), `failed` (old session kept, to-
 
 - **due**: pct ≥ threshold. Meter turns amber; a line under the header says the session will be
   handed over after this turn, with [now] [later] [never for this session].
+- **boundary, without hooks**: a Claude with no hook reporting is read from its transcript:
+  the last main-chain assistant entry having `stop_reason: end_turn` counts as done, but only
+  over the panel's own guess (never over a hook or a bell), and the two-minute quiet gate
+  still applies. A Claude hook state stored in the database is not restored at startup when
+  Claude's hooks are not installed, because nothing could ever replace it.
 - **boundary** (all must hold to leave *due*): session state is done/idle (not working,
   not waiting on a permission/choice/question); no browser input to the session for
   `idleInputSeconds` and no unsent compose draft; no background sub-agent or long command

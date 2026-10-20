@@ -27547,3 +27547,50 @@ state, so a locator read stale markup and reported a line that was visibly
 there. The cause was not established; the fixture now waits two animation
 frames after each render, and the check was run repeatedly and against a
 version of the component with the line removed.
+
+## 2026-10-20 — A hook's last word outliving the hooks
+
+The waiting line named the blocker (`turn`), and the blocker was wrong. The
+session was idle at its prompt and the panel believed it was waiting for a
+person, because its row said `waiting`, source `hook`, from two days earlier.
+An earlier note here dismissed that row as irrelevant to the live detector; it
+is not, and that note was wrong. `RestoreState` loads each row's state into the
+detector at startup, and the detector's rule is that a hook report stands until
+the next one replaces it. This machine has no Claude hooks installed, so
+nothing ever replaced it, and no restart, no output and no amount of waiting
+could. The Hand off button could never reach a countdown on such a session.
+
+Two fixes, because the symptom had two causes:
+
+1. **Do not restore a Claude hook state when Claude's hooks are not installed.**
+   With nothing able to send the next report, the stored one is a fossil. The
+   next poll derives the state from what can be observed. The check is the same
+   `hooks.Inspect` the settings page uses; installed hooks keep the old
+   behaviour (a waiting session still survives a restart, which
+   `TestRestoreStateReadsWhatWasWrittenDown` pins).
+2. **Let a Claude transcript say a turn ended.** Without hooks the heuristic can
+   only answer "working" for a live `claude` process, so even a correctly
+   cleared session would never look finished. `agentctx` already tails the
+   transcript for the usage meter; it now also records whether the last
+   main-chain assistant entry has `stop_reason: end_turn` (tool calls are
+   `tool_use`, a subagent's entries are sidechains and ignored). The rollover
+   boundary treats that as `Done` -- but only over the heuristic's own guess,
+   never over a hook or a bell, and the session is still not `HookBacked`, so
+   the two-minute quiet gate applies exactly as it does for a log-backed Codex.
+   `TurnEnded` is `json:"-"`: it never reaches a snapshot.
+
+`publish` compared rounded usage, model and source, so a turn ending at the same
+rounded thousand tokens was thrown away as "unchanged" and the boundary kept
+reading the old value; `TurnEnded` is part of that comparison now, and a test
+pins both that and that an identical reading is still not republished.
+
+Not done, on purpose: telling "the panel thinks you are being asked something"
+from "the panel is unsure" on the banner, and installing hooks. Installing them
+is the real fix for state accuracy and touches `~/.claude/settings.json`, which
+the dev instance deliberately does not do on its own.
+
+Each of the six guards was removed in turn and the test that owns it failed;
+the first version of the bell test did not, because a later `Observe` reset the
+quiet clock and the two-minute gate passed it by itself. `TestSlowViewer
+IsDroppedNotBlocking` failed once in a full `internal/session` run alongside a
+running `httpapi` suite and passes alone, with and without these changes.
