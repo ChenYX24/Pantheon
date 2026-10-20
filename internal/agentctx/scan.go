@@ -23,6 +23,14 @@ type Usage struct {
 	Model  string    `json:"model"`
 	Source string    `json:"source"`
 	At     time.Time `json:"at"`
+	// TurnEnded: the last main-chain assistant entry has stop_reason
+	// "end_turn", so the agent finished and is waiting for the person. It is
+	// what a Claude with no hooks installed has instead of a Stop report.
+	//
+	// Not serialised. It is read by the rollover boundary only, and a field in
+	// the snapshot would be one more thing every open tab is sent a new copy
+	// of each time a turn ends.
+	TurnEnded bool `json:"-"`
 }
 
 var datedModel = regexp.MustCompile(`-\d{8}$`)
@@ -83,8 +91,9 @@ func ScanClaude(r io.Reader, last Usage) Usage {
 			IsSidechain bool   `json:"isSidechain"`
 			Timestamp   string `json:"timestamp"`
 			Message     struct {
-				Model string `json:"model"`
-				Usage *struct {
+				Model      string `json:"model"`
+				StopReason string `json:"stop_reason"`
+				Usage      *struct {
 					Input    int64 `json:"input_tokens"`
 					Read     int64 `json:"cache_read_input_tokens"`
 					Creation int64 `json:"cache_creation_input_tokens"`
@@ -99,7 +108,12 @@ func ScanClaude(r io.Reader, last Usage) Usage {
 			return
 		}
 		at, _ := time.Parse(time.RFC3339Nano, e.Timestamp)
-		last = Usage{Used: u.Input + u.Read + u.Creation, Window: ClaudeWindow(e.Message.Model), Model: e.Message.Model, Source: Claude, At: at}
+		last = Usage{Used: u.Input + u.Read + u.Creation, Window: ClaudeWindow(e.Message.Model), Model: e.Message.Model, Source: Claude, At: at,
+			// Tool calls are written as stop_reason "tool_use", so only the
+			// reply that ends a turn sets this, and any later assistant entry
+			// clears it. A prompt typed after it writes no assistant entry for
+			// a moment; the rollover's input and quiet gates cover that gap.
+			TurnEnded: e.Message.StopReason == "end_turn"}
 	})
 	return last
 }

@@ -118,7 +118,7 @@ func (m *contextMeter) publish(id string, u agentctx.Usage, known bool) {
 	// At describes the published reading, not a heartbeat. Even a new event
 	// with the same rounded usage must serialize identically or every viewer
 	// receives a whole snapshot again (see notifyState's byte comparison).
-	if ok && old.Used == u.Used && old.Window == u.Window && old.Model == u.Model && old.Source == u.Source {
+	if ok && old.Used == u.Used && old.Window == u.Window && old.Model == u.Model && old.Source == u.Source && old.TurnEnded == u.TurnEnded {
 		return
 	}
 	m.values[id] = u

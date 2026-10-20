@@ -1,6 +1,7 @@
 package agentctx
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -93,5 +94,39 @@ func TestScannersSkipOversizedLines(t *testing.T) {
 				t.Fatalf("usage after oversized line = %+v", got)
 			}
 		})
+	}
+}
+
+// A Claude with no hooks installed has no Stop report, so the transcript is the
+// only place a finished turn is written down. Calls are stop_reason "tool_use";
+// only the reply that ends a turn is "end_turn", and anything after clears it.
+func TestClaudeTurnEndsWithAnEndTurnReply(t *testing.T) {
+	line := func(typ, stop string, side bool) string {
+		s := `{"type":"` + typ + `","isSidechain":` + map[bool]string{true: "true", false: "false"}[side] +
+			`,"timestamp":"2026-10-20T08:00:00Z","message":{"model":"claude-opus-5-5","stop_reason":"` + stop +
+			`","usage":{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":30}}}`
+		return s + "\n"
+	}
+	for _, tc := range []struct {
+		name  string
+		lines string
+		want  bool
+	}{
+		{"a tool call is not an end", line("assistant", "tool_use", false), false},
+		{"an end_turn reply is", line("assistant", "tool_use", false) + line("assistant", "end_turn", false), true},
+		{"a later call clears it", line("assistant", "end_turn", false) + line("assistant", "tool_use", false), false},
+		// A subagent finishing says nothing about the main conversation.
+		{"a sidechain end_turn is ignored", line("assistant", "tool_use", false) + line("assistant", "end_turn", true), false},
+		{"a stop_sequence is not an end_turn", line("assistant", "stop_sequence", false), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ScanClaude(strings.NewReader(tc.lines), Usage{})
+			if got.TurnEnded != tc.want || got.Used != 60 || got.Source != Claude {
+				t.Fatalf("%+v", got)
+			}
+		})
+	}
+	if b, _ := json.Marshal(Usage{TurnEnded: true}); strings.Contains(string(b), "urn") {
+		t.Fatalf("TurnEnded reached the wire: %s", b)
 	}
 }

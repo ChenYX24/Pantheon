@@ -697,8 +697,25 @@ func (s *Server) RestoreState(ctx context.Context) error {
 	// hooks are installed. Without them, a Codex hook state can only have come
 	// from notify, and has to be releasable like one.
 	codexNotifyOnly := !hooks.CodexHooksInstalled()
+	// A hook report stands until the next report replaces it, which is only
+	// safe while something can send one. With Claude's hooks gone -- never
+	// installed on this machine, or removed since -- the last thing a hook said
+	// is not a fact about the session any more, it is a fossil: one stored as
+	// "waiting" outlives every restart and the panel goes on calling an idle
+	// session busy, with nothing able to correct it. The next poll derives the
+	// state from what is observable instead.
+	claudeHooks := false
+	if script, err := s.scriptPath(); err == nil {
+		if st, ierr := hooks.Inspect(script); ierr == nil {
+			claudeHooks = st.Installed
+		}
+	}
 	for _, row := range rows {
 		if row.StateChangedAt == 0 {
+			continue
+		}
+		if row.StateSource == session.SourceHook && !claudeHooks &&
+			chat.AgentFor(row.LaunchCommand, row.Command) == "claude" {
 			continue
 		}
 		before := row.State

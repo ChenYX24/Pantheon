@@ -61,6 +61,10 @@ type Observation struct {
 	QuietSince, LastInput                           time.Time
 	Draft, Background, Busy, Never                  bool
 	PreCompact, Now                                 bool
+	// TurnEnded is the agent's own transcript saying the turn is over. It
+	// stands in for a hook's Stop report, so it does not make the session
+	// HookBacked and the two-minute quiet gate still applies.
+	TurnEnded bool
 }
 
 func (o Observation) Eligible() bool {

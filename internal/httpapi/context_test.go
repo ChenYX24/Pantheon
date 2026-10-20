@@ -219,3 +219,25 @@ func TestContextSnapshotLeavesHiddenSessionsOut(t *testing.T) {
 		t.Fatalf("hidden sessions leaked into context: %+v", got)
 	}
 }
+
+// publish keeps the old reading when the rounded usage has not moved, so a flag
+// that is not part of that comparison goes stale: the turn ended, the tokens
+// rounded to the same thousand, and the rollover kept reading "not ended".
+func TestPublishNoticesATurnEndingAtTheSameUsage(t *testing.T) {
+	var m contextMeter
+	at := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	u := agentctx.Usage{Used: 72_100, Window: 1_000_000, Model: "claude-opus-5-5", Source: agentctx.Claude, At: at}
+	m.publish("s", u, true)
+	u.TurnEnded = true
+	m.publish("s", u, true)
+	if !m.values["s"].TurnEnded {
+		t.Fatal("the turn ended and the published reading did not change")
+	}
+	// And a steady value is still not a change, or every poll would be one.
+	before := m.values["s"]
+	u.At = at.Add(time.Minute)
+	m.publish("s", u, true)
+	if m.values["s"] != before {
+		t.Fatal("an identical reading was published again")
+	}
+}

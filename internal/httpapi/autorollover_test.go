@@ -484,3 +484,119 @@ func TestAutoRolloverLogOnlyDoneNeedsTwoMinutesOfQuiet(t *testing.T) {
 		t.Fatal("quiet log-backed done did not reach boundary")
 	}
 }
+
+// A Claude with no hooks sits at its prompt and the detector, which can only see
+// that the process is alive, answers "working" for ever. The transcript says
+// the turn ended; that has to be enough to reach the boundary -- through the
+// same two-minute quiet gate a log-backed Codex gets, and never against a hook
+// or a bell, which are the agent speaking for itself.
+func TestAutoRolloverUsesTheTranscriptWhenClaudeHasNoHooks(t *testing.T) {
+	tick := func(s *Server, row store.Session) {
+		t.Helper()
+		if err := s.refreshAutoRollovers(context.Background(), []store.Session{row}, map[string]tmux.Info{row.TmuxName: {PID: 20, Command: "claude"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setup := func(t *testing.T, ended bool) (*Server, store.Session, *time.Time) {
+		s, row, now := autoFixture(t)
+		row.LaunchCommand, row.StateSource = []string{"claude"}, session.SourceHeuristic
+		row.StateChangedAt = now.Add(-time.Hour).Unix()
+		s.Detector = session.NewDetector()
+		s.Detector.Observe(row.ID, session.Signals{Visible: true}, *now)
+		s.contexts.publish(row.ID, agentctx.Usage{Used: 72_000, Window: 100_000, Source: agentctx.Claude, At: *now, TurnEnded: ended}, true)
+		s.autoRollover.entries = map[string]rollover.Memory{row.ID: {View: rollover.View{State: rollover.Due}, SeenAt: now.Add(-time.Hour)}}
+		return s, row, now
+	}
+	state := func(s *Server, row store.Session) rollover.State {
+		return s.autoRolloverSnapshot([]store.Session{row})[row.ID].State
+	}
+
+	t.Run("a finished turn reaches the boundary, after the quiet gate", func(t *testing.T) {
+		s, row, now := setup(t, true)
+		tick(s, row)
+		if state(s, row) != rollover.Due {
+			t.Fatal("the transcript skipped the two-minute gate")
+		}
+		*now = now.Add(2 * time.Minute)
+		tick(s, row)
+		if state(s, row) != rollover.Countdown {
+			t.Fatal("a finished Claude with no hooks never reached its countdown")
+		}
+	})
+	t.Run("without the signal it never gets there", func(t *testing.T) {
+		s, row, now := setup(t, false)
+		*now = now.Add(30 * time.Minute)
+		tick(s, row)
+		if state(s, row) != rollover.Due {
+			t.Fatal("a session still working reached the countdown")
+		}
+	})
+	t.Run("a hook that says working is not overruled", func(t *testing.T) {
+		s, row, now := setup(t, true)
+		s.Detector.Hook(row.ID, session.HookReport{State: session.StateWorking}, *now)
+		*now = now.Add(30 * time.Minute)
+		tick(s, row)
+		if state(s, row) != rollover.Due {
+			t.Fatal("the transcript outvoted a hook")
+		}
+	})
+	t.Run("a bell is not overruled", func(t *testing.T) {
+		s, row, now := setup(t, true)
+		// Rung once, then a long silence. Observing again later would reset the
+		// quiet clock and let the two-minute gate pass the test on its own.
+		s.Detector.Observe(row.ID, session.Signals{Visible: true, Bell: true}, *now)
+		if st, _ := s.Detector.Evaluate(row.ID, session.Observation{}, *now); st != session.StateWaiting {
+			t.Fatalf("setup: a rung bell reads %q, want waiting", st)
+		}
+		*now = now.Add(30 * time.Minute)
+		tick(s, row)
+		if state(s, row) != rollover.Due {
+			t.Fatal("the transcript outvoted a bell: the agent was asking for the person")
+		}
+	})
+}
+
+// A hook's last word stands until the next report replaces it, so restoring
+// one is only right while something can send that next report.
+func TestRestoreStateDropsAClaudeHookStateWhenNoHooksAreInstalled(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		installed bool
+		want      session.State
+	}{
+		{"no hooks: the fossil is dropped", false, session.StateWorking},
+		{"hooks installed: the report stands", true, session.StateWaiting},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			s, row, now := autoFixture(t)
+			s.Detector = session.NewDetector()
+			if tc.installed {
+				script, err := s.scriptPath()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := hooks.InstallClaude(script); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// The launch command alone says claude; the pane's command is whatever
+			// the poller last wrote, and may be a wrapper.
+			claude, err := s.DB.CreateSession(context.Background(), store.Session{ID: "claude1", ProjectID: row.ProjectID,
+				TmuxName: "vp_claude", Title: "Claude", CWD: row.CWD, State: session.StateDone, LaunchCommand: []string{"claude"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.DB.SetSessionState(context.Background(), claude.ID, session.StateWaiting, session.SourceHook); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.RestoreState(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if st, _ := s.Detector.Evaluate(claude.ID, session.Observation{}, *now); st != tc.want {
+				t.Fatalf("restored state = %q, want %q", st, tc.want)
+			}
+		})
+	}
+}

@@ -216,7 +216,7 @@ func (s *Server) autoObservation(row store.Session, never bool) rollover.Observa
 		Recorded: row.LaunchRecorded && len(row.LaunchCommand) > 0,
 		Agent:    chat.AgentFor(row.LaunchCommand, ""), Scratch: row.Scratch,
 		Archived: row.ArchivedAt != nil, Exited: row.Exited, HomeWorker: homeWorkerSession(row),
-		Used: u.Used, Window: u.Window, Done: row.State == session.StateDone,
+		Used: u.Used, Window: u.Window, Done: row.State == session.StateDone, TurnEnded: u.TurnEnded,
 		HookBacked: row.StateSource == session.SourceHook, LastInput: s.lastResourceInput(row.ID),
 		Never: never, Busy: s.RollingOver(row.ID),
 		QuietSince: time.Unix(row.StateChangedAt, 0),
@@ -266,6 +266,15 @@ func (s *Server) stepAutoRollover(sid string, o rollover.Observation, p rollover
 		// Codex log readings also use SourceHook in the detector. Without an
 		// actual hook report, keep the conservative two-minute quiet gate.
 		o.Done, o.HookBacked = st == session.StateDone, src == session.SourceHook && !s.Detector.LastHook(sid).IsZero()
+		// Without hooks the detector can only answer "working" for a Claude
+		// that is sitting at its prompt: the process is there, so the
+		// heuristic says so, and a handoff could never reach its countdown.
+		// The transcript knows better. Only the heuristic's guess is
+		// overruled -- never a hook's word, and never a bell, which means the
+		// agent is asking for the person.
+		if !o.Done && o.TurnEnded && o.Agent == "claude" && st == session.StateWorking && src == session.SourceHeuristic {
+			o.Done = true
+		}
 		if last := s.Detector.LastOutput(sid); last.After(o.QuietSince) {
 			o.QuietSince = last
 		}
