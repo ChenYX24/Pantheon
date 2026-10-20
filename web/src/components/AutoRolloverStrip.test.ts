@@ -35,6 +35,21 @@ describe('automatic rollover strip', () => {
     expect(render({ state: 'due', pct: 72, reason: 'threshold' })).toContain('Never for this session')
   })
 
+  it.each(['turn', 'draft', 'background', 'input', 'quiet'] as const)('says why a due session is waiting: %s', (waiting) => {
+    for (const lang of ['zh', 'en'] as const) {
+      setLang(lang)
+      const html = render({ state: 'due', pct: 8, reason: 'now', waiting })
+      expect(html).toContain('data-testid="rollover-waiting"')
+      expect(html).not.toContain('autoRollover.wait')
+    }
+  })
+
+  it('says nothing about waiting at the boundary or after it', () => {
+    setLang('en')
+    expect(render({ state: 'due', pct: 8, reason: 'now' })).not.toContain('rollover-waiting')
+    expect(render({ state: 'countdown', pct: 8, endsAt: Date.now() + 9000, waiting: 'turn' })).not.toContain('rollover-waiting')
+  })
+
   it('counts down locally with a cancel action', () => {
     setLang('en')
     const html = render({ state: 'countdown', pct: 72, endsAt: Date.now() + 28_000 })

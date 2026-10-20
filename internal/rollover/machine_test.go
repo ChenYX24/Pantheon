@@ -314,3 +314,86 @@ func TestWithoutARequestTheSwitchesStillHold(t *testing.T) {
 		t.Fatalf("a busy session accepted a request: %+v", r)
 	}
 }
+
+// A due session that is not moving has to be able to say why. Each reason is
+// the first thing in boundary's list that is false, and the view changes only
+// when the reason does: it is broadcast to every tab, so it must not tick.
+func TestADueSessionSaysWhatItIsWaitingFor(t *testing.T) {
+	p := DefaultPolicy()
+	for _, tc := range []struct {
+		name string
+		edit func(*Observation, time.Time)
+		want string
+	}{
+		{"working", func(o *Observation, _ time.Time) { o.Done = false }, WaitTurn},
+		{"a draft", func(o *Observation, _ time.Time) { o.Draft = true }, WaitDraft},
+		{"a background task", func(o *Observation, _ time.Time) { o.Background = true }, WaitBackground},
+		// A session first seen a second ago counts as just active.
+		{"just seen, so just active", func(*Observation, time.Time) {}, WaitInput},
+		// Past the input gap, with output newer than the first sighting and
+		// no hook to vouch that the turn is over: the two-minute gate.
+		{"done but nothing vouches for it", func(o *Observation, at time.Time) {
+			o.HookBacked, o.QuietSince = false, at.Add(-10*time.Second)
+		}, WaitQuiet},
+		// Two things at once: the one the person can act on first.
+		{"working and a draft", func(o *Observation, _ time.Time) { o.Done, o.Draft = false, true }, WaitTurn},
+		{"a draft and a background task", func(o *Observation, _ time.Time) { o.Draft, o.Background = true, true }, WaitDraft},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := observation()
+			o.Now = true
+			start := Step(Memory{}, o, p, epoch).Memory
+			if start.State != Due {
+				t.Fatalf("not due: %+v", start)
+			}
+			at := epoch.Add(time.Second)
+			if tc.want == WaitQuiet {
+				at = epoch.Add(time.Duration(p.IdleInputSeconds+10) * time.Second)
+			}
+			tc.edit(&o, at)
+			o.Now = false
+			r := Step(start, o, p, at)
+			// Becoming due already carries a reason, so a case whose reason is
+			// the one it started with is correctly not news.
+			if r.Memory.State != Due || r.Memory.Waiting != tc.want || r.Changed != (start.Waiting != tc.want) || len(r.Events) != 0 {
+				t.Fatalf("want waiting %q (changed=%v), no event: %+v", tc.want, start.Waiting != tc.want, r)
+			}
+			// The same blocker a second later is not news.
+			if again := Step(r.Memory, o, p, at.Add(time.Second)); again.Changed || again.Memory.Waiting != tc.want {
+				t.Fatalf("a steady blocker was announced again: %+v", again)
+			}
+		})
+	}
+}
+
+func TestTheReasonClearsAtTheBoundaryAndOutsideDue(t *testing.T) {
+	p := DefaultPolicy()
+	o := observation()
+	o.Now, o.Done = true, false
+	due := Step(Memory{}, o, p, epoch).Memory
+	due = Step(due, Observation{Recorded: true, Agent: "claude", Used: 72, Window: 100, Done: true, HookBacked: true, QuietSince: epoch.Add(-time.Hour), Draft: true}, p, epoch.Add(time.Second)).Memory
+	if due.Waiting != WaitDraft {
+		t.Fatalf("setup: %+v", due)
+	}
+	o = observation()
+	r := Step(due, o, p, epoch.Add(3*time.Minute))
+	if r.Memory.State != Countdown || r.Memory.Waiting != "" || len(r.Events) != 1 {
+		t.Fatalf("the boundary should start the countdown with no reason: %+v", r)
+	}
+	// Cancelling clears it too: a stale reason on an ok session would show up
+	// the next time it is requested, before anything had been observed.
+	if c := Cancel(due, "later"); c.Memory.Waiting != "" {
+		t.Fatalf("a cancelled request kept its reason: %+v", c.Memory)
+	}
+}
+
+// The snapshot that announces "due" must already say why, or every session that
+// becomes due is published twice.
+func TestBecomingDueCarriesItsReason(t *testing.T) {
+	o := observation()
+	o.Now, o.Done = true, false
+	r := Step(Memory{}, o, DefaultPolicy(), epoch)
+	if r.Memory.State != Due || r.Memory.Waiting != WaitTurn || len(r.Events) != 1 || r.Events[0].Waiting != WaitTurn {
+		t.Fatalf("%+v", r)
+	}
+}

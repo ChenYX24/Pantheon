@@ -64,21 +64,23 @@ try {
       window.__vite_plugin_react_preamble_installed__ = true
       const { createElement: h } = (await import('/node_modules/.vite/deps/react.js')).default
       const { createRoot } = (await import('/node_modules/.vite/deps/react-dom_client.js')).default
-      const { flushSync } = (await import('/node_modules/.vite/deps/react-dom.js')).default
       const { AutoRolloverStrip } = await import('/src/components/AutoRolloverStrip.tsx')
       const { HandoffButton } = await import('/src/components/HandoffButton.tsx')
       const { setLang } = await import('/src/i18n.ts')
       await import('/src/styles.css')
       const root = createRoot(document.querySelector('#root'))
+      const committed = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       window.fixture = {
         requests,
         reply(next) { reply = { status: 200, body: {}, delay: 0, ...next } },
         lang(next) { setLang(next) },
-        // Flushed before returning: a render that is only scheduled leaves
-        // the next assertion reading the previous state's DOM, and a check
-        // that passes on stale markup passes whatever the component does.
-        button(status, props = {}) { flushSync(() => root.render(h(HandoffButton, { sessionId: 'fixture', status, ...props }))) },
-        show(status, props = {}) { flushSync(() => root.render(h(AutoRolloverStrip, { sessionId: 'fixture', status, ...props }))) },
+        // Resolved only after React has committed. A render that is merely
+        // scheduled lets the next assertion read the previous state's DOM, and
+        // a check that passes on stale markup passes whatever the component
+        // does. flushSync was tried first and the DOM was still the old one
+        // when it returned (cause not established), so this waits for frames.
+        async button(status, props = {}) { root.render(h(HandoffButton, { sessionId: 'fixture', status, ...props })); await committed() },
+        async show(status, props = {}) { root.render(h(AutoRolloverStrip, { sessionId: 'fixture', status, ...props })); await committed() },
       }
     </script></body></html>
   ` }))
@@ -173,6 +175,17 @@ try {
   await page.waitForFunction(() => window.fixture.requests.length === 1)
   assert.deepEqual(await requests(), [{ url: '/api/sessions/fixture/rollover/auto', method: 'POST', body: { action: 'cancel' } }])
 
+  step = 'a waiting reason is shown, changes with the reason and leaves with it'
+  for (const waiting of ['turn', 'draft', 'background', 'input', 'quiet']) {
+    await show({ state: 'due', pct: 8, reason: 'now', waiting })
+    const line = strip.locator('[data-testid=rollover-waiting]')
+    assert.equal(await line.count(), 1, `no reason line for ${waiting}`)
+    const text = await line.innerText()
+    assert.ok(text.length > 10 && !text.includes('autoRollover.'), `${waiting}: ${text}`)
+  }
+  await show({ state: 'due', pct: 8, reason: 'now' })
+  assert.equal(await strip.locator('[data-testid=rollover-waiting]').count(), 0, 'a session at the boundary still says it is waiting')
+
   step = 'the hand-off button: one press, one request, whatever the policy'
   await reset()
   const handoff = page.getByTestId('handoff-now')
@@ -237,7 +250,7 @@ try {
       await page.evaluate((th) => { document.documentElement.dataset.theme = th }, theme)
       for (const width of [320, 768, 1200]) {
         await page.setViewportSize({ width, height: 800 })
-        for (const status of [{ state: 'due', pct: 72 }, { state: 'countdown', pct: 72, endsAt: Date.now() + 60_000 }]) {
+        for (const status of [{ state: 'due', pct: 72 }, { state: 'due', pct: 8, reason: 'now', waiting: 'turn' }, { state: 'countdown', pct: 72, endsAt: Date.now() + 60_000 }]) {
           await show(status)
           const m = await strip.evaluate((el) => {
             const box = el.getBoundingClientRect()

@@ -2214,6 +2214,8 @@ export interface AutoRollover {
   pct: number
   endsAt?: number
   reason?: string
+  /** What holds a due session back from its countdown; absent at the boundary. */
+  waiting?: 'turn' | 'draft' | 'background' | 'input' | 'quiet'
 }
 
 export interface AutoRolloverPolicy {

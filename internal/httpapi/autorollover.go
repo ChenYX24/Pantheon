@@ -376,7 +376,7 @@ func (s *Server) emitAutoRollover(ctx context.Context, sid string, result rollov
 			s.audit(ctx, "rollover.failed", "", "", string(b))
 		}
 	}
-	if len(result.Events) > 0 {
+	if len(result.Events) > 0 || result.Changed {
 		s.notifyState()
 	}
 }

@@ -23,7 +23,22 @@ type View struct {
 	Pct    int    `json:"pct"`
 	EndsAt int64  `json:"endsAt,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// Waiting names what holds a due session back from its countdown, so the
+	// banner can say why nothing is happening. It changes only when the
+	// blocker does; it never carries a number that ticks, because every change
+	// to the view is a snapshot to every open tab.
+	Waiting string `json:"waiting,omitempty"`
 }
+
+// What can hold a due session back. The order is the order they are checked
+// in, so the one named is the first thing the person can do something about.
+const (
+	WaitTurn       = "turn"       // not done: working, or asking the person something
+	WaitDraft      = "draft"      // an unsent draft in a compose box
+	WaitBackground = "background" // a sub-agent or long command still running
+	WaitInput      = "input"      // the person typed too recently
+	WaitQuiet      = "quiet"      // done, but no hook vouches for it and it has not been quiet long enough
+)
 
 // Memory is derived state. A fresh value always has to observe the threshold
 // twice, even if the persisted session row says it has been idle for hours.
@@ -60,7 +75,8 @@ func (o Observation) percent() float64 {
 	return float64(o.Used) / float64(o.Window) * 100
 }
 
-func boundary(m Memory, o Observation, p Policy, now time.Time) bool {
+// blocker is why a session is not at a safe boundary, or "" when it is.
+func blocker(m Memory, o Observation, p Policy, now time.Time) string {
 	quiet := o.QuietSince
 	if quiet.Before(m.SeenAt) {
 		quiet = m.SeenAt
@@ -69,15 +85,33 @@ func boundary(m Memory, o Observation, p Policy, now time.Time) bool {
 	if input.Before(m.SeenAt) {
 		input = m.SeenAt
 	}
-	return o.Done && !o.Draft && !o.Background && !o.Busy &&
-		now.Sub(input) >= time.Duration(p.IdleInputSeconds)*time.Second &&
-		(o.HookBacked || now.Sub(quiet) >= 2*time.Minute)
+	switch {
+	case !o.Done || o.Busy:
+		return WaitTurn
+	case o.Draft:
+		return WaitDraft
+	case o.Background:
+		return WaitBackground
+	case now.Sub(input) < time.Duration(p.IdleInputSeconds)*time.Second:
+		return WaitInput
+	case !o.HookBacked && now.Sub(quiet) < 2*time.Minute:
+		return WaitQuiet
+	}
+	return ""
+}
+
+func boundary(m Memory, o Observation, p Policy, now time.Time) bool {
+	return blocker(m, o, p, now) == ""
 }
 
 type Result struct {
 	Memory Memory
 	Events []View
 	Start  bool
+	// Changed: the view differs from what was last shown although nothing
+	// transitioned, so open tabs need a fresh snapshot but there is nothing to
+	// audit.
+	Changed bool
 }
 
 type rule struct {
@@ -167,6 +201,12 @@ func Step(m Memory, o Observation, p Policy, now time.Time) Result {
 			}
 		}
 		m.View = View{State: r.to, Pct: int(math.Round(o.percent())), Reason: reason}
+		// The reason is part of the snapshot that announces "due": computing it
+		// on the next poll would publish a second snapshot a second later for
+		// every session that becomes due.
+		if r.to == Due {
+			m.Waiting = blocker(m, o, p, now)
+		}
 		if r.to == Countdown {
 			m.CountdownAt = now
 			m.EndsAt = now.Add(time.Duration(p.CountdownSeconds) * time.Second).UnixMilli()
@@ -175,6 +215,12 @@ func Step(m Memory, o Observation, p Policy, now time.Time) Result {
 			m.Attempts = append(m.Attempts, now)
 		}
 		return Result{Memory: m, Events: []View{m.View}, Start: r.to == HandingOff}
+	}
+	if m.State == Due {
+		if w := blocker(m, o, p, now); w != m.Waiting {
+			m.Waiting = w
+			return Result{Memory: m, Changed: true}
+		}
 	}
 	return Result{Memory: m}
 }
