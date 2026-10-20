@@ -27520,3 +27520,30 @@ that is only *scheduled* lets the next assertion read the previous state's
 DOM, so a check can pass on stale markup. The fixture uses `flushSync`, and
 waits for a press to finish before reading the button again; the check was
 run repeatedly and against three deliberate breakages of the component.
+
+## 2026-10-20 — Say why a requested handoff is not counting down
+
+The first real press of the new Hand off button on /dev showed "the countdown
+starts when this turn finishes" and then nothing, for as long as the session
+kept working. That is correct -- the session pressed it from was the one being
+used, and it never reached a boundary -- but the banner read identically
+whether the session was busy, held by a draft, or broken. An earlier
+diagnosis here blamed a stale `waiting` row in the database; that was wrong,
+because the boundary reads the live detector, not the row, and it was reported
+before anything had been checked.
+
+`View.Waiting` now says which condition holds: `turn`, `draft`, `background`,
+`input` or `quiet`, in the order `boundary` tests them (`boundary` is now
+`blocker(...) == ""`, so the two cannot drift). It is computed when a session
+becomes due, and `Result.Changed` makes the server publish again only when the
+reason changes. The first version computed it on the poll *after* becoming due,
+and `TestAutoRolloverSnapshotDoesNotStormAndInputCancels` failed because every
+session that became due was published twice; that test is what kept this from
+shipping as a small, constant stream of snapshots.
+
+A second trap in the browser check, worth keeping: `flushSync` imported from
+the pre-bundled `react-dom` returned while the DOM was still the previous
+state, so a locator read stale markup and reported a line that was visibly
+there. The cause was not established; the fixture now waits two animation
+frames after each render, and the check was run repeatedly and against a
+version of the component with the line removed.

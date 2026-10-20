@@ -117,6 +117,13 @@ rounded percentage at the last transition; `reason` describes that transition
 (`threshold`, `precompact`, `now`, or a failure message). `endsAt` is present only
 during a countdown and is **Unix milliseconds**, fixed until the state changes.
 The client computes remaining seconds; ticking does not rebroadcast snapshots.
+`waiting`, present only while `due`, names what keeps the session from its
+countdown: `turn` (working, or asking the person something), `draft` (an unsent
+compose draft), `background` (a sub-agent or long command), `input` (typed
+within `idleInputSeconds`) or `quiet` (done, but no hook vouches for it and it
+has not been quiet for two minutes). It is the first of those that holds, it is
+set when the session becomes due, and it is rebroadcast only when it changes,
+never as a number that counts. It is absent at the boundary.
 This map is also present in WebSocket `state` messages.
 
 Claude counts the last non-sidechain assistant entry's input, cache-read input
