@@ -1,6 +1,7 @@
 # Stage R contract — automatic session rollover by context use
 
-Status: R0 contract, user-approved design 2026-10-16. R1 (the meter) is implemented; R2/R3 implement the rest.
+Status: R0 contract, user-approved design 2026-10-16. R1 (the meter) and R2 (the trigger) are
+implemented; R3 (confirm before release) is specified in §8, which settles what §4 left open.
 Plan: Harness `plan/Pantheon自动换会话计划_2026-10-16-14-47.md`.
 
 ## 1. Principle
@@ -74,3 +75,87 @@ i18n zh/en; non-colour cue for the amber/red bands; phone shows the banner, not 
 ## 7. Out of scope
 Changing the agent's own compaction; Codex native resume; token-based triggers for
 non-interactive E1 workers (each attempt is already a fresh process).
+
+## 8. R3: the replacement confirms before the old session is released (2026-10-22)
+
+Until R3 the primitive ended the old session first and opened the new one after. A handoff that
+failed after that point (2026-10-20: the replacement never became ready) left nothing running and
+nobody told. R3 reverses the order, so every failure leaves the old session exactly as it was.
+
+**Which rollovers.** Every rollover that opens a replacement (`resume: true`) for any reason but
+`memory`: the automatic trigger, the Hand off button, and `POST …/rollover` with `manual`/`long`.
+Memory pressure keeps the E2 order (end first, then open), because its point is to free memory now;
+so does `resume: false`, which has no replacement to wait for.
+
+**The handoff document.** The prompt asks for Markdown headings 目标 / 已完成 / 未完成 / 下一步 /
+验证命令 / 禁止事项 (关键文件与命令 is invited, not required). A section is present when some
+heading line (`#`…) contains its name. When the reply leaves some out, the agent is asked once,
+by name, for those sections. If they are still missing the agent's text is kept and a labelled
+appendix is added below it (`## Pantheon fallback` with the missing names, the last 200 lines and
+`git status`/`git log`). The agent's words are never replaced. No document at all is the E2
+fallback, as before.
+
+**Order.**
+1. Handoff written and checked (above); the old session's scrollback saved.
+2. Replacement created: same project, directory, launch command, profile, account and size; title
+   and pin copied. Ready as before (a hook's waiting/done, or drawn and then still for 5 s; at most
+   60 s).
+3. Ack prompt pasted into the replacement (below). Both sessions are now **verifying**.
+4. Ack seen → **handed_off**. Old session released after `keepOldMinutes`, or at once on *release*.
+5. No ack within **10 minutes** of the prompt, or the replacement exits or fails to start →
+   **failed**. Both sessions stay as they are; nothing is ended.
+
+**Ack prompt** (pasted into the replacement, one line):
+`[Pantheon] 你接手了上一个会话。请先阅读交接文档 <path>，然后：1）用一句话复述其中的“下一步”，执行 vibepanel me info set summary "<复述>"；2）执行 vibepanel me info set labels handoff-ack（vibepanel 命令不可用时，改为单独输出一行 HANDOFF-ACK）；3）从“下一步”继续。`
+
+**What counts as the ack.** Either the replacement's labels contain `handoff-ack` (written through
+`vibepanel me`, which only that session's own token can do), or a line that is exactly
+`HANDOFF-ACK` appears on the replacement's screen after the prompt (an agent whose sandbox cannot
+reach the panel). The restated next step is the replacement's summary; it goes into the
+`rollover.handed_off` audit detail, truncated to 200 characters. The panel does not judge the
+restatement. The person sees it.
+
+**Views** (`rollover[sessionId]` in the snapshot, extended):
+| session | state | extra fields |
+|---|---|---|
+| old | `verifying` | `newSessionId` |
+| old | `handed_off` | `newSessionId`, `endsAt` = release deadline |
+| old | `failed` | `newSessionId` when one was opened |
+| new | `verifying` | `replaces` |
+| new | `confirmed` | `replaces`; lasts until the old session is released or kept |
+
+**Release.** At the deadline or on *release*: fresh scrollback, end through the governor's
+prepared end, archive with `rolled over → <path>`, exit, done, execution report. These are the
+existing steps, moved after the ack. If the governor raises a memory alert while a session is
+`handed_off`, it is released at once.
+
+**Keeping the old session.** *keep* (the toast's "back to old"), or any keystroke into the old
+session after the ack, cancels the release. Both sessions stay as ordinary sessions. That is the
+person deciding, and typing into the old one is the clearest way they can say so.
+
+**Busy.** While a pairing is live (verifying, handed_off/confirmed), neither session can start
+another rollover, and the governor does not pick either of them as a rollover candidate.
+
+**Restart.** Pairing state is in memory. A restart during a pairing ends it with both sessions
+alive. That costs one extra session until the person archives it, and it can never end the only
+copy of the work.
+
+**Failure is reported.** `rollover.failed` audit, the old session's strip says why with a link to
+the replacement, and for a cyx project an execution report with `needs_user` (the home page's
+"check the handover" to-do).
+
+**Routes.** `POST /api/sessions/{id}/rollover/auto` gains `release` (old session in `handed_off`)
+and `keep` (old session in `verifying` or `handed_off`). Anything else is 409.
+
+**Browser.**
+- Old session strip: verifying "↻ 新会话正在确认交接 [打开新会话]"; handed_off "已交接到新会话 ·
+  m:ss 后释放旧会话 [打开新会话] [保留旧会话] [立即释放]"; failed "交接未确认：<reason>
+  [打开新会话]".
+- New session strip: verifying "↻ 正在接手：阅读交接文档"; confirmed "↻ 已确认交接：<summary>".
+- The person viewing the old session when it becomes `handed_off` is moved to the new one, once
+  per pairing, with a toast [回到旧会话] (select old and *keep*) [释放]. Anyone not viewing it is
+  not interrupted.
+- A sidebar row whose view has `replaces` shows "↻": shape, not colour (red line 4).
+
+**Audit.** `rollover.handed_off` (session, newSessionId, summary), `rollover.released`,
+`rollover.cancelled` with reason `keep` or `input`, and `rollover.failed`.
