@@ -27812,3 +27812,45 @@ go test -count=1 ./internal/httpapi -run 'Rollover|AutoRollover|^TestMe|TypeScri
 npx tsc -b
 npx vitest run --pool=forks --maxWorkers=1 src/components/rolloverHandoff.test.ts src/components/AutoRolloverStrip.test.ts src/components/RolloverActions.test.ts src/components/focus.test.ts src/i18n.test.ts src/i18n.prose.test.ts src/chrome-vocabulary.test.ts
 ```
+
+## 2026-10-22 — R3 on /dev: what the first real handoffs found
+
+The first real run of R3 on /dev, a throwaway project with a Claude session
+and then a Codex one, each given a first step and handed off through the
+button's route (`POST …/rollover/auto` with `now`).
+
+**The first attempt was lost to the machine, not the handoff.** /dev's tmux
+runs in a hand-made user unit, `parthenon-dev-tmux.service`, with
+`MemoryMax=768M` and no `OOMPolicy`, so the default `stop`. R3 keeps the old
+session until the new one confirms; three Claudes and a Codex plus the
+replacement crossed the limit, the kernel killed one `claude`, and systemd
+then stopped the whole unit: the tmux server and every /dev session went with
+it (the same happened on 2026-10-17). R3 reported it correctly —
+`rollover.failed`, "replacement session exited or vanished", nothing released.
+The unit now has `OOMPolicy=continue`, as `deploy/vibepanel.service` always
+had for the same reason. The unit is not in this repository; the change and
+its backup are recorded in the progress repository's plan.
+
+**Claude: the confirmation works.** The replacement confirmed 18 seconds after
+it was created, read the handoff, restated the next step through
+`vibepanel me info set summary`, labelled itself `handoff-ack`, and when told
+to, did that step. `rollover.handed_off` carried the restatement.
+
+**The old session was then kept for "input" 37 seconds later with nothing on
+its screen typed** (the prompt line held only Claude's dim suggestion). The
+one path found that does that: R2 had added `Handler.Input` to every binary
+frame in `ws.handleBinary`, so what a terminal sends on its own — focus
+in/out, answers to queries, wheel reports — counted as typing. Keystrokes were
+already reported by the Live through `OnKey`, which leaves escape sequences
+out; that call is gone, and a paste, which does not pass through
+`Live.Write`, still reports. `TestATerminalsOwnTrafficIsNotReportedAsInput`
+fails without the change (six reports for five automatic frames and a paste)
+and passes with it. Contract §8 now says what a keystroke is.
+
+**Codex: the handoff never started.** It stayed `due`, waiting for the turn
+to end, and the session said `working` from creation onwards. Codex installed
+by npm is a `#!/usr/bin/env node` script, so the pane reports `node`;
+`readCodexLog` matched `codex` only, so a Codex with no hooks (there are none
+on this machine) never had its rollout read and could never be seen to finish
+a turn. `node` now counts when the session was launched as `codex`;
+`TestTheRolloutIsReadOnlyForAQuietCodex` has the npm cases.
