@@ -136,6 +136,13 @@ say so. "Once the replacement exists", not "after the ack": counting only later 
 released an old session ten minutes after the ack while it was answering what the person had
 asked it during verification, which is the interruption §1 rules out.
 
+A keystroke is what the session itself counts as one (`session.Live.Write`'s `OnKey`: anything
+that does not start with an escape sequence, and a line), or a paste. What a terminal sends on
+its own is not: focus in/out, answers to an application's queries, mouse and wheel reports.
+They used to count, and they are the one path found that explains the first real Claude handoff
+on /dev (2026-10-22): its old session was kept for "input" with nothing on its screen typed.
+Arrow keys and a lone Esc are left out with them, as `OnKey` already does.
+
 **Busy.** While a pairing is live (verifying, handed_off/confirmed), neither session can start
 another rollover, and the governor does not pick either of them as a rollover candidate.
 
