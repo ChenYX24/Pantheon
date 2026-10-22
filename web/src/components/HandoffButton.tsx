@@ -25,7 +25,7 @@ export function HandoffButton({ sessionId, status, disabled = false, compact = f
 }) {
   useLang()
   const [busy, setBusy] = useState(false)
-  const underway = status?.state === 'due' || status?.state === 'countdown' || status?.state === 'handing_off'
+  const underway = status?.state === 'due' || status?.state === 'countdown' || status?.state === 'handing_off' || status?.state === 'verifying' || status?.state === 'handed_off' || status?.state === 'confirmed'
   const send = async () => {
     setBusy(true)
     try { await api.autoRollover(sessionId, 'now') }

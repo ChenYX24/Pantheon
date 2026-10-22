@@ -35,7 +35,7 @@ type autoRolloverState struct {
 	write  sync.Mutex
 	policy *rollover.Policy
 	never  map[string]bool
-	// The single execution seam that R3 replaces; tests use no live panes.
+	// The execution seam includes confirmation and retention; tests use no live panes.
 	run func(context.Context, string) (rolloverStatus, error)
 }
 
@@ -377,7 +377,10 @@ func (s *Server) executeAutoRollover(sid string) {
 		a.entries[status.NewSessionID] = next
 	}
 	a.mu.Unlock()
-	s.emitAutoRollover(ctx, sid, result)
+	// The primitive already audited a failed verification with both ids.
+	if status.State != "failed" {
+		s.emitAutoRollover(ctx, sid, result)
+	}
 	s.notifyState()
 }
 
@@ -408,7 +411,7 @@ func (s *Server) cancelAutoRollover(sid, reason string, countdownOnly bool) bool
 	a := &s.autoRollover
 	a.mu.Lock()
 	m := a.entries[sid]
-	if m.State == rollover.HandingOff {
+	if rollover.Busy(m.State) {
 		a.mu.Unlock()
 		return false
 	}
@@ -460,9 +463,9 @@ func (s *Server) handleAutoRollover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.Action {
-	case "now", "later", "never", "cancel":
+	case "now", "later", "never", "cancel", "release", "keep":
 	default:
-		writeErr(w, http.StatusBadRequest, "action must be now, later, never or cancel")
+		writeErr(w, http.StatusBadRequest, "action must be now, later, never, cancel, release or keep")
 		return
 	}
 	row, err := s.DB.GetSession(r.Context(), chi.URLParam(r, "id"))
@@ -470,9 +473,17 @@ func (s *Server) handleAutoRollover(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreErr(w, err)
 		return
 	}
+	if req.Action == "release" || req.Action == "keep" {
+		if !s.rolloverPairAction(row.ID, req.Action) {
+			writeErr(w, http.StatusConflict, "session is not in a matching handoff phase")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	a := &s.autoRollover
 	a.mu.Lock()
-	active := a.entries[row.ID].State == rollover.HandingOff
+	active := rollover.Busy(a.entries[row.ID].State)
 	counting := a.entries[row.ID].State == rollover.Countdown
 	a.mu.Unlock()
 	if active || s.RollingOver(row.ID) {

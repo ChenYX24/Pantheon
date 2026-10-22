@@ -593,6 +593,7 @@ export function Sidebar(props: SidebarProps) {
                       else setRenaming((cur) => (cur === s.id ? null : cur))
                     }}
                   />
+                  {props.rollover[s.id]?.replaces && <span role="img" aria-label={t('autoRollover.replaces')} title={t('autoRollover.replaces')} className="shrink-0 text-ink-2">↻</span>}
                   <ContextMeter usage={props.context[s.id]} rollover={props.rollover[s.id]} compact />
                   {props.frozen.includes(s.id) && (
                     <span

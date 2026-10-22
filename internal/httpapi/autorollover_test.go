@@ -300,14 +300,15 @@ func TestAutoRolloverUsesLiveDetectorAndExcludesHiddenProjects(t *testing.T) {
 }
 
 func TestAutoRolloverExecutionReusesLongResumePrimitive(t *testing.T) {
-	s, row, _, steps := rolloverFixture(t)
+	s, row, h, steps := rolloverFixture(t)
+	ackRolloverByLabel(t, s, h)
 	s.autoRollover.entries = map[string]rollover.Memory{row.ID: {View: rollover.View{State: rollover.HandingOff, Pct: 72}, Attempts: []time.Time{time.Now()}}}
 	s.executeAutoRollover(row.ID)
 	status := s.rolloverStatus(row.ID)
 	if status.State != "done" || status.NewSessionID != "new" {
 		t.Fatal(status)
 	}
-	if got := strings.Join(*steps, "\n"); !strings.Contains(got, "end\ncreate:codex:profile") || !strings.Contains(got, "请先阅读交接文档") || !strings.Contains(got, "原因：会话时间过长") {
+	if got := strings.Join(*steps, "\n"); !strings.Contains(got, "create:codex:profile\nready\nsend:new:") || !strings.HasSuffix(got, "\nend") || !strings.Contains(got, "请先阅读交接文档") || !strings.Contains(got, "原因：会话时间过长") {
 		t.Fatal(got)
 	}
 	if s.autoRollover.entries["new"].Attempts == nil {
@@ -323,7 +324,8 @@ func TestAutoRolloverExecutionReusesLongResumePrimitive(t *testing.T) {
 }
 
 func TestAutoRolloverAClickIsHandedOffAsManual(t *testing.T) {
-	s, row, _, steps := rolloverFixture(t)
+	s, row, h, steps := rolloverFixture(t)
+	ackRolloverByLabel(t, s, h)
 	s.autoRollover.entries = map[string]rollover.Memory{row.ID: {View: rollover.View{State: rollover.HandingOff, Pct: 24, Reason: "now"}}}
 	s.executeAutoRollover(row.ID)
 	if got := strings.Join(*steps, "\n"); !strings.Contains(got, "原因：手动交接") {

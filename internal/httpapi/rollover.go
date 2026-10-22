@@ -43,8 +43,9 @@ type rolloverRequest struct {
 }
 
 type rolloverState struct {
-	mu     sync.Mutex
-	states map[string]rolloverStatus
+	mu      sync.Mutex
+	states  map[string]rolloverStatus
+	actions map[string]string
 	// Tests replace all pane operations and time; none needs a tmux server.
 	hooks    *rolloverHooks
 	terminal rolloverTerminal
@@ -76,6 +77,7 @@ type rolloverHooks struct {
 	create     func(context.Context, store.Session) (store.Session, error)
 	ready      func(context.Context, store.Session) (bool, error)
 	memory     func() (uint64, uint64)
+	alert      func() bool
 	held       func(store.Session) uint64
 	// gone reports that the pane's agent has exited. Nothing can answer a
 	// handoff request after that, so waiting out the grace is pure delay.
@@ -106,7 +108,7 @@ func rolloverReason(reason string) string {
 }
 
 func handoffPrompt(reason, path string) string {
-	return "[Pantheon] 需要结束本会话（原因：" + rolloverReason(reason) + "）。请立即把当前工作写成交接文档，保存到 " + path + "，包含：目标、已完成、未完成、关键文件与命令、下一步、注意事项。写完后只回复 HANDOFF-DONE，不要做别的事。"
+	return "[Pantheon] 需要结束本会话（原因：" + rolloverReason(reason) + "）。请立即把当前工作写成交接文档，保存到 " + path + "，使用 Markdown 标题：目标、已完成、未完成、关键文件与命令（可选）、下一步、验证命令、禁止事项。写完后只回复 HANDOFF-DONE，不要做别的事。"
 }
 
 func (s *Server) rolloverStatus(id string) rolloverStatus {
@@ -119,7 +121,7 @@ func (s *Server) rolloverStatus(id string) rolloverStatus {
 }
 
 func activeRollover(state string) bool {
-	return state == "asking" || state == "waiting" || state == "ending"
+	return state == "asking" || state == "waiting" || state == "ending" || state == "verifying" || state == "handed_off" || state == "confirmed"
 }
 func (s *Server) RollingOver(id string) bool { return activeRollover(s.rolloverStatus(id).State) }
 
@@ -184,6 +186,7 @@ func (s *Server) rolloverRuntime() rolloverHooks {
 	}
 	return rolloverHooks{
 		now: time.Now, wait: rolloverWait, memory: sysmon.Memory,
+		alert: func() bool { return s.Resources != nil && s.Resources.Alert() != nil },
 		send: func(ctx context.Context, row store.Session, text string) error {
 			ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
@@ -293,7 +296,9 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 		return result, errors.New("session has no resumable agent launch command")
 	}
 	h := s.rolloverRuntime()
+	verify := req.Resume && req.Reason != "memory"
 	started := h.now()
+	var cyxID string
 	s.rollovers.mu.Lock()
 	if s.rollovers.states == nil {
 		s.rollovers.states = map[string]rolloverStatus{}
@@ -304,17 +309,27 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 	}
 	result = rolloverStatus{State: "asking", StartedAt: started.Unix()}
 	s.rollovers.states[sid] = result
+	delete(s.rollovers.actions, sid)
 	s.rollovers.mu.Unlock()
 	update := func(state string) {
 		result.State = state
 		s.rollovers.mu.Lock()
 		s.rollovers.states[sid] = result
 		s.rollovers.mu.Unlock()
+		if verify {
+			s.publishRolloverPair(sid, result, 0)
+		}
+	}
+	if verify {
+		s.publishRolloverPair(sid, result, 0)
 	}
 	defer func() {
 		if err != nil {
 			result.Error = err.Error()
 			update("failed")
+			if verify {
+				s.failRollover(row, result, cyxID, started)
+			}
 		}
 		s.notifyState()
 	}()
@@ -325,7 +340,13 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 	if capGrace > 0 && grace > capGrace {
 		grace = capGrace
 	}
-	ctx, cancel := context.WithTimeout(ctx, grace+3*time.Minute)
+	// Confirmation and retention have their own deadlines. The E2 budget
+	// must not cancel an otherwise healthy pair after only a few minutes.
+	budget := grace + 3*time.Minute
+	if verify {
+		budget += rolloverAckTimeout + 120*time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	project, err := s.DB.GetProject(ctx, row.ProjectID)
 	if err != nil {
@@ -350,7 +371,7 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return result, statErr
 	}
-	if h.prepareEnd != nil {
+	if !verify && h.prepareEnd != nil {
 		end, prepareErr := h.prepareEnd(ctx, row)
 		if prepareErr != nil {
 			return result, prepareErr
@@ -393,13 +414,25 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 		update("waiting")
 		// Grace belongs to the reply. Spending it before the prompt would
 		// end a working agent immediately after asking it to save its work.
-		if err = s.waitHandoff(ctx, h, row, asked, h.now().Add(grace), markersBefore, critical); err != nil {
+		deadline := h.now().Add(grace)
+		if err = s.waitHandoff(ctx, h, row, asked, deadline, markersBefore, critical); err != nil {
 			return result, err
+		}
+		if verify {
+			if err = s.checkHandoffSections(ctx, h, row, asked, deadline, critical); err != nil {
+				return result, err
+			}
 		}
 		if draft != "" {
 			if info, statErr := os.Lstat(draft); statErr == nil && info.Mode().IsRegular() && info.Size() > 0 {
-				if data, readErr := os.ReadFile(draft); readErr == nil && os.WriteFile(path, data, 0644) == nil {
+				data, copyErr := os.ReadFile(draft)
+				if copyErr == nil {
+					copyErr = os.WriteFile(path, data, 0644)
+				}
+				if copyErr == nil {
 					_ = os.Remove(draft)
+				} else if verify {
+					return result, copyErr
 				}
 			}
 		}
@@ -414,17 +447,43 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 	} else if !info.Mode().IsRegular() {
 		return result, errors.New("handoff is not a regular file")
 	}
-	// Capture before signalling: the pane's exit screen may replace the only
-	// remaining copy of the agent's final output.
-	text, captureErr := h.capture(ctx, row, scrollbackLines)
-	if captureErr != nil {
-		if _, archiveErr := s.DB.GetScrollback(ctx, sid); archiveErr != nil {
-			return result, captureErr
-		}
-	} else if strings.TrimSpace(text) != "" {
-		content, truncated := boundScrollback([]byte(text), maxScrollbackBytes)
-		if err = s.DB.PutScrollback(ctx, store.Scrollback{SessionID: sid, CapturedAt: h.now().Unix(), Lines: scrollbackLines, Truncated: truncated, Content: content}); err != nil {
+	if verify {
+		if _, err = os.ReadFile(path); err != nil {
 			return result, err
+		}
+	}
+	if err = s.saveRolloverScrollback(ctx, h, row); err != nil {
+		return result, err
+	}
+	if verify {
+		var next store.Session
+		next, err = h.create(ctx, row)
+		result.NewSessionID = next.ID
+		if err != nil {
+			return result, err
+		}
+		update("verifying")
+		var kept bool
+		kept, err = s.verifyRollover(ctx, h, row, next, result)
+		if err != nil {
+			return result, err
+		}
+		if kept {
+			update("idle")
+			return result, nil
+		}
+		if err = s.saveRolloverScrollback(ctx, h, row); err != nil {
+			return result, err
+		}
+		// Prepare against the live process after confirmation. A PID captured
+		// before a ten-minute wait may no longer name the same process.
+		if h.prepareEnd != nil {
+			var end func(context.Context) error
+			end, err = h.prepareEnd(ctx, row)
+			if err != nil {
+				return result, err
+			}
+			h.end = func(ctx context.Context, _ store.Session) error { return end(ctx) }
 		}
 	}
 	update("ending")
@@ -457,7 +516,7 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 			return result, err
 		}
 	}
-	if req.Resume {
+	if req.Resume && !verify {
 		var next store.Session
 		next, err = h.create(ctx, row)
 		result.NewSessionID = next.ID
@@ -484,6 +543,9 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 		if err = h.send(ctx, next, "请先阅读交接文档 "+path+"，确认理解后从“下一步”继续。"); err != nil {
 			return result, err
 		}
+	}
+	if verify {
+		s.auditRollover(ctx, "rollover.released", sid, result.NewSessionID, "", "")
 	}
 	update("done")
 	return result, nil
@@ -531,33 +593,7 @@ func (s *Server) waitHandoff(ctx context.Context, h rolloverHooks, row store.Ses
 }
 
 func (s *Server) fallbackHandoff(ctx context.Context, h rolloverHooks, row store.Session, project store.Project, reason, path string) error {
-	text, err := h.capture(ctx, row, 200)
-	if err != nil {
-		if sb, e := s.DB.GetScrollback(ctx, row.ID); e == nil {
-			text = string(sb.Content)
-		} else {
-			text = "Scrollback unavailable: " + err.Error()
-		}
-	}
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	if len(lines) > 200 {
-		lines = lines[len(lines)-200:]
-	}
-	text = homeTail(strings.Join(lines, "\n"), 128<<10)
-	gitText := func(args ...string) string {
-		gitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(gitCtx, "git", append([]string{"-C", row.CWD}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
-		var data homeGitOutput
-		cmd.Stdout = &data
-		cmd.WaitDelay = time.Second
-		if err := cmd.Run(); err != nil {
-			return "Unavailable (not a repository or git failed)."
-		}
-		return homeTail(data.String(), 32<<10)
-	}
-	data := fmt.Sprintf("---\ngenerated_by: pantheon (agent did not answer)\n---\n# Session handoff\n\nTitle: %s\nProject: %s (%s)\nCWD: %s\nLaunch command: %q\nReason: %s (%s)\n\n## Last 200 lines\n\n```text\n%s\n```\n\n## git status --short\n\n```text\n%s\n```\n\n## git log --oneline -5\n\n```text\n%s\n```\n", row.Title, project.Name, project.Path, row.CWD, row.LaunchCommand, reason, rolloverReason(reason), text, gitText("status", "--short"), gitText("log", "--oneline", "-5"))
+	data := fmt.Sprintf("---\ngenerated_by: pantheon (agent did not answer)\n---\n# Session handoff\n\nTitle: %s\nProject: %s (%s)\nCWD: %s\nLaunch command: %q\nReason: %s (%s)\n\n%s", row.Title, project.Name, project.Path, row.CWD, row.LaunchCommand, reason, rolloverReason(reason), s.handoffEvidence(ctx, h, row))
 	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
 		return err
@@ -604,7 +640,7 @@ func (s *Server) createRolloverSession(ctx context.Context, old store.Session) (
 		return store.Session{}, err
 	}
 	sid := id.New()
-	row := store.Session{ID: sid, ProjectID: old.ProjectID, TmuxName: id.TmuxName(sid), Title: old.Title, CWD: dir, Cols: old.Cols, Rows: old.Rows, State: session.StateWorking, LaunchCommand: old.LaunchCommand, LaunchProfileID: old.LaunchProfileID, ClaudeAccountID: old.ClaudeAccountID}
+	row := store.Session{ID: sid, ProjectID: old.ProjectID, TmuxName: id.TmuxName(sid), Title: old.Title, Pinned: old.Pinned, CWD: dir, Cols: old.Cols, Rows: old.Rows, State: session.StateWorking, LaunchCommand: old.LaunchCommand, LaunchProfileID: old.LaunchProfileID, ClaudeAccountID: old.ClaudeAccountID}
 	row, err = s.DB.CreateSession(ctx, row)
 	if err != nil {
 		return row, err
@@ -663,4 +699,51 @@ func rolloverDraftPath(cwd, projectPath, sid string) string {
 		}
 	}
 	return ""
+}
+
+func (s *Server) handoffEvidence(ctx context.Context, h rolloverHooks, row store.Session) string {
+	text, err := h.capture(ctx, row, 200)
+	if err != nil {
+		if sb, e := s.DB.GetScrollback(ctx, row.ID); e == nil {
+			text = string(sb.Content)
+		} else {
+			text = "Scrollback unavailable: " + err.Error()
+		}
+	}
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(lines) > 200 {
+		lines = lines[len(lines)-200:]
+	}
+	text = homeTail(strings.Join(lines, "\n"), 128<<10)
+	gitText := func(args ...string) string {
+		gitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(gitCtx, "git", append([]string{"-C", row.CWD}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0")
+		var data homeGitOutput
+		cmd.Stdout = &data
+		cmd.WaitDelay = time.Second
+		if err := cmd.Run(); err != nil {
+			return "Unavailable (not a repository or git failed)."
+		}
+		return homeTail(data.String(), 32<<10)
+	}
+	return fmt.Sprintf("## Last 200 lines\n\n```text\n%s\n```\n\n## git status --short\n\n```text\n%s\n```\n\n## git log --oneline -5\n\n```text\n%s\n```\n", text, gitText("status", "--short"), gitText("log", "--oneline", "-5"))
+}
+
+func (s *Server) saveRolloverScrollback(ctx context.Context, h rolloverHooks, row store.Session) error {
+	// Capture before signalling: the pane's exit screen may replace the only
+	// remaining copy of the agent's final output.
+	text, captureErr := h.capture(ctx, row, scrollbackLines)
+	if captureErr != nil {
+		if _, archiveErr := s.DB.GetScrollback(ctx, row.ID); archiveErr != nil {
+			return captureErr
+		}
+	} else if strings.TrimSpace(text) != "" {
+		content, truncated := boundScrollback([]byte(text), maxScrollbackBytes)
+		if err := s.DB.PutScrollback(ctx, store.Scrollback{SessionID: row.ID, CapturedAt: h.now().Unix(), Lines: scrollbackLines, Truncated: truncated, Content: content}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

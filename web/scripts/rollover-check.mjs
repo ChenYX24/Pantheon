@@ -1,4 +1,4 @@
-// The automatic rollover strip in a real browser: pending, countdown, cancel.
+// The automatic rollover strip in a real browser: pending, countdown, confirmation, retention and cancellation.
 //
 // The Go tests cover the state machine and the unit tests render the markup
 // once, but nothing had ever *clicked* it. The path a person takes -- see the
@@ -62,16 +62,28 @@ try {
       window.$RefreshReg$ = () => {}
       window.$RefreshSig$ = () => (type) => type
       window.__vite_plugin_react_preamble_installed__ = true
-      const { createElement: h } = (await import('/node_modules/.vite/deps/react.js')).default
+      const { createElement: h, useState } = (await import('/node_modules/.vite/deps/react.js')).default
       const { createRoot } = (await import('/node_modules/.vite/deps/react-dom_client.js')).default
       const { AutoRolloverStrip } = await import('/src/components/AutoRolloverStrip.tsx')
       const { HandoffButton } = await import('/src/components/HandoffButton.tsx')
+      const { ToastStack } = await import('/src/components/ToastStack.tsx')
+      const { clearToasts } = await import('/src/components/toasts.ts')
+      const { useRolloverHandoff } = await import('/src/components/useRolloverHandoff.ts')
       const { setLang } = await import('/src/i18n.ts')
       await import('/src/styles.css')
       const root = createRoot(document.querySelector('#root'))
       const committed = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const selections = []
+      function Pair({ views }) {
+        const [selected, setSelected] = useState('fixture')
+        useRolloverHandoff(views, selected, (id) => { selections.push(id); setSelected(id) })
+        return h('div', null,
+          h('input', { id: 'compose-fixture', 'aria-label': 'Compose' }),
+          h('output', { id: 'selected-fixture' }, selected),
+          h(ToastStack, { narrow: innerWidth < 600 }))
+      }
       window.fixture = {
-        requests,
+        requests, selections, clearToasts,
         reply(next) { reply = { status: 200, body: {}, delay: 0, ...next } },
         lang(next) { setLang(next) },
         // Resolved only after React has committed. A render that is merely
@@ -80,7 +92,8 @@ try {
         // does. flushSync was tried first and the DOM was still the old one
         // when it returned (cause not established), so this waits for frames.
         async button(status, props = {}) { root.render(h(HandoffButton, { sessionId: 'fixture', status, ...props })); await committed() },
-        async show(status, props = {}) { root.render(h(AutoRolloverStrip, { sessionId: 'fixture', status, ...props })); await committed() },
+        async show(status, props = {}) { root.render(h(AutoRolloverStrip, { sessionId: 'fixture', status, onSelect: (id) => selections.push(id), ...props })); await committed() },
+        async pair(views, key = 'pair') { root.render(h(Pair, { views, key })); await committed() },
       }
     </script></body></html>
   ` }))
@@ -92,6 +105,8 @@ try {
   const requests = () => page.evaluate(() => window.fixture.requests.slice())
   const reset = () => page.evaluate(() => {
     window.fixture.requests.length = 0
+    window.fixture.selections.length = 0
+    window.fixture.clearToasts()
     window.fixture.reply({})
   })
 
@@ -201,7 +216,8 @@ try {
   step = 'the hand-off button: unavailable while a handoff is underway, exited or disconnected'
   for (const [status, props] of [
     [{ state: 'due', pct: 8, reason: 'now' }, {}], [{ state: 'countdown', pct: 8, endsAt: Date.now() + 9000 }, {}],
-    [{ state: 'handing_off', pct: 8 }, {}], [undefined, { disabled: true }],
+    [{ state: 'handing_off', pct: 8 }, {}], [{ state: 'verifying', pct: 8 }, {}],
+    [{ state: 'handed_off', pct: 8 }, {}], [{ state: 'confirmed', pct: 8, replaces: 'old' }, {}], [undefined, { disabled: true }],
   ]) {
     await button(status, props)
     assert.equal(await handoff.isDisabled(), true, `still pressable for ${JSON.stringify([status?.state, props])}`)
@@ -239,6 +255,71 @@ try {
   assert.equal(await strip.locator('svg.lucide-triangle-alert').count(), 1)
   assert.equal(await strip.locator('svg.lucide-clock').count(), 0)
 
+  step = 'old verifying: open the replacement and keep the old session'
+  await reset()
+  await show({ state: 'verifying', pct: 72, newSessionId: 'new' })
+  assert.match(await strip.innerText(), /new session is confirming/)
+  await strip.getByRole('button', { name: 'Open fresh session' }).click()
+  assert.deepEqual(await page.evaluate(() => window.fixture.selections), ['new'])
+  await strip.getByRole('button', { name: 'Keep old session' }).click()
+  await page.waitForFunction(() => window.fixture.requests.length === 1)
+  assert.deepEqual(await requests(), [{ url: '/api/sessions/fixture/rollover/auto', method: 'POST', body: { action: 'keep' } }])
+
+  step = 'old handed off: countdown is local; keep and release have exact requests'
+  await show({ state: 'handed_off', pct: 72, newSessionId: 'new', endsAt: Date.now() + 2300 })
+  assert.match(await strip.innerText(), /old session releases in 0:0[23]/)
+  await page.waitForFunction(() => /releases in 0:00/.test(document.querySelector('[data-testid=auto-rollover]')?.textContent ?? ''), null, { timeout: 5000 })
+  for (const [label, action] of [['Keep old session', 'keep'], ['Release now', 'release']]) {
+    await reset()
+    await strip.getByRole('button', { name: label }).click()
+    await page.waitForFunction(() => window.fixture.requests.length === 1)
+    await page.waitForFunction(() => !document.querySelector('[data-testid=auto-rollover] button:disabled'))
+    assert.deepEqual(await requests(), [{ url: '/api/sessions/fixture/rollover/auto', method: 'POST', body: { action } }])
+  }
+
+  step = 'the replacement reads the handoff, then shows its summary'
+  await show({ state: 'verifying', pct: 0, replaces: 'fixture' })
+  assert.match(await strip.innerText(), /Taking over: reading the handoff/)
+  assert.deepEqual(await buttons(), [])
+  await show({ state: 'confirmed', pct: 0, replaces: 'fixture' }, { summary: 'Run the remaining tests' })
+  assert.match(await strip.innerText(), /Handoff confirmed: Run the remaining tests/)
+  assert.deepEqual(await buttons(), [])
+
+  step = 'failed confirmation names the reason and opens the replacement'
+  await reset()
+  await show({ state: 'failed', pct: 72, newSessionId: 'new', reason: 'No acknowledgement in 10 minutes' })
+  assert.match(await strip.innerText(), /No acknowledgement in 10 minutes/)
+  await strip.getByRole('button', { name: 'Open fresh session' }).click()
+  assert.deepEqual(await page.evaluate(() => window.fixture.selections), ['new'])
+  assert.deepEqual(await requests(), [])
+
+  step = 'auto-switch and toast: once per pair, back sends keep'
+  await reset()
+  await page.evaluate(() => window.fixture.pair({ fixture: { state: 'verifying', pct: 72, newSessionId: 'new' } }))
+  await page.evaluate(() => document.activeElement?.blur())
+  await page.evaluate(() => window.fixture.pair({ fixture: { state: 'handed_off', pct: 72, newSessionId: 'new', endsAt: Date.now() + 600000 } }))
+  assert.equal(await page.locator('#selected-fixture').innerText(), 'new')
+  const toast = page.getByTestId('toast')
+  await toast.getByRole('button', { name: 'Back to old session' }).click()
+  await page.waitForFunction(() => window.fixture.requests.length === 1)
+  assert.deepEqual(await requests(), [{ url: '/api/sessions/fixture/rollover/auto', method: 'POST', body: { action: 'keep' } }])
+  await page.evaluate(() => window.fixture.pair({ fixture: { state: 'handed_off', pct: 72, newSessionId: 'new', endsAt: Date.now() + 600000 } }))
+  assert.equal(await page.locator('#selected-fixture').innerText(), 'fixture')
+  assert.deepEqual(await page.evaluate(() => window.fixture.selections), ['new', 'fixture'])
+
+  step = 'focused compose keeps focus, shows the toast, and release sends release'
+  await reset()
+  await page.evaluate(() => window.fixture.pair({ fixture: { state: 'verifying', pct: 72, newSessionId: 'new' } }, 'focused'))
+  await page.locator('#compose-fixture').fill('unsent draft')
+  await page.evaluate(() => window.fixture.pair({ fixture: { state: 'handed_off', pct: 72, newSessionId: 'new', endsAt: Date.now() + 600000 } }, 'focused'))
+  assert.equal(await page.locator('#selected-fixture').innerText(), 'fixture')
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'compose-fixture')
+  assert.deepEqual(await page.evaluate(() => window.fixture.selections), [])
+  await toast.getByRole('button', { name: 'Release', exact: true }).click()
+  await page.waitForFunction(() => window.fixture.requests.length === 1)
+  assert.deepEqual(await requests(), [{ url: '/api/sessions/fixture/rollover/auto', method: 'POST', body: { action: 'release' } }])
+  await reset()
+
   step = 'a dropped connection disables every button'
   await show({ state: 'due', pct: 72 }, { disconnected: true })
   assert.equal(await strip.locator('button:not(:disabled)').count(), 0)
@@ -250,7 +331,9 @@ try {
       await page.evaluate((th) => { document.documentElement.dataset.theme = th }, theme)
       for (const width of [320, 768, 1200]) {
         await page.setViewportSize({ width, height: 800 })
-        for (const status of [{ state: 'due', pct: 72 }, { state: 'due', pct: 8, reason: 'now', waiting: 'turn' }, { state: 'countdown', pct: 72, endsAt: Date.now() + 60_000 }]) {
+        for (const status of [{ state: 'due', pct: 72 }, { state: 'due', pct: 8, reason: 'now', waiting: 'turn' }, { state: 'countdown', pct: 72, endsAt: Date.now() + 60_000 },
+          { state: 'verifying', pct: 72, newSessionId: 'new' }, { state: 'handed_off', pct: 72, newSessionId: 'new', endsAt: Date.now() + 61_000 },
+          { state: 'confirmed', pct: 0, replaces: 'fixture' }, { state: 'failed', pct: 72, newSessionId: 'new', reason: 'No acknowledgement' }]) {
           await show(status)
           const m = await strip.evaluate((el) => {
             const box = el.getBoundingClientRect()

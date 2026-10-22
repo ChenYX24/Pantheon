@@ -32,6 +32,7 @@ import type {
 import { TerminalView } from './components/Terminal'
 import { StateDot } from './components/StateDot'
 import { ContextMeter } from './components/ContextMeter'
+import { useRolloverHandoff } from './components/useRolloverHandoff'
 import { AutoRolloverStrip } from './components/AutoRolloverStrip'
 import { HandoffButton } from './components/HandoffButton'
 import { Sidebar } from './components/Sidebar'
@@ -1226,6 +1227,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     focusTerminal(id)
   }
 
+  useRolloverHandoff(state.rollover, selected, selectSession)
+
   // The panel's keys (shortcuts.ts), on the window so they work from inside a
   // terminal too: xterm lets them past. In the order the sidebar draws, which
   // is the order the person sees, read off the rows rather than recomputed.
@@ -1647,7 +1650,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           </div>
         </header>
 
-        {current && <AutoRolloverStrip key={current.id} sessionId={current.id} status={state.rollover[current.id]} disconnected={disconnected} />}
+        {current && <AutoRolloverStrip key={current.id} sessionId={current.id} status={state.rollover[current.id]} summary={current.summary} onSelect={selectSession} disconnected={disconnected} />}
 
         {disconnected && <DisconnectedBar />}
 
