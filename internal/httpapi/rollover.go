@@ -40,6 +40,9 @@ type rolloverResult struct {
 type rolloverRequest struct {
 	Reason string `json:"reason"`
 	Resume bool   `json:"resume"`
+	// verifying hears the status once the replacement exists, for a caller
+	// that must not wait out the confirmation and the retention after it.
+	verifying func(rolloverStatus)
 }
 
 type rolloverState struct {
@@ -147,7 +150,32 @@ func (s *Server) handleRollover(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "reason must be manual, memory or long")
 		return
 	}
-	result, err := s.runRollover(context.WithoutCancel(r.Context()), chi.URLParam(r, "id"), req, 0)
+	ctx, sid := context.WithoutCancel(r.Context()), chi.URLParam(r, "id")
+	var result rolloverStatus
+	var err error
+	if req.Resume && req.Reason != "memory" {
+		// A confirmed handoff keeps the old session for keepOldMinutes after
+		// a confirmation that may itself take ten minutes. Held open that
+		// long, this request is the menu's spinner for twenty minutes and
+		// then whatever a proxy's timeout says, for a handoff that is going
+		// fine. Answer once the replacement exists; the snapshot and
+		// GET …/rollover carry the rest.
+		type outcome struct {
+			status rolloverStatus
+			err    error
+		}
+		// Room for both sends, so neither blocks once this has answered.
+		answered := make(chan outcome, 2)
+		req.verifying = func(status rolloverStatus) { answered <- outcome{status, nil} }
+		go func() {
+			status, err := s.runRollover(ctx, sid, req, 0)
+			answered <- outcome{status, err}
+		}()
+		first := <-answered
+		result, err = first.status, first.err
+	} else {
+		result, err = s.runRollover(ctx, sid, req, 0)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, errRolloverConflict):
@@ -463,6 +491,9 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 			return result, err
 		}
 		update("verifying")
+		if req.verifying != nil {
+			req.verifying(result)
+		}
 		var kept bool
 		kept, err = s.verifyRollover(ctx, h, row, next, result)
 		if err != nil {

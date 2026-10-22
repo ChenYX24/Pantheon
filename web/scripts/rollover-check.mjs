@@ -62,7 +62,7 @@ try {
       window.$RefreshReg$ = () => {}
       window.$RefreshSig$ = () => (type) => type
       window.__vite_plugin_react_preamble_installed__ = true
-      const { createElement: h, useState } = (await import('/node_modules/.vite/deps/react.js')).default
+      const { createElement: h } = (await import('/node_modules/.vite/deps/react.js')).default
       const { createRoot } = (await import('/node_modules/.vite/deps/react-dom_client.js')).default
       const { AutoRolloverStrip } = await import('/src/components/AutoRolloverStrip.tsx')
       const { HandoffButton } = await import('/src/components/HandoffButton.tsx')
@@ -74,11 +74,18 @@ try {
       const root = createRoot(document.querySelector('#root'))
       const committed = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const selections = []
-      function Pair({ views }) {
-        const [selected, setSelected] = useState('fixture')
-        useRolloverHandoff(views, selected, (id) => { selections.push(id); setSelected(id) })
+      // No hook of its own: this file's React is the pre-bundled copy, not the
+      // one Vite hands the components, and a useState here is a call into a
+      // React that is not rendering ("Invalid hook call"). The selection lives
+      // out here instead and every change renders again.
+      let pairState = { views: {}, selected: 'fixture', key: 'pair' }
+      const renderPair = () => root.render(h(Pair, pairState))
+      const choose = (id) => { selections.push(id); pairState = { ...pairState, selected: id }; renderPair() }
+      function Pair({ views, selected }) {
+        useRolloverHandoff(views, selected, choose)
         return h('div', null,
           h('input', { id: 'compose-fixture', 'aria-label': 'Compose' }),
+          h('textarea', { id: 'terminal-fixture', className: 'xterm-helper-textarea', 'aria-label': 'Terminal input' }),
           h('output', { id: 'selected-fixture' }, selected),
           h(ToastStack, { narrow: innerWidth < 600 }))
       }
@@ -93,7 +100,7 @@ try {
         // when it returned (cause not established), so this waits for frames.
         async button(status, props = {}) { root.render(h(HandoffButton, { sessionId: 'fixture', status, ...props })); await committed() },
         async show(status, props = {}) { root.render(h(AutoRolloverStrip, { sessionId: 'fixture', status, onSelect: (id) => selections.push(id), ...props })); await committed() },
-        async pair(views, key = 'pair') { root.render(h(Pair, { views, key })); await committed() },
+        async pair(views, key = 'pair') { pairState = { views, key, selected: key === pairState.key ? pairState.selected : 'fixture' }; renderPair(); await committed() },
       }
     </script></body></html>
   ` }))
@@ -306,6 +313,17 @@ try {
   await page.evaluate(() => window.fixture.pair({ fixture: { state: 'handed_off', pct: 72, newSessionId: 'new', endsAt: Date.now() + 600000 } }))
   assert.equal(await page.locator('#selected-fixture').innerText(), 'fixture')
   assert.deepEqual(await page.evaluate(() => window.fixture.selections), ['new', 'fixture'])
+
+  step = 'a focused terminal is not typing: the move still happens'
+  // With the old session selected the keyboard is normally in xterm's helper
+  // textarea. Counting it as typing meant the move never happened.
+  await reset()
+  await page.evaluate(() => window.fixture.pair({ fixture: { state: 'verifying', pct: 72, newSessionId: 'new' } }, 'terminal'))
+  await page.locator('#terminal-fixture').focus()
+  await page.evaluate(() => window.fixture.pair({ fixture: { state: 'handed_off', pct: 72, newSessionId: 'new', endsAt: Date.now() + 600000 } }, 'terminal'))
+  assert.equal(await page.locator('#selected-fixture').innerText(), 'new')
+  assert.deepEqual(await page.evaluate(() => window.fixture.selections), ['new'])
+  await page.evaluate(() => window.fixture.clearToasts())
 
   step = 'focused compose keeps focus, shows the toast, and release sends release'
   await reset()

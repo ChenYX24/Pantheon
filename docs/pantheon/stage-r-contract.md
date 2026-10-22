@@ -130,8 +130,11 @@ existing steps, moved after the ack. If the governor raises a memory alert while
 `handed_off`, it is released at once.
 
 **Keeping the old session.** *keep* (the toast's "back to old"), or any keystroke into the old
-session after the ack, cancels the release. Both sessions stay as ordinary sessions. That is the
-person deciding, and typing into the old one is the clearest way they can say so.
+session once the replacement exists, cancels the release. Both sessions stay as ordinary
+sessions. That is the person deciding, and typing into the old one is the clearest way they can
+say so. "Once the replacement exists", not "after the ack": counting only later keystrokes
+released an old session ten minutes after the ack while it was answering what the person had
+asked it during verification, which is the interruption §1 rules out.
 
 **Busy.** While a pairing is live (verifying, handed_off/confirmed), neither session can start
 another rollover, and the governor does not pick either of them as a rollover candidate.

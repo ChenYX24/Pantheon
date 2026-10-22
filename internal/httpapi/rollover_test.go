@@ -91,6 +91,8 @@ func TestRolloverFallbackArchiveReportAndResume(t *testing.T) {
 	if result.NewSessionID != "new" {
 		t.Fatal(result)
 	}
+	// The request answers once the replacement exists; the release follows.
+	waitRolloverState(t, s, row.ID, "done")
 	if !strings.HasPrefix(result.Handoff, filepath.Join(base, "agent-docs", "handoffs")) {
 		t.Fatal(result.Handoff)
 	}

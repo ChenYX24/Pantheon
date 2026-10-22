@@ -417,8 +417,8 @@ the frame to a remote page.
 
 Authenticated session rollover (stages E2 and R3). Development permits both routes only
 where manual terminal sessions are enabled. POST takes
-`{"reason":"manual"|"memory"|"long","resume":false}` and waits for the operation,
-returning `{"handoff":"/absolute/path.md","newSessionId":"..."}` (the latter
+`{"reason":"manual"|"memory"|"long","resume":false}` and waits for the operation
+(a confirmed handoff: until its replacement exists, below), returning `{"handoff":"/absolute/path.md","newSessionId":"..."}` (the latter
 only when resumed). A second operation on the same session is `409`. Missing
 sessions are `404`; invalid reasons are `400`. Home execution workers and
 archived/exited sessions cannot roll over. Resume requires a recorded Claude
@@ -461,12 +461,15 @@ For `resume: true` with any reason except `memory`, the old session stays alive:
    (`vibepanel me info set labels handoff-ack`, through `PATCH /api/me/v1`), or
    a new standalone `HANDOFF-ACK` screen line. ANSI, whitespace and the same
    leading bullet/prompt decoration as `HANDOFF-DONE` are tolerated; echoes,
-   inline mentions and markers present before the prompt do not count. The
-   replacement writes its restatement with `vibepanel me info set summary`.
+   inline mentions and markers present before the prompt do not count. A
+   capture that fails reads as nothing on screen, not as a failure: the label
+   can still confirm. The replacement writes its restatement with
+   `vibepanel me info set summary`.
 4. Ack changes the old view to `handed_off` and the new view to `confirmed`.
    Release follows at `keepOldMinutes` after the ack, on `release`, or on an
-   active governor memory alert. `keep`, or input into the old session later
-   than the ack, cancels release and leaves both sessions ordinary.
+   active governor memory alert. `keep`, or input into the old session at any
+   time after the replacement exists (before the ack as well as after), cancels
+   release and leaves both sessions ordinary.
 5. Release captures fresh scrollback and prepares the governor's end against
    the live process. It sends SIGTERM to verified session process groups,
    then SIGKILL after ten seconds if necessary; retains the row and scrollback;
@@ -486,7 +489,10 @@ end/archive/report, then create a replacement if requested and send the original
 continuation prompt when ready. Section repair and acknowledgement do not delay
 this path. The expanded initial heading request applies to both paths.
 
-The POST remains open until release, keep or failure. Pairing state is in memory;
+For that path the POST answers once the replacement exists (`200` with both
+fields) or as soon as the operation fails before that; confirmation and
+retention continue in the background, and GET and the snapshot carry them.
+`memory` and `resume: false` still answer when the operation ends. Pairing state is in memory;
 a restart during verification or retention leaves both processes alive and ends
 the pairing. Nothing is scheduled to release either session after startup.
 

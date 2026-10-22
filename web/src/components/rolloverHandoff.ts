@@ -1,5 +1,6 @@
 import type { AutoRollover } from '../protocol/wire'
 import { api } from '../protocol/api'
+import { takesTyping, type FocusTarget } from './focus'
 import { showToast } from './toasts'
 
 export interface HandoffPair { oldId: string; newId: string }
@@ -18,8 +19,11 @@ export function selectedHandoff(seen: Set<string>, views: Record<string, AutoRol
   return pair
 }
 
-export function handoffInputFocused(element: Element | null): boolean {
-  return !!element?.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"]')
+// The terminal's own textarea is not typing. With the old session selected the
+// keyboard is normally there, so counting it meant the move never happened;
+// and a person who had typed into it kept the old session already.
+export function handoffInputFocused(element: FocusTarget | null): boolean {
+  return takesTyping(element)
 }
 
 export function announceHandoff(pair: HandoffPair, select: (id: string) => void, inputFocused: boolean) {

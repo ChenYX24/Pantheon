@@ -27772,3 +27772,43 @@ No second full Vitest run was made.
 
 These source checks cover implementation commit `24daefd`; the embedded frontend
 bundle is intentionally left for the Conductor to build.
+
+### Review: four things the first cut did, and what replaced them
+
+Reviewed by the Conductor before any browser or /dev run. Each was a reading
+the task left open; each is changed in code, and each change has a test that
+fails when the change is removed (run, failed, restored):
+
+- **The rollover POST answered only at release.** The session menu's "hand off
+  and continue" and the home to-do both `await` it, so with the defaults that
+  was a spinner for up to twenty minutes and then whatever a proxy's timeout
+  said, for a handoff that was going fine. `handleRollover` now runs the
+  confirmed path in the background and answers once the replacement exists,
+  or with the error if it fails before that; `memory` and `resume: false`
+  still answer at the end. `rolloverRequest.verifying` is the hook, unexported
+  and never decoded. `TestRolloverRequestAnswersOnceTheReplacementExists`.
+- **Input counted only after the ack.** A person who asked the old agent one
+  more thing while the new one was reading got the old session released ten
+  minutes after the ack, mid-answer, which is the interruption the contract's
+  first principle rules out. Input now counts from the moment the replacement
+  exists, in the readiness wait, the ack wait and retention alike; contract §8
+  says so. `TestRolloverInputBeforeTheAckKeepsOldSession`.
+- **One failed screen capture failed the handoff.** Captures have a two-second
+  timeout and this host is loaded; a miss now reads as nothing on screen, the
+  label can still confirm, and a replacement that is really gone is
+  `alive()`'s to report. The capture during retention read nothing anyone used
+  and is gone; the input-during-the-final-check test now injects at the
+  liveness read instead. `TestRolloverUnreadableReplacementScreenStillTakesTheLabel`
+  replaces the test that pinned the failure.
+- **The focused terminal counted as typing,** so the move to the new session
+  almost never happened: with the old session selected the keyboard is
+  normally in xterm's helper textarea. `handoffInputFocused` is now
+  `focus.ts`'s `takesTyping`, which already knew that textarea is not typing;
+  a compose box still holds the move. Someone who had typed into the terminal
+  kept the old session already, so there is nothing left to protect there.
+
+```sh
+go test -count=1 ./internal/httpapi -run 'Rollover|AutoRollover|^TestMe|TypeScript|EveryAuditEvent'
+npx tsc -b
+npx vitest run --pool=forks --maxWorkers=1 src/components/rolloverHandoff.test.ts src/components/AutoRolloverStrip.test.ts src/components/RolloverActions.test.ts src/components/focus.test.ts src/i18n.test.ts src/i18n.prose.test.ts src/chrome-vocabulary.test.ts
+```

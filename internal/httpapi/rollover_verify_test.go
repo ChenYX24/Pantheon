@@ -551,27 +551,114 @@ func TestRolloverReplacementExitAfterAckAlsoKeepsOldSession(t *testing.T) {
 	rolloverAudit(t, s, "failed")
 }
 
-func TestRolloverUnreadableReplacementScreenFailsWithoutRelease(t *testing.T) {
+// A capture that times out on a loaded machine is not the replacement going
+// away. It used to fail the whole handoff on the first miss; the label still
+// confirms, and with neither the ten-minute deadline is what fails it.
+func TestRolloverUnreadableReplacementScreenStillTakesTheLabel(t *testing.T) {
+	for _, labelled := range []bool{true, false} {
+		s, row, h, steps := rolloverFixture(t)
+		if labelled {
+			ackRolloverByLabel(t, s, h)
+		}
+		capture := h.capture
+		h.capture = func(ctx context.Context, r store.Session, n int) (string, error) {
+			if r.ID == "new" {
+				return "", errors.New("capture timed out")
+			}
+			return capture(ctx, r, n)
+		}
+		result, err := s.runRollover(context.Background(), row.ID, rolloverRequest{Reason: "manual", Resume: true}, 0)
+		if labelled {
+			if err != nil || result.State != "done" || !slices.Contains(*steps, "end") {
+				t.Fatal("labelled", result, err, *steps)
+			}
+			continue
+		}
+		assertRolloverIntact(t, s, *steps)
+		if err == nil || !strings.Contains(result.Error, "within 10 minutes") {
+			t.Fatal("unlabelled", result, err)
+		}
+	}
+}
+
+func TestRolloverInputBeforeTheAckKeepsOldSession(t *testing.T) {
 	s, row, h, steps := rolloverFixture(t)
-	sent := false
-	send, capture := h.send, h.capture
-	h.send = func(ctx context.Context, row store.Session, text string) error {
-		if row.ID == "new" {
-			sent = true
+	s.autoRollover.now = h.now
+	send := h.send
+	h.send = func(ctx context.Context, r store.Session, text string) error {
+		if err := send(ctx, r, text); err != nil {
+			return err
 		}
-		return send(ctx, row, text)
-	}
-	h.capture = func(ctx context.Context, row store.Session, n int) (string, error) {
-		if row.ID == "new" && sent {
-			return "", errors.New("pane vanished")
+		if r.ID == "new" {
+			// The person asks the old agent for one more thing while the new
+			// one is still reading; the ack follows a moment later.
+			if err := h.wait(ctx, time.Second); err != nil {
+				return err
+			}
+			s.noteResourceInput(row.ID)
+			summary := "下一步"
+			return s.DB.SetSessionInfo(ctx, r.ID, &summary, nil, []string{"handoff-ack"})
 		}
-		return capture(ctx, row, n)
+		return nil
 	}
-	result, err := s.runRollover(context.Background(), row.ID, rolloverRequest{Reason: "manual", Resume: true}, 0)
+	result, err := s.runRollover(context.Background(), row.ID, rolloverRequest{Reason: "long", Resume: true}, 0)
 	assertRolloverIntact(t, s, *steps)
-	if err == nil || result.Error != "pane vanished" {
+	if err != nil || result.State != "idle" {
 		t.Fatal(result, err)
 	}
+	if a := rolloverAudit(t, s, "cancelled"); a["reason"] != "input" {
+		t.Fatal(a)
+	}
+}
+
+func waitRolloverState(t *testing.T, s *Server, id, want string) rolloverStatus {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		status := s.rolloverStatus(id)
+		if status.State == want {
+			return status
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rollover state %q, want %q", status.State, want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// The menu's request answered only when the old session was released, twenty
+// minutes after it was sent with the defaults.
+func TestRolloverRequestAnswersOnceTheReplacementExists(t *testing.T) {
+	s, row, h, _ := rolloverFixture(t)
+	proceed := make(chan struct{})
+	wait := h.wait
+	h.wait = func(ctx context.Context, d time.Duration) error {
+		if s.rolloverStatus(row.ID).State == "verifying" {
+			<-proceed
+		}
+		return wait(ctx, d)
+	}
+	answered := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		answered <- homeRequest(t, s, "POST", "/api/sessions/agent/rollover", `{"reason":"manual","resume":true}`, true)
+	}()
+	var w *httptest.ResponseRecorder
+	select {
+	case w = <-answered:
+	case <-time.After(5 * time.Second):
+		close(proceed)
+		t.Fatal("the request waited for the confirmation")
+	}
+	result := homeDecode[rolloverStatus](t, w, 200)
+	if result.NewSessionID != "new" || s.rolloverStatus(row.ID).State != "verifying" {
+		t.Fatal(result, s.rolloverStatus(row.ID))
+	}
+	summary := "下一步"
+	if err := s.DB.SetSessionInfo(context.Background(), "new", &summary, nil, []string{"handoff-ack"}); err != nil {
+		t.Fatal(err)
+	}
+	close(proceed)
+	waitRolloverState(t, s, row.ID, "done")
 }
 
 func TestRolloverPairActionsKeepDevelopmentAllowList(t *testing.T) {
@@ -590,12 +677,12 @@ func TestRolloverPairActionsKeepDevelopmentAllowList(t *testing.T) {
 	}
 }
 
-func TestRolloverInputDuringTheFinalCaptureKeepsOldSession(t *testing.T) {
+func TestRolloverInputDuringTheFinalCheckKeepsOldSession(t *testing.T) {
 	s, row, h, steps := rolloverFixture(t)
 	ackRolloverByLabel(t, s, h)
 	s.autoRollover.now = h.now
-	capture := h.capture
-	h.capture = func(ctx context.Context, r store.Session, n int) (string, error) {
+	// The liveness read is the last thing between the check and the release.
+	h.gone = func(ctx context.Context, r store.Session) bool {
 		if r.ID == "new" && s.rolloverStatus(row.ID).State == "handed_off" {
 			if err := h.wait(ctx, time.Second); err != nil {
 				t.Fatal(err)
@@ -605,7 +692,7 @@ func TestRolloverInputDuringTheFinalCaptureKeepsOldSession(t *testing.T) {
 				t.Fatal("release was not available")
 			}
 		}
-		return capture(ctx, r, n)
+		return false
 	}
 	result, err := s.runRollover(context.Background(), row.ID, rolloverRequest{Reason: "manual", Resume: true}, 0)
 	assertRolloverIntact(t, s, *steps)

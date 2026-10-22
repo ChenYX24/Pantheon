@@ -58,14 +58,14 @@ it.each([false, true])('announces confirmation without stealing a focused input 
   }
 })
 
-it('recognises text entry controls, including the terminal textarea and editable compose boxes', () => {
-  const closest = vi.fn().mockReturnValue({})
-  expect(handoffInputFocused({ closest } as unknown as Element)).toBe(true)
-  const selector = closest.mock.calls[0][0]
-  for (const control of ['input', 'textarea', 'contenteditable', 'role="textbox"']) expect(selector).toContain(control)
+it('holds the move for a compose box but not for the focused terminal', () => {
+  const classes = (...names: string[]) => ({ contains: (name: string) => names.includes(name) })
+  expect(handoffInputFocused({ tagName: 'TEXTAREA', classList: classes() })).toBe(true)
+  expect(handoffInputFocused({ tagName: 'DIV', isContentEditable: true })).toBe(true)
+  expect(handoffInputFocused({ tagName: 'INPUT', type: 'text' })).toBe(true)
+  expect(handoffInputFocused({ tagName: 'TEXTAREA', classList: classes('xterm-helper-textarea') })).toBe(false)
+  expect(handoffInputFocused({ tagName: 'BUTTON' })).toBe(false)
   expect(handoffInputFocused(null)).toBe(false)
-  closest.mockReturnValue(null)
-  expect(handoffInputFocused({ closest } as unknown as Element)).toBe(false)
 })
 
 it.each(['verifying', 'handed_off', 'confirmed'] as const)('disables the Hand off button for a paired %s session', (state) => {

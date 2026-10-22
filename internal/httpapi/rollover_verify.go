@@ -213,10 +213,19 @@ func (s *Server) verifyRollover(ctx context.Context, h rolloverHooks, old, next 
 		}
 		return current, nil
 	}
+	// Typing into the old session counts from the moment the replacement
+	// exists, not from the ack. A person who asks the old agent for one more
+	// thing while the new one is still reading is using it; counting only
+	// later keystrokes released it ten minutes after the ack, mid-answer.
+	pairedAt := h.now()
+	typed := func() bool { return s.lastResourceInput(old.ID).After(pairedAt) }
 	readyBy := h.now().Add(time.Minute)
 	for {
 		if s.rolloverPairChoice(old.ID) == "keep" {
 			return keep("keep")
+		}
+		if typed() {
+			return keep("input")
 		}
 		if _, err := alive(); err != nil {
 			return false, err
@@ -235,10 +244,11 @@ func (s *Server) verifyRollover(ctx context.Context, h rolloverHooks, old, next 
 			return false, err
 		}
 	}
-	before, err := h.capture(ctx, next, 200)
-	if err != nil {
-		return false, err
-	}
+	// The screen is only the second way to confirm. A capture that times out
+	// on a loaded machine reads as nothing on screen, not as a failure: the
+	// label can still arrive, and a replacement that is really gone is
+	// alive()'s to report.
+	before, _ := h.capture(ctx, next, 200)
 	markersBefore := ackMarkerCount(before)
 	if err := h.send(ctx, next, handoffAckPrompt(status.Handoff)); err != nil {
 		return false, err
@@ -249,14 +259,14 @@ func (s *Server) verifyRollover(ctx context.Context, h rolloverHooks, old, next 
 		if s.rolloverPairChoice(old.ID) == "keep" {
 			return keep("keep")
 		}
+		if typed() {
+			return keep("input")
+		}
 		current, err := alive()
 		if err != nil {
 			return false, err
 		}
-		text, err := h.capture(ctx, next, 200)
-		if err != nil {
-			return false, err
-		}
+		text, _ := h.capture(ctx, next, 200)
 		if slices.Contains(current.Labels, "handoff-ack") || ackMarkerCount(text) > markersBefore {
 			ackAt = h.now()
 			summary := []rune(current.Summary)
@@ -286,7 +296,7 @@ func (s *Server) verifyRollover(ctx context.Context, h rolloverHooks, old, next 
 		if s.rollovers.actions[old.ID] == "keep" {
 			return "keep"
 		}
-		if s.lastResourceInput(old.ID).After(ackAt) {
+		if typed() {
 			return "input"
 		}
 		if release {
@@ -300,9 +310,6 @@ func (s *Server) verifyRollover(ctx context.Context, h rolloverHooks, old, next 
 			return keep(reason)
 		}
 		if _, err := alive(); err != nil {
-			return false, err
-		}
-		if _, err := h.capture(ctx, next, 200); err != nil {
 			return false, err
 		}
 		if s.rolloverPairChoice(old.ID) == "release" || !h.now().Before(releaseAt) || h.alert != nil && h.alert() {
