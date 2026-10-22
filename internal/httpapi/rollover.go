@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jiangmuran/vibepanel/internal/chat"
 	"github.com/jiangmuran/vibepanel/internal/id"
 	"github.com/jiangmuran/vibepanel/internal/pantheon/home"
 	"github.com/jiangmuran/vibepanel/internal/resources"
@@ -256,7 +257,10 @@ func (s *Server) rolloverRuntime() rolloverHooks {
 			if err != nil {
 				return false, err
 			}
-			return (current.State == session.StateWaiting || current.State == session.StateDone) && (rolloverAgent(store.Session{Command: info.Command}) || info.Command == "node"), nil
+			if !rolloverAgent(store.Session{Command: info.Command}) && info.Command != "node" {
+				return false, nil
+			}
+			return current.State == session.StateWaiting || current.State == session.StateDone || s.rolloverSettled(current, time.Now()), nil
 		},
 		held: func(row store.Session) uint64 {
 			if s.Resources != nil {
@@ -360,7 +364,7 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 	}
 	if rolloverAgent(row) {
 		beforeSend := h.now().Add(time.Minute)
-		for row.State == session.StateWorking && h.now().Before(beforeSend) && !critical() && (h.gone == nil || !h.gone(ctx, row)) {
+		for row.State == session.StateWorking && !s.rolloverTurnOver(row) && h.now().Before(beforeSend) && !critical() && (h.gone == nil || !h.gone(ctx, row)) {
 			if err = h.wait(ctx, time.Second); err != nil {
 				return result, err
 			}
@@ -615,6 +619,35 @@ func (s *Server) createRolloverSession(ctx context.Context, old store.Session) (
 	}
 	s.notifyState()
 	return row, nil
+}
+
+// rolloverReadyQuiet is how long a fresh agent's pane must have been still.
+// Long enough to outlast the redraws a TUI makes while it starts; short enough
+// that the one-minute ready budget is mostly spare.
+const rolloverReadyQuiet = 5 * time.Second
+
+// rolloverSettled is readiness for a replacement no hook vouches for. Without
+// hooks the detector says "working" for as long as an agent runs, so waiting
+// for waiting/done timed out on every handoff on a machine without them: the
+// old session was ended and the new one never received its message. What a
+// starting TUI does that can be seen is draw itself and then stop. Something
+// must have been drawn -- an empty pane is a process that has not started --
+// and nothing since. A hook's "working" is not a guess and is not overruled.
+func (s *Server) rolloverSettled(row store.Session, now time.Time) bool {
+	if s.Detector == nil || row.State != session.StateWorking || row.StateSource != session.SourceHeuristic {
+		return false
+	}
+	last := s.Detector.LastOutput(row.ID)
+	return !last.IsZero() && now.Sub(last) >= rolloverReadyQuiet
+}
+
+// rolloverTurnOver lets the transcript end the wait before the prompt, the same
+// way it lets a strip reach its countdown (claudeTurnOver). Waiting for the
+// heuristic to say anything but "working" spent the whole minute on every
+// handoff without hooks, after the boundary had already established this.
+func (s *Server) rolloverTurnOver(row store.Session) bool {
+	u := s.contexts.snapshot([]store.Session{row})[row.ID]
+	return claudeTurnOver(chat.AgentFor(row.LaunchCommand, ""), row.State, row.StateSource, u.TurnEnded)
 }
 
 // rolloverDraftPath is where the agent is asked to write: a dot-file at the

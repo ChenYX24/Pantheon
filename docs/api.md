@@ -415,7 +415,9 @@ after a restart. Closing the requesting tab does not cancel a rollover.
 A cyx checkout uses its Harness project's `agent-docs/handoffs/` directory;
 other sessions use the panel data directory's `handoffs/`. Claude Code and Codex
 receive one bracketed paste and Enter requesting a handoff. An active turn may
-finish for up to 60 seconds before that request. Completion requires a regular
+finish for up to 60 seconds before that request; a Claude transcript whose last
+main-chain turn ended overrules the heuristic's "working" and ends that wait
+(never a hook's report). Completion requires a regular
 file of at least 200 bytes unchanged for five seconds, or a new `HANDOFF-DONE`
 reply line (the prompt's echo and older markers do not count). The resource
 policy's `rolloverGraceSeconds` bounds the reply wait; critical host memory
@@ -427,7 +429,10 @@ groups, then SIGKILL after ten seconds if necessary. It keeps the row and
 scrollback, sets `archivedAt` and `archiveNote: "rolled over → <path>"`, disables
 boot restoration, records a session event and writes a report for cyx projects.
 A resumed session uses the original launch command, profile and Claude account,
-with a fresh id, and receives the continuation prompt only after it is ready.
+with a fresh id, and receives the continuation prompt only after it is ready:
+an agent in its pane that is `waiting` or `done`, or, when only the heuristic
+speaks for it, one whose pane has drawn something and then been still for five
+seconds. Readiness has 60 seconds.
 If that fails, GET retains the error and any new session id for recovery.
 
 ### `POST /api/sessions/{id}/rollover/auto`
@@ -472,7 +477,8 @@ Known background tasks come from an explicit main-thread Claude `Stop` inventory
 an empty/completed inventory clears that block. Unreported tasks are unknown.
 An active memory-governor alert, frozen session or E2 handoff takes precedence.
 
-On expiry R2 invokes the existing primitive with `reason: "long", resume: true`.
+On expiry R2 invokes the existing primitive with `resume: true` and
+`reason: "manual"` when the request came from Hand off (`now`), `"long"` otherwise.
 It saves a handoff, ends the old session and opens the replacement, as E2 does
 today. New-session acknowledgement and delayed release are R3, not implemented
 here; an error after the old session ends cannot restore its process. Failed

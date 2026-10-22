@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jiangmuran/vibepanel/internal/agentctx"
 	"github.com/jiangmuran/vibepanel/internal/resources"
 	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/store"
@@ -346,11 +347,66 @@ func TestRolloverRealInputAndResumeAdapter(t *testing.T) {
 	if ready, err := h.ready(context.Background(), next); err != nil || ready {
 		t.Fatal(ready, err)
 	}
+	// Without a hook a fresh agent is "working" for as long as it runs, which
+	// is how every replacement on a machine without hooks timed out unasked.
+	// What can be seen instead is a pane that drew something and went still.
+	s.Detector = session.NewDetector()
+	if ready, err := h.ready(context.Background(), next); err != nil || ready {
+		t.Fatal("nothing drawn yet", ready, err)
+	}
+	s.Detector.Observe(next.ID, session.Signals{Visible: true}, time.Now().Add(-time.Second))
+	if ready, err := h.ready(context.Background(), next); err != nil || ready {
+		t.Fatal("still drawing", ready, err)
+	}
+	s.Detector.Observe(next.ID, session.Signals{Visible: true}, time.Now().Add(-2*rolloverReadyQuiet))
+	if ready, err := h.ready(context.Background(), next); err != nil || !ready {
+		t.Fatal("drawn and still", ready, err)
+	}
+	if err = s.DB.SetSessionState(context.Background(), next.ID, session.StateWorking, session.SourceHook); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := h.ready(context.Background(), next); err != nil || ready {
+		t.Fatal("a hook's working was overruled by quiet", ready, err)
+	}
 	if err = s.DB.SetSessionState(context.Background(), next.ID, session.StateWaiting, session.SourceHook); err != nil {
 		t.Fatal(err)
 	}
 	if ready, err := h.ready(context.Background(), next); err != nil || !ready {
 		t.Fatal(ready, err)
+	}
+	fake.info.Command = "bash"
+	if ready, err := h.ready(context.Background(), next); err != nil || ready {
+		t.Fatal("a shell is not a ready agent", ready, err)
+	}
+}
+
+func TestRolloverPromptWaitEndsWhenTheTranscriptSaysTheTurnEnded(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source session.Source
+		ended  bool
+		wait   time.Duration
+	}{
+		{"the transcript overrules the heuristic", session.SourceHeuristic, true, 0},
+		{"the transcript is still mid-turn", session.SourceHeuristic, false, time.Minute},
+		{"a hook says working", session.SourceHook, true, time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, base, h, _ := rolloverFixture(t)
+			row, err := s.DB.CreateSession(context.Background(), store.Session{ID: "claude", ProjectID: base.ProjectID, TmuxName: "vp_claude", CWD: base.CWD, LaunchCommand: []string{"claude"}, State: session.StateWorking, StateSource: tc.source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.contexts.publish(row.ID, agentctx.Usage{Used: 10_000, Window: 100_000, Source: agentctx.Claude, TurnEnded: tc.ended}, true)
+			start, sent := h.now(), time.Time{}
+			h.send = func(context.Context, store.Session, string) error { sent = h.now(); return nil }
+			if _, err := s.runRollover(context.Background(), row.ID, rolloverRequest{Reason: "manual"}, 0); err != nil {
+				t.Fatal(err)
+			}
+			if got := sent.Sub(start); got != tc.wait {
+				t.Fatal("waited", got, "before the prompt, want", tc.wait)
+			}
+		})
 	}
 }
 

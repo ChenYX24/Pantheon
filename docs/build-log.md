@@ -27594,3 +27594,34 @@ the first version of the bell test did not, because a later `Observe` reset the
 quiet clock and the two-minute gate passed it by itself. `TestSlowViewer
 IsDroppedNotBlocking` failed once in a full `internal/session` run alongside a
 running `httpapi` suite and passes alone, with and without these changes.
+
+## 2026-10-22 — The replacement that never heard its message
+
+The first real Hand off on the dev instance went through every step but the
+last. The audit has it: requested 18:31:41, countdown 18:35:40, prompt 18:36:46,
+handoff written and the old session ended 18:37:40, replacement created
+18:37:50, and `rollover.failed: new agent did not become ready within 60
+seconds` at 18:38:50. The document was in the Harness; the new session never
+received the line pointing at it, so it started knowing nothing.
+
+Readiness asked for `waiting` or `done`. Without hooks the detector answers
+"working" for any live agent process -- that is its documented rule, chosen so a
+quiet agent is never called finished -- so on this machine readiness could not
+be reached at all. It now also accepts the one thing a starting TUI does that
+the panel can see: it draws, then stops. The pane must have produced visible
+output and been still for five seconds, the state must be the heuristic's own
+guess (a hook's "working" stands), and the pane must still run the agent. An
+empty pane is not ready, because that is a process that has not started.
+
+The same rule cost the minute before the prompt. That loop waited for the row to
+stop saying "working", which without hooks it never does, so every handoff paid
+the full minute after the boundary had already established that the turn was
+over. It now ends on the transcript's `end_turn`, through the same
+`claudeTurnOver` the strip uses, so the two cannot disagree about what a finished
+turn is.
+
+And a click told the agent it was being stopped because 「会话时间过长」: the
+executor passed `reason: "long"` for every handoff. A request that came from the
+button (`now`) is `manual` now, in the prompt and the report.
+
+Each of the three was removed in turn and its test failed.

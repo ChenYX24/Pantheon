@@ -272,7 +272,7 @@ func (s *Server) stepAutoRollover(sid string, o rollover.Observation, p rollover
 		// The transcript knows better. Only the heuristic's guess is
 		// overruled -- never a hook's word, and never a bell, which means the
 		// agent is asking for the person.
-		if !o.Done && o.TurnEnded && o.Agent == "claude" && st == session.StateWorking && src == session.SourceHeuristic {
+		if !o.Done && claudeTurnOver(o.Agent, st, src, o.TurnEnded) {
 			o.Done = true
 		}
 		if last := s.Detector.LastOutput(sid); last.After(o.QuietSince) {
@@ -282,6 +282,12 @@ func (s *Server) stepAutoRollover(sid string, o rollover.Observation, p rollover
 	result := rollover.Step(m, o, p, now)
 	a.entries[sid] = result.Memory
 	return result
+}
+
+// claudeTurnOver is the transcript overruling the heuristic's "working" for a
+// Claude whose turn has ended. Only that guess: a hook's word and a bell stand.
+func claudeTurnOver(agent string, st session.State, src session.Source, turnEnded bool) bool {
+	return turnEnded && agent == "claude" && st == session.StateWorking && src == session.SourceHeuristic
 }
 
 func (s *Server) queueAutoRollovers(ctx context.Context, rows []store.Session, panes map[string]tmux.Info) {
@@ -345,14 +351,22 @@ func (s *Server) refreshAutoRollovers(ctx context.Context, rows []store.Session,
 
 func (s *Server) executeAutoRollover(sid string) {
 	ctx := context.Background()
-	run := s.autoRollover.run
+	a := &s.autoRollover
+	// The prompt and the report both name the reason, and a click read as
+	// "the session ran too long" to the agent being asked to stop.
+	a.mu.Lock()
+	reason := "long"
+	if a.entries[sid].Reason == "now" {
+		reason = "manual"
+	}
+	a.mu.Unlock()
+	run := a.run
 	if run == nil {
 		run = func(ctx context.Context, sid string) (rolloverStatus, error) {
-			return s.runRollover(ctx, sid, rolloverRequest{Reason: "long", Resume: true}, 0)
+			return s.runRollover(ctx, sid, rolloverRequest{Reason: reason, Resume: true}, 0)
 		}
 	}
 	status, err := run(ctx, sid)
-	a := &s.autoRollover
 	a.mu.Lock()
 	result := rollover.Finish(a.entries[sid], err)
 	a.entries[sid] = result.Memory
