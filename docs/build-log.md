@@ -27854,3 +27854,18 @@ by npm is a `#!/usr/bin/env node` script, so the pane reports `node`;
 on this machine) never had its rollout read and could never be seen to finish
 a turn. `node` now counts when the session was launched as `codex`;
 `TestTheRolloutIsReadOnlyForAQuietCodex` has the npm cases.
+
+**Codex, second run (pantheon.9): the handoff started, and the replacement
+updated Codex.** With the rollout read, the old session was seen to finish
+its turn and the countdown ran. The replacement opened on Codex's startup
+"Update available … 1. Update now" menu. Without hooks, ready means drawn
+and then still for five seconds, which a menu is; the ack prompt was pasted
+and Enter pressed, Enter took the default, and Codex ran `npm install -g
+@openai/codex` (0.162.1 → 0.163.0, machine-wide), said "please restart" and
+exited. R3 did its part — `rollover.failed`, "replacement session exited or
+vanished", the old session untouched — but the paste has been going into
+whatever the new agent shows first since R0. A startup dialog is a menu
+whose default an Enter accepts: Codex's update prompt, and Claude's folder
+trust check, whose highlighted default is "No, exit". Not fixed yet; the
+choice of fix is open (recognise the input prompt before pasting, or start
+the replacement with those dialogs switched off).
