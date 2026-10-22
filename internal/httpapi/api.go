@@ -1404,8 +1404,18 @@ const interruptSkew = 5 * time.Second
 
 // readCodexLog says whether a pane's state should come from its Codex rollout:
 // a Codex, with no hook report for codexLogAfter.
-func readCodexLog(command string, lastHook, now time.Time) bool {
-	return command == "codex" && now.Sub(lastHook) > codexLogAfter
+//
+// A Codex installed by npm is a `#!/usr/bin/env node` script, so its pane
+// reports `node` and the native binary runs as that process's child. Matching
+// `codex` alone never read the rollout for one: with no hooks either, the
+// session said working forever, and a handoff -- automatic or the button --
+// waited for a turn to end that the panel could not see end (/dev,
+// 2026-10-22). `node` counts only for a session launched as codex; a node
+// typed into a shell is anything at all.
+func readCodexLog(command string, launch []string, lastHook, now time.Time) bool {
+	codex := command == "codex" ||
+		command == "node" && len(launch) > 0 && filepath.Base(launch[0]) == "codex"
+	return codex && now.Sub(lastHook) > codexLogAfter
 }
 
 // codexLogAfter is how long a Codex session has to go without a hook report
@@ -2722,7 +2732,7 @@ func (s *Server) pollOnce(ctx context.Context) error {
 		// on the poller, because finding the file walks /proc and reading it is
 		// disk I/O; the watcher reads only what was appended since the last
 		// tick.
-		if s.Detector != nil && readCodexLog(info.Command, s.Detector.LastHook(row.ID), now) {
+		if s.Detector != nil && readCodexLog(info.Command, row.LaunchCommand, s.Detector.LastHook(row.ID), now) {
 			if st, ok := s.codexLogs.State(row.ID, info.PID, now); ok {
 				s.Detector.ReportLog(row.ID, session.State(st.State), st.At)
 			}
