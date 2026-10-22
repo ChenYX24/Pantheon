@@ -27625,3 +27625,150 @@ executor passed `reason: "long"` for every handoff. A request that came from the
 button (`now`) is `manual` now, in the prompt and the report.
 
 Each of the three was removed in turn and its test failed.
+
+
+## 2026-10-22 — R3: the replacement confirms before release
+
+[Stage R §8](pantheon/stage-r-contract.md) records the 2026-10-20 failure:
+the old session had already ended when its replacement failed to become ready.
+The readiness repair makes the message reach an agent without hooks, but an
+end-first handoff still risks leaving no working copy. Non-memory rollovers
+with `resume: true` now save the handoff and scrollback, start the replacement,
+and wait for acknowledgement before the old session can be released. The
+memory and non-resuming paths keep E2's order and timing rules.
+
+The replacement receives §8's exact one-line prompt. Its own `handoff-ack`
+label, accepted unchanged by `PATCH /api/me/v1`, or a new standalone
+`HANDOFF-ACK` screen line confirms the handoff. The screen matcher uses the
+same ANSI/whitespace/bullet rules as `HANDOFF-DONE` and counts before versus
+after the prompt, so a prompt echo or an old marker is insufficient. The
+summary is the replacement's ordinary session summary; the audit keeps at most
+200 runes. No semantic assessment of that summary is claimed.
+
+Both manual and automatic requests publish paired views through the existing
+rollover snapshot. The old side names `newSessionId`; the replacement names
+`replaces`. Both are busy while verifying or retained, including to the
+memory governor. The trigger's attempt history survives success and failure
+and follows the replacement; a direct manual request joins it once as well.
+
+After acknowledgement, the old side has one fixed release deadline. Release
+means a fresh scrollback capture, the governor's prepared end against the live
+process, archive note, exit/done and execution report. A memory alert or the
+release action can end retention early. Keep, or input into the old session
+after acknowledgement, cancels release. The decision rechecks input and keep
+after reading SQLite/tmux: a keystroke during that read must not be followed by
+ending the session it was sent to. Replacement liveness is checked during
+retention too; an exit after acknowledgement still keeps the old session.
+
+Verification failure leaves the old session running and leaves a running replacement alone,
+publishes the old session's failure with its replacement link, audits the
+reason, and writes a cyx execution report with `needs_user: true`, the handoff
+path and both ids. There is no persistence or startup cleanup for pairings.
+Restarting during verification or retention leaves both sessions alive and
+ordinary, at the cost of an extra session until the person archives it.
+
+The handoff prompt now requests six required Markdown headings and invites
+关键文件与命令. Section repair applies to the R3 path: one follow-up names
+missing headings; if still incomplete, an appended `## Pantheon fallback`
+reuses the complete fallback's bounded scrollback/Git evidence. The agent's
+text is retained. No document still uses E2's complete fallback. The initial
+heading request changes on both paths, which is why the literal prompt in
+`TestRolloverRealInputAndResumeAdapter` was updated; its adapter assertions now
+also pin title and pin copying. Existing memory/non-resume order tests were
+left unchanged. The previous long/resume tests now supply an ack and assert
+the reversed order.
+
+The banner stays below the terminal header, including on a 320 px phone. It
+shows both sides of confirmation, the locally ticking release time, failure
+reason and replacement link. A sidebar replacement has an accessible ↻ mark.
+The selected old session switches once per pairing, with a toast whose actions
+send keep/release. Focused text entry, including the terminal textarea and
+compose boxes, suppresses the switch but still shows the toast. Action toasts
+stay until dismissed, acted on or the pairing ends; ordinary toast timing is
+unchanged. The older manual action component now rereads the result instead
+of calling a kept session done.
+
+Readings settled here, without changing §8: `verifying` starts as soon as the
+replacement row exists, including the unchanged readiness wait; a section
+follow-up gets the remainder of the original reply grace, not another full
+grace; keep/input wins over a pending release or memory-triggered release;
+`keepOldMinutes` is read at acknowledgement and later policy changes do not
+move that deadline. Capturing an unreadable replacement screen fails safely.
+The rollover POST remains synchronous through release or keep, as documented in
+`docs/api.md`.
+
+`web/scripts/rollover-check.mjs` now covers old verification, retention and both
+actions, new verification/summary, failure links, auto-switching once, toast
+requests and focus protection, plus those strip states in both languages and
+themes at 320/768/1200 px. It was written but not run on this shared host. No
+frontend bundle was built or committed, and no service was deployed; the
+Conductor owns the browser and /dev acceptance and the bundle build.
+
+
+Validation on the shared host was serial and at niceness 19. Every Go command
+used `GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1
+GOMEMLIMIT=600MiB`; no `go test ./...` was run. Exact commands after that
+environment prefix:
+
+```sh
+nice -n 19 go test -count=1 -json ./internal/rollover
+nice -n 19 go test -count=1 -json ./internal/pantheon/home
+nice -n 19 go test -count=1 -json ./internal/store
+nice -n 19 go test -count=1 -json ./internal/resources
+nice -n 19 go test -count=1 -json ./internal/httpapi -run 'Rollover|AutoRollover|Me|Snapshot|TypeScript|Route'
+nice -n 19 go test -count=1 -json ./internal/httpapi
+nice -n 19 go test -count=1 -json ./internal/httpapi -run '^TestEveryAuditEventIsAccountedFor$'
+```
+
+The first four passed: 14/54, 25/25, 141/206 and 40/40 respectively (top-level
+passes / passes including subtests). The final targeted HTTP run passed 85/278;
+the audit inventory passed 1/1. The one full HTTP run passed 547/866, skipped
+`TestElevatedUpgradeAgainstRealSudo`, and failed two tests:
+
+- `TestABellThatRangWhileThePumpWasDownIsSeen`: the known tmux 3.4 bell-latch
+  failure; unchanged here. The Conductor owns comparison against main.
+- `TestEveryAuditEventIsAccountedFor`: introduced here, then fixed. Building
+  audit names from `"rollover." + event` fooled the source inventory into
+  seeing the incomplete name `rollover.`. Callers now supply complete names;
+  the inventory scans the new helper and accounts for `rollover.handed_off`
+  and `rollover.released`. That test and the full targeted HTTP pattern passed
+  after repair. The full package was not repeated.
+
+The three safety mutations used these exact commands with the same Go
+environment. Removing the verification-error return made the first test fail
+with the old session ended and archived; removing the input guard did the same
+in the second (repeated after consolidating the final decision check); bypassing
+the ack condition made the third fail with `retention started without
+acknowledgement`. Each edit was restored before the next test. All three pass
+in the final targeted run.
+
+```sh
+nice -n 19 go test -count=1 ./internal/httpapi -run '^TestRolloverNoAckKeepsOldSessionAndReportsFailure$'
+nice -n 19 go test -count=1 ./internal/httpapi -run '^TestRolloverInputKeepsOldSession$'
+nice -n 19 go test -count=1 ./internal/httpapi -run '^TestRolloverAckIsRequiredBeforeRelease$'
+```
+
+Frontend commands ran from `web`, each with
+`NODE_OPTIONS=--max-old-space-size=900`, using the existing dependencies:
+
+```sh
+nice -n 19 npx tsc -b
+nice -n 19 npx eslint src/App.tsx src/components/AutoRolloverStrip.tsx src/components/AutoRolloverStrip.test.ts src/components/HandoffButton.tsx src/components/RolloverActions.tsx src/components/Sidebar.tsx src/components/ToastStack.tsx src/components/rollover.ts src/components/toasts.ts src/components/rolloverHandoff.ts src/components/rolloverHandoff.test.ts src/components/useRolloverHandoff.ts src/components/settings/AutoRolloverSettings.test.ts src/i18n.ts src/protocol/wire.ts scripts/rollover-check.mjs
+nice -n 19 npx eslint src/i18n.ts src/components/settings/AutoRolloverSettings.test.ts src/components/Sidebar.test.ts
+nice -n 19 npx vitest run --pool=forks --maxWorkers=1 src/components/AutoRolloverStrip.test.ts src/components/rolloverHandoff.test.ts src/components/RolloverActions.test.ts src/components/Sidebar.test.ts src/components/toasts.test.ts src/components/settings/AutoRolloverSettings.test.ts src/i18n.test.ts src/chrome-vocabulary.test.ts
+nice -n 19 npx vitest run --pool=forks --maxWorkers=1
+nice -n 19 npx vitest run --pool=forks --maxWorkers=1 src/components/AutoRolloverStrip.test.ts src/components/rolloverHandoff.test.ts src/components/RolloverActions.test.ts src/components/Sidebar.test.ts src/components/toasts.test.ts src/components/settings/AutoRolloverSettings.test.ts src/i18n.test.ts src/i18n.prose.test.ts src/chrome-vocabulary.test.ts
+```
+
+TypeScript passed, including a final run. ESLint had no errors and the three
+existing App warnings (two Fast Refresh exports and `setPaneLayout` as an
+effect dependency); the later lint of the changed copy/sidebar test was clean.
+The eight-file focused suite passed 65 tests. The full suite was run once:
+118 files, 1,141 passes and one failure in `src/i18n.prose.test.ts` (`says the
+thing and stops`). Two new explanations exceeded the dictionary's length
+budget. Their Chinese and English copy was shortened without relaxing the
+budget, and the final nine-file run, including that gate, passed all 68 tests.
+No second full Vitest run was made.
+
+These source checks cover implementation commit `24daefd`; the embedded frontend
+bundle is intentionally left for the Conductor to build.
