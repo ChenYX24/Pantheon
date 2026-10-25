@@ -62,7 +62,7 @@ def main():
         if current and str(current['pid']) != backend_pid:
             raise RuntimeError('An earlier dev backend still owns this port')
         ctl('start', TERMINALS)
-        tp, tg = unit_identity(TERMINALS, 768 * 1024**2, '75000 100000')
+        tp, tg = unit_identity(TERMINALS, 1024 * 1024**2, '75000 100000')
         ctl('restart' if action == 'restart' else 'start', BACKEND)
         bp, bg = unit_identity(BACKEND, 256 * 1024**2, '25000 100000')
         if tg == bg:
