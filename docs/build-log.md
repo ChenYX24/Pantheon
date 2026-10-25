@@ -27903,3 +27903,21 @@ Removing each part fails a test: `ready` ignoring the screen fails
 the reason without the screen fails
 `TestRolloverReplacementAtAMenuIsNotTypedInto`; the Codex numbered-item rule
 fails `TestWhatIsNotAnInputBox`.
+
+**On /dev (pantheon.10 = `893a647`).** The incident again, on purpose: a
+Codex session handed off with its update check on, so the replacement opened
+on "› 1. Update now". `rollover.failed` 60 seconds later with "new agent did
+not reach its input box within 60 seconds; it shows "› 1. Update now (runs
+`npm install -g @openai/codex`)"", nothing typed, the menu still on the
+replacement's screen, the old session untouched, and Codex still 0.163.0.
+
+A second run, with `-c check_for_update_on_startup=false` so the replacement
+would open at its box, failed for a different reason: memory. Claude Code's
+auto-updater, under the long-lived Claude session that lives in the same
+768 MB unit, ran `npm install -g @anthropic-ai/claude-code` (380 MB) during
+the handoff; the replacement Codex could not draw within the minute, and the
+reason had nothing to name because its screen was still empty. R3 failed it
+correctly. The kernel then killed the npm, and with `OOMPolicy=continue` the
+tmux server and the sessions lived. The killed install had left the machine
+without a `claude` on PATH until another update run reinstalled it. The
+release path (`keepOldMinutes`, *release*) is still untested on a real agent.
