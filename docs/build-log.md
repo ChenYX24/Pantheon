@@ -27921,3 +27921,21 @@ correctly. The kernel then killed the npm, and with `OOMPolicy=continue` the
 tmux server and the sessions lived. The killed install had left the machine
 without a `claude` on PATH until another update run reinstalled it. The
 release path (`keepOldMinutes`, *release*) is still untested on a real agent.
+
+**Release, on real agents (pantheon.10).** With the dev unit at 1 GiB and
+Codex at 0.164.0, so its first screen was its input box:
+
+- Codex, left alone after the ack: `rollover.handed_off` at 22:39:40,
+  `rollover.released` at 22:49:51 — `keepOldMinutes` plus one poll. The old
+  session was ended, archived with "rolled over → <handoff>", and its memory
+  came back (the unit's anonymous memory fell from 594 MB to 400 MB). The
+  replacement had already carried on with the next step.
+- Claude, released by hand: `handed_off` at 22:53:59, `release` posted at
+  22:54:46, `released` at 22:54:56. Nobody typed into the old session and it
+  was not kept, which is the half of the input fix the first run could not
+  show.
+
+Every row of contract §8's order has now happened on a real Claude or Codex:
+written, created, ready at the input box, confirmed by label, released at the
+deadline and on request, kept on input (the first run), failed with the old
+session intact (the menu, the empty screen, the dead tmux).
