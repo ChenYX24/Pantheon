@@ -238,7 +238,7 @@ func (s *Server) verifyRollover(ctx context.Context, h rolloverHooks, old, next 
 			break
 		}
 		if !h.now().Before(readyBy) {
-			return false, errors.New("new agent did not become ready within 60 seconds")
+			return false, notAtInputBox(ctx, h, next)
 		}
 		if err := h.wait(ctx, time.Second); err != nil {
 			return false, err

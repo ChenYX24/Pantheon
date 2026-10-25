@@ -18,6 +18,7 @@ import (
 	"github.com/jiangmuran/vibepanel/internal/id"
 	"github.com/jiangmuran/vibepanel/internal/pantheon/home"
 	"github.com/jiangmuran/vibepanel/internal/resources"
+	"github.com/jiangmuran/vibepanel/internal/rollover"
 	"github.com/jiangmuran/vibepanel/internal/session"
 	"github.com/jiangmuran/vibepanel/internal/store"
 	"github.com/jiangmuran/vibepanel/internal/sysmon"
@@ -59,6 +60,7 @@ type rolloverTerminal interface {
 	Paste(context.Context, string, string) error
 	Keys(context.Context, string, ...string) error
 	CaptureLines(context.Context, string, int) (string, error)
+	Screen(context.Context, string, bool) (string, error)
 	Create(context.Context, tmux.CreateOptions) error
 	ServerPID(context.Context) (int, error)
 }
@@ -291,7 +293,19 @@ func (s *Server) rolloverRuntime() rolloverHooks {
 			if !rolloverAgent(store.Session{Command: info.Command}) && info.Command != "node" {
 				return false, nil
 			}
-			return current.State == session.StateWaiting || current.State == session.StateDone || s.rolloverSettled(current, time.Now()), nil
+			if current.State != session.StateWaiting && current.State != session.StateDone && !s.rolloverSettled(current, time.Now()) {
+				return false, nil
+			}
+			// And at its own input box, because what follows is a paste and
+			// an Enter: a startup menu is still too, and takes the Enter as
+			// its default (rollover.AtInputBox). A capture that times out on a
+			// loaded host is "not yet", like the rest of this; the minute
+			// decides.
+			screen, err := s.rolloverTerminal().Screen(ctx, row.TmuxName, false)
+			if err != nil {
+				return false, nil
+			}
+			return rollover.AtInputBox(chat.AgentFor(current.LaunchCommand, info.Command), screen), nil
 		},
 		held: func(row store.Session) uint64 {
 			if s.Resources != nil {
@@ -565,7 +579,7 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 				break
 			}
 			if !h.now().Before(readyBy) {
-				return result, errors.New("new agent did not become ready within 60 seconds")
+				return result, notAtInputBox(ctx, h, next)
 			}
 			if err = h.wait(ctx, time.Second); err != nil {
 				return result, err
@@ -580,6 +594,17 @@ func (s *Server) runRollover(ctx context.Context, sid string, req rolloverReques
 	}
 	update("done")
 	return result, nil
+}
+
+// notAtInputBox is the failure for a replacement that was not ready within
+// the minute, naming what it showed instead. Nothing has been typed into it,
+// so whatever it is asking is still there for the person to answer.
+func notAtInputBox(ctx context.Context, h rolloverHooks, next store.Session) error {
+	text, _ := h.capture(ctx, next, 1)
+	if shows := rollover.Showing(handoffANSI.ReplaceAllString(text, "")); shows != "" {
+		return fmt.Errorf("new agent did not reach its input box within 60 seconds; it shows %q", shows)
+	}
+	return errors.New("new agent did not reach its input box within 60 seconds")
 }
 
 var handoffMarker = regexp.MustCompile(`(?m)^[ \t]*(?:[⏺●•>*][ \t]*)?HANDOFF-DONE[ \t]*\r?$`)

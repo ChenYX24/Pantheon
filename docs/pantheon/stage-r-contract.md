@@ -98,8 +98,12 @@ fallback, as before.
 **Order.**
 1. Handoff written and checked (above); the old session's scrollback saved.
 2. Replacement created: same project, directory, launch command, profile, account and size; title
-   and pin copied. Ready as before (a hook's waiting/done, or drawn and then still for 5 s; at most
-   60 s).
+   and pin copied. Ready as before (a hook's waiting/done, or drawn and then still for 5 s), and
+   also at the agent's own input box (`rollover.AtInputBox`); at most 60 s. A startup menu is
+   still too, and the paste's Enter is its answer: on /dev (2026-10-22) that was Codex's "Update
+   now". Not ready within the minute → **failed**, nothing typed into the replacement, and the
+   reason names what it shows (`rollover.Showing`: a menu's highlighted line, else its last line).
+   This is the only paste into a replacement, so it covers the memory path's message too.
 3. Ack prompt pasted into the replacement (below). Both sessions are now **verifying**.
 4. Ack seen → **handed_off**. Old session released after `keepOldMinutes`, or at once on *release*.
 5. No ack within **10 minutes** of the prompt, or the replacement exits or fails to start →

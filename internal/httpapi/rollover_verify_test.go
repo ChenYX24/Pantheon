@@ -316,6 +316,34 @@ func TestRolloverReplacementFailuresLeaveOldIntact(t *testing.T) {
 	}
 }
 
+// A replacement that opens on a menu is never typed into. The handoff fails
+// with the old session as it was, and the reason names the line an Enter
+// would have chosen, which is still on the new session's screen to answer.
+// On /dev that Enter was Codex's "Update now", run for the whole machine.
+func TestRolloverReplacementAtAMenuIsNotTypedInto(t *testing.T) {
+	s, row, h, steps := rolloverFixture(t)
+	h.ready = func(context.Context, store.Session) (bool, error) { return false, nil }
+	capture := h.capture
+	h.capture = func(ctx context.Context, r store.Session, n int) (string, error) {
+		if r.ID == "new" {
+			return "\x1b[1m  Update available · 0.163.0 → 0.164.0\x1b[0m\n\n" +
+				"› 1. Update now (runs `npm install -g @openai/codex`)\n  2. Skip\n\n  enter continue · esc skip\n", nil
+		}
+		return capture(ctx, r, n)
+	}
+	_, err := s.runRollover(context.Background(), row.ID, rolloverRequest{Reason: "long", Resume: true}, 0)
+	assertRolloverIntact(t, s, *steps)
+	for _, step := range *steps {
+		if strings.HasPrefix(step, "send:new:") {
+			t.Fatal("typed into a replacement that was not at its input box:", step)
+		}
+	}
+	a := rolloverAudit(t, s, "failed")
+	if reason, _ := a["reason"].(string); !strings.Contains(reason, "› 1. Update now") {
+		t.Fatalf("the reason does not say what the replacement shows: %v (err %v)", a, err)
+	}
+}
+
 func TestRolloverInputKeepsOldSession(t *testing.T) {
 	s, row, h, steps := rolloverFixture(t)
 	ackRolloverByLabel(t, s, h)

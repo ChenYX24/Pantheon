@@ -285,6 +285,7 @@ func TestRolloverRouteGuardsAndPolicyDefaults(t *testing.T) {
 
 type fakeRolloverTerminal struct {
 	info    tmux.Info
+	screen  string
 	steps   []string
 	options tmux.CreateOptions
 	create  func(tmux.CreateOptions) error
@@ -301,6 +302,9 @@ func (f *fakeRolloverTerminal) Keys(_ context.Context, name string, keys ...stri
 }
 func (f *fakeRolloverTerminal) CaptureLines(context.Context, string, int) (string, error) {
 	return "scrollback", nil
+}
+func (f *fakeRolloverTerminal) Screen(context.Context, string, bool) (string, error) {
+	return f.screen, nil
 }
 func (f *fakeRolloverTerminal) Create(_ context.Context, opt tmux.CreateOptions) error {
 	f.options = opt
@@ -363,6 +367,18 @@ func TestRolloverRealInputAndResumeAdapter(t *testing.T) {
 		t.Fatal("still drawing", ready, err)
 	}
 	s.Detector.Observe(next.ID, session.Signals{Visible: true}, time.Now().Add(-2*rolloverReadyQuiet))
+	// Drawn and still is true of a startup menu too, and the message that
+	// follows is a paste and an Enter: on /dev that Enter updated Codex for
+	// the whole machine. Excerpts of the real screens; internal/rollover has
+	// them whole.
+	codexIdle := "› Ask Codex to do anything\n\n  GPT-6-Astra max fast · ~/w\n  ? for shortcuts\n"
+	codexUpdate := "  Update available · 0.163.0 → 0.164.0\n\n› 1. Update now (runs `npm install -g @openai/codex`)\n" +
+		"  2. Skip\n  3. Skip until next version\n\n  enter continue · esc skip\n"
+	fake.screen = codexUpdate
+	if ready, err := h.ready(context.Background(), next); err != nil || ready {
+		t.Fatal("a startup menu read as ready", ready, err)
+	}
+	fake.screen = codexIdle
 	if ready, err := h.ready(context.Background(), next); err != nil || !ready {
 		t.Fatal("drawn and still", ready, err)
 	}
@@ -378,6 +394,11 @@ func TestRolloverRealInputAndResumeAdapter(t *testing.T) {
 	if ready, err := h.ready(context.Background(), next); err != nil || !ready {
 		t.Fatal(ready, err)
 	}
+	fake.screen = codexUpdate
+	if ready, err := h.ready(context.Background(), next); err != nil || ready {
+		t.Fatal("a hook's waiting at a startup menu read as ready", ready, err)
+	}
+	fake.screen = codexIdle
 	fake.info.Command = "bash"
 	if ready, err := h.ready(context.Background(), next); err != nil || ready {
 		t.Fatal("a shell is not a ready agent", ready, err)
