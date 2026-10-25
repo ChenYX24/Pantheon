@@ -27869,3 +27869,37 @@ whose default an Enter accepts: Codex's update prompt, and Claude's folder
 trust check, whose highlighted default is "No, exit". Not fixed yet; the
 choice of fix is open (recognise the input prompt before pasting, or start
 the replacement with those dialogs switched off).
+
+## 2026-10-25 — A replacement is typed into only at its input box
+
+The fix for the incident above, chosen by the person: recognise the agent's
+input box before pasting, and fail the handoff when it is not there, rather
+than switching the known dialogs off at launch. A list of dialogs covers the
+ones met so far; the next one — a login that expired, a changed trust prompt,
+a new "what's new" screen — would take the Enter the same way.
+
+`rollover.AtInputBox(agent, screen)` reads the visible screen (`tmux.Screen`,
+plain). Claude Code's prompt is a `❯` line with a full-width rule directly
+above and below it; its dialogs put text above their cursor line. Codex's is
+a `›` line with "? for shortcuts" (or "context left") somewhere below it; its
+menus have neither. Both agents draw their menu cursor with their prompt
+character, so a numbered item after the cursor (`❯ 1. Yes`, `› 1. Update
+now`) is never a prompt. `internal/rollover/testdata` holds the four real
+screens it was written against, captured on a throwaway tmux socket with the
+panel's configuration: Claude Code 2.1.310 idle and at its folder trust
+check, Codex 0.163.0 idle and at its update menu (0.164.0 had been released;
+nothing was pressed).
+
+`ready` now requires that box as well as the old conditions, and the minute
+runs out into `rollover.failed` with what the screen shows — the highlighted
+line of a menu, because that is what the Enter would have chosen — and
+nothing typed. The dialog is still on the replacement's screen for the person
+to answer. Strict on purpose: a box not recognised costs a handoff that
+fails with the old session running; a menu taken for a box costs whatever its
+default does.
+
+Removing each part fails a test: `ready` ignoring the screen fails
+`TestRolloverRealInputAndResumeAdapter` ("a startup menu read as ready");
+the reason without the screen fails
+`TestRolloverReplacementAtAMenuIsNotTypedInto`; the Codex numbered-item rule
+fails `TestWhatIsNotAnInputBox`.
