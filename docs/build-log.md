@@ -27939,3 +27939,50 @@ Every row of contract §8's order has now happened on a real Claude or Codex:
 written, created, ready at the input box, confirmed by label, released at the
 deadline and on request, kept on input (the first run), failed with the old
 session intact (the menu, the empty screen, the dead tmux).
+
+## 2026-10-26 — R3 on main, and in production with the automatic trigger off
+
+**The gate R4 set for itself: this work's own session hands off once.** The
+long-lived Claude session that had carried R3 was handed off on /dev
+(pantheon.10) with the button: due 01:32:51, countdown 01:33:07, and the
+replacement read the handoff, restated the next step and labelled itself
+`handoff-ack`, so `rollover.handed_off` at 01:35:33. Nobody typed into the old
+session, and `rollover.released` came at 01:45:43, `keepOldMinutes` plus one
+poll. No failure and no keep. The replacement is the session that merged the
+branch and wrote this entry.
+
+**Merged as `6176ba2`** (`--no-ff`; main had the dev unit's 1 GiB guard
+change beside it, which the branch does not touch). Before merging, the
+`Co-Authored-By` trailers this file's conventions forbid were removed from the
+nine commits that had them and had never been pushed (`48c88b2` and
+`4c106ad`–`ba48a98`). Only messages changed: each rewritten commit was compared
+with its original for tree, author and body. The originals are kept under
+`refs/backup/`. Pushed history is left as it is.
+
+`scripts/head-check.sh main` fails only `TestABellThatRangWhileThePumpWasDownIsSeen`,
+the known tmux 3.4 bell flake, which fails on main both before and after the merge;
+build, vet, every other package, `npm ci`, tsc, eslint, vitest and the
+committed bundle all pass. `make rollover-check` passes. It was last run before
+the three backend fixes, and the frontend has not changed since then.
+
+**Production: v1.30.0-pantheon.11, 2026-10-26 18:39.** It comes from pantheon.1
+(`8d94214`) and brings R1, R2, the button and R3. The schema is unchanged
+(`store.go` and `schema.sql` are identical to `8d94214`, still 42), so the
+rollback is the old binary alone. The deploy script still snapshots the
+database while the service is stopped, but a rollback does not restore it,
+because that would drop everything written since.
+
+The production database had no `rollover.auto.*` rows. Without them the new
+binary follows `DefaultPolicy`: automatic handoff on, at 70%, on the first
+poll after start. The first release was meant to offer the button and not the
+trigger, so while the service was stopped the deploy wrote
+`rollover.auto.enabled=false` with `INSERT OR IGNORE`, which keeps a value the
+owner has already chosen. That costs the button nothing: `Step` treats an
+explicit request as the person's decision and skips the switch, the
+per-session "never" and the daily cap, and `machine_test.go` pins both
+directions. The trigger is turned on at Settings → Resources → Auto rollover.
+
+The /dev trial behind this was R3 on /dev since 2026-10-22 and its last
+backend fix (pantheon.10) since 2026-10-25 21:58, about twenty-one hours
+before the deploy. That is short of the day R4 asked for. The owner decided
+to deploy anyway, with the automatic trigger off.

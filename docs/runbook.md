@@ -241,10 +241,14 @@ reloads them there.
 **Without hooks, on Linux**, a Codex session's state comes from its rollout file
 once no hook has reported for ten minutes. The panel finds it through
 `/proc/<pid>/fd` of the `codex` process under the pane, so it needs the panel
-and Codex to run as the same user. To see what it would find:
+and Codex to run as the same user. A Codex installed by npm shows as `node` in
+tmux. Its `codex` is a node script that starts the native binary as a child,
+so the panel reads the rollout for a `node` pane only when the session was
+launched as `codex`. To see what it would find:
 
 ```sh
-tmux -L vibepanel list-panes -a -F '#{pane_pid} #{pane_current_command}' | grep codex
+tmux -L vibepanel list-panes -a -F '#{pane_pid} #{pane_current_command}' | grep -E 'codex|node'
+pgrep -a codex                                  # the native process, under node for npm
 ls -l /proc/<pid>/fd | grep rollout
 ```
 
@@ -428,6 +432,44 @@ ss -tlnp | grep vibepanel                       # what it is actually bound to
 tmux -L vibepanel show-environment -t =vp_x: VIBEPANEL_URL   # what one session holds
 curl -sk "$(tmux -L vibepanel show-environment -t =vp_x: VIBEPANEL_URL | cut -d= -f2-)/api/health"
 ```
+
+## A session never hands off by itself, or a handoff failed
+
+**On this Pantheon deployment the automatic trigger starts off.** The R3
+deploy (v1.30.0-pantheon.11) wrote `rollover.auto.enabled=false` before the
+first start. A database with no `rollover.auto.*` rows follows the default
+policy, which is on at 70%, and the first release was meant to offer the
+button only. The header's Hand off button does not look at that switch, at a
+session's "never", or at the daily cap. It still waits for the session to be
+an agent at a turn boundary. To turn the trigger on, go to Settings →
+Resources → Auto rollover.
+
+```sh
+DB="file:$HOME/.local/share/vibepanel/vibepanel.db?mode=ro"
+sqlite3 -readonly "$DB" "select key, value from settings where key like 'rollover.auto.%'"
+sqlite3 -readonly "$DB" "select datetime(at,'unixepoch','localtime'), event, detail
+  from audit_log where event like 'rollover.%' order by id desc limit 10"
+```
+
+Read the events in order:
+
+- **`due` and no `countdown`**: the session has not reached a turn boundary.
+  A Codex without hooks only ever reaches one through its rollout file
+  (above), and one the panel cannot find says working forever.
+- **`failed`, "did not reach its input box within 60 seconds; it shows "…""**:
+  the replacement opened on a menu or a dialog, such as an update prompt or a
+  directory-trust question, and nothing was typed into it. The quoted line is
+  what was highlighted. Answer it in the replacement. The old session was not
+  touched.
+- **`failed` with no "it shows"**: the replacement never drew a screen. On this
+  machine that has been memory every time: a second agent and an
+  auto-updater's `npm install -g` at the same moment.
+- **`cancelled`, reason `input` or `keep`**: the old session was kept. Someone
+  typed or pasted into it, or pressed *keep*. Focus changes, query answers and
+  wheel reports do not count as input.
+- **`handed_off` and nothing after it**: release comes `keepOldMinutes` after
+  the ack. A restart in that window ends the pairing with both sessions alive
+  by design, and the old one is archived by hand.
 
 ## An upload fails with 413, or "a proxy in front of the panel refused"
 
