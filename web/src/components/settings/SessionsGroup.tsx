@@ -149,6 +149,26 @@ function HooksSection() {
             )
           })}
 
+          {/* Claude Code's limits come from its status line and nowhere else,
+              so this is a second switch for Claude rather than part of the
+              hooks: one status line per machine, which may be somebody's own,
+              and the panel never replaces that one. */}
+          {visibleHookAgents(status).includes('claude') && (
+            <AgentHooks
+              label={t('set.claudeQuota')}
+              value={status.claudeQuota === 'ours'
+                ? (status.claudeQuotaCurrent ? t('set.claudeQuotaOn') : t('set.claudeQuotaElsewhere'))
+                : status.claudeQuota === 'other' ? t('set.claudeQuotaTaken') : t('set.notInstalled')}
+              file={status.settingsPath}
+              installed={status.claudeQuota === 'ours'}
+              note={status.claudeQuota === 'other' ? t('set.claudeQuotaTakenWhy') : t('set.claudeQuotaWhy')}
+              busy={busy || status.claudeQuota === 'other'}
+              testid="claude-quota"
+              onInstall={() => void act(() => api.installHooks('claude-quota'))}
+              onRemove={() => void act(() => api.removeHooks('claude-quota'))}
+            />
+          )}
+
           <AgentsShown
             shown={status.agentsShown}
             status={status}
@@ -197,6 +217,9 @@ function HooksSection() {
                 // there is nothing to read before agreeing to it.
                 return text ? <Snippet key={id} label={hookAgentName(id)} text={text} /> : null
               })}
+              {visibleHookAgents(status).includes('claude') && status.claudeQuota !== 'other' && (
+                <Snippet label={t('set.claudeQuota')} text={status.claudeQuotaSnippet} />
+              )}
             </div>
           )}
         </div>

@@ -32,6 +32,9 @@ import type {
 import { TerminalView } from './components/Terminal'
 import { StateDot } from './components/StateDot'
 import { ContextMeter } from './components/ContextMeter'
+import { QuotaMeter } from './components/QuotaMeter'
+import { UpdateNotice } from './components/UpdateNotice'
+import { ownBundle } from './components/bundle'
 import { useRolloverHandoff } from './components/useRolloverHandoff'
 import { AutoRolloverStrip } from './components/AutoRolloverStrip'
 import { HandoffButton } from './components/HandoffButton'
@@ -112,6 +115,9 @@ const STATE_RESYNC_MS = 30_000
  */
 const PAGE_PROMPT_AFTER_MS = 3000
 
+// Read once, at load: it is the build this page is, and nothing changes it
+// short of loading another one.
+const OWN_BUNDLE = ownBundle()
 const SELECTED_KEY = 'vibepanel.selected'
 const SIDEBAR_KEY = 'vibepanel.sidebar'
 const BOTTOM_KEY = 'vibepanel.bottom'
@@ -311,6 +317,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
     live: [],
     context: {},
     rollover: {},
+    quota: {},
+    bundle: '',
     archived: [],
     fullscreen: [],
     frozen: [],
@@ -1572,6 +1580,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
               {/* Like latency, this stays out of the 320px phone header;
                   the drawer still carries each session's reading. */}
               {!narrow && <ContextMeter usage={state.context[current.id]} rollover={state.rollover[current.id]} />}
+              {!narrow && <QuotaMeter quota={state.quota[current.id]} />}
               {!narrow && latency && (
                 <span
                   data-testid="link-latency"
@@ -1778,6 +1787,8 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
             onDismiss={() => setDismissedAlert(resourceAlert.id)}
           />
         )}
+
+        <UpdateNotice served={state.bundle} own={OWN_BUNDLE} />
 
         {state.stale && (
           <div

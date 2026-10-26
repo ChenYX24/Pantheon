@@ -433,6 +433,8 @@ export class PanelSocket {
             live: st.live,
             context: st.context ?? {},
             rollover: st.rollover ?? {},
+            quota: st.quota ?? {},
+            bundle: st.bundle ?? '',
             archived: st.archived ?? [],
             fullscreen: st.fullscreen ?? [],
             frozen: st.frozen ?? [],

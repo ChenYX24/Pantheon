@@ -27986,3 +27986,101 @@ The /dev trial behind this was R3 on /dev since 2026-10-22 and its last
 backend fix (pantheon.10) since 2026-10-25 21:58, about twenty-one hours
 before the deploy. That is short of the day R4 asked for. The owner decided
 to deploy anyway, with the automatic trigger off.
+
+## 2026-10-27 — Subscription limits in the header, both handoff triggers in one place, and a page that knows it is old
+
+Three things from the first look at production after R3 went out.
+
+**"The handoff button and the context meter are missing."** They were not.
+The tab had been open since before the upgrade, and the page kept running
+pantheon.1's interface against pantheon.11's server. That interface had
+neither control. The served bundle had both (`按上下文用量自动交接` is in
+`index-CPtGAEua.js`), and a reload showed them. Nothing on the page could have
+said so. The snapshot now carries `bundle`, the entry script the embedded
+interface boots from (`webui.Entry`, read once from `dist/index.html`). The
+page compares it with the `<script>` its own document loaded, and when they
+differ it shows a notice with a reload button, never an automatic reload,
+because whoever is looking may be typing into a terminal. A release that
+changes nothing in `web/` keeps the hash and says nothing. Served from disk
+(`--static-dir`), `bundle` is empty: there the files change under a running
+panel on purpose.
+
+**"不止是内存吧"**: the Resources page made handing off look like a memory
+measure. The context trigger was one block above the allocation modes, and
+the memory trigger was inside them, under a heading about how much memory
+sessions get. Each was off screen while the other was being read. They are
+now one section, *Automatic handoff*, with *By context use* and *Under memory
+pressure* side by side. They remain two policies with two saves (the rollover
+machine's `settings/rollover` and the governor's `resources`), and the second
+says the system has no governor where there is none.
+
+**Subscription limits.** A chip beside the context meter shows what the
+session's account has used of its windows: `5h 12% · 7d 83%`. It turns amber
+from 80% and red from 95%, and the percentage is always the text (red line 4).
+
+- **Codex** writes `rate_limits` beside every `token_count`, in the rollout
+  the context meter already tails, so `ScanCodex` reads them in the same pass.
+  On this machine (0.164.0, Pro) there is one seven-day primary and a null
+  secondary, so windows are ordered by `window_minutes` and not by slot. Only
+  `limit_id` `"codex"` is read, because a model-specific bucket alternating
+  with it would make the figure jump. Limits arrive on the first
+  `token_count`, whose `info` is null, and a later count may carry context
+  without limits; each reading keeps the other's.
+- **Claude Code** reports limits in one place: the document it pipes to its
+  status line command. Its transcripts carry tokens only, and its hooks carry
+  neither. This was measured before anything was built, with a real Claude in
+  a throwaway tmux (`-L quota-probe`) given a status line through `--settings`
+  and `~/.claude/settings.json` left untouched. With the default login (API
+  billing), `rate_limits` never appears. With the panel's Max account it
+  appears after the first reply:
+  `{"five_hour":{"used_percentage":0,…},"seven_day":{"used_percentage":7,…}}`.
+  The environment reaches the command, so `VIBEPANEL_*` does too. A command
+  that prints nothing leaves the input box exactly as it was, which matters
+  because the rollover reads that box (`AtInputBox`). That screen is now
+  `testdata/claude-statusline.txt`.
+
+So the reporter has a `quota` arm, sent as a signal like `precompact`. It
+sends only documents containing `rate_limits`, at most one per fifteen seconds
+per session (a stamp file in `$XDG_RUNTIME_DIR`), in the background, and
+prints nothing: Claude Code runs it after every message, up to three times a
+second while a reply streams. The server reads two windows of checked numbers
+and stores nothing else from the document (red line 6). A document it cannot
+read gets a 204, so a status line has nothing to retry.
+
+Installing it is a switch on the Claude row of the state-reporting settings
+(`?agent=claude-quota`), not part of the hooks. There is one `statusLine` per
+machine and it may be somebody's own: install refuses with 409 when one is
+set, and remove only takes the panel's.
+
+Limits are kept per account (`quota.go`), because that is what a limit is:
+three Claude sessions on one login share one five-hour window. A Claude
+session's account is the panel's `claude_account_id`; a Codex session's is the
+`CODEX_HOME` its rollout was written under. Of two readings for one account
+the fresher wins, whichever the poller happened to read last. A reading
+outlives its session, so the next session on that login shows it before its
+first reply. A window past its reset is dropped by the page, which ticks, and
+not by the server, so the snapshot does not change on its own.
+
+The first run of the new `quota-check` found the poller unbinding every
+session it did not recognise as an agent on each tick. A report from a status
+line in such a session (a `claude` typed into a shell) disappeared two
+seconds after it arrived. Sessions are now unbound when they end, which
+`TestAReportOutlivesThePollButNotTheSession` pins.
+
+Seven mutations, each one fix removed, and each failed its test: the carried
+quota in `ScanCodex`, the freshness rule, unbinding by agent, the reporter's
+`rate_limits` filter, its fifteen-second throttle, the refusal to replace
+somebody's status line, and the range check on a percentage.
+
+**On /dev (pantheon.12-dev):** a throwaway session launched with the panel's
+status line through `--settings` and the Max account answered one word. Then
+`/api/state` carried `5h 0% · 7d 7%` for it, which matches the probe. The
+other session showed the same reading for a reason specific to the test: the
+throwaway was started with `CLAUDE_CONFIG_DIR` set by hand, so the panel filed
+it under the default account, and the other session is on that account too.
+Sessions the panel launches with an account carry its id.
+
+`make quota-check` is the browser half. It runs a real reporter inside a real
+session to the header chip in both themes, checks the handoff section fits the
+settings dialog at three widths, and serves a page an older entry script to
+show the notice, which goes away after a reload.

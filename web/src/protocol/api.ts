@@ -599,10 +599,10 @@ export const api = {
    */
   restartPanel: () => request<RestartResult>('/api/settings/restart', { method: 'POST' }),
 
-  installHooks: (agent: HookAgent = 'claude') =>
+  installHooks: (agent: HookAgent | 'claude-quota' = 'claude') =>
     request<HookStatus>(`/api/settings/hooks?agent=${agent}`, { method: 'POST' }),
 
-  removeHooks: (agent: HookAgent = 'claude') =>
+  removeHooks: (agent: HookAgent | 'claude-quota' = 'claude') =>
     request<HookStatus>(`/api/settings/hooks?agent=${agent}`, { method: 'DELETE' }),
 
   /** Which agents the reporting section offers. The server answers with the

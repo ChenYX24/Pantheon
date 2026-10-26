@@ -31,6 +31,11 @@ type Usage struct {
 	// the snapshot would be one more thing every open tab is sent a new copy
 	// of each time a turn ends.
 	TurnEnded bool `json:"-"`
+
+	// Quota is the subscription's windows from the same Codex token_count,
+	// nil when none has been read. Not serialised here: a quota belongs to an
+	// account, and the snapshot sends it per account, not once per session.
+	Quota *Quota `json:"-"`
 }
 
 var datedModel = regexp.MustCompile(`-\d{8}$`)
@@ -134,17 +139,24 @@ func ScanCodex(r io.Reader, last Usage) Usage {
 					} `json:"last_token_usage"`
 					Window int64 `json:"model_context_window"`
 				} `json:"info"`
+				Limits json.RawMessage `json:"rate_limits"`
 			} `json:"payload"`
 		}
-		if json.Unmarshal(line, &e) != nil || e.Type != "event_msg" || e.Payload.Type != "token_count" || e.Payload.Info == nil {
-			return
-		}
-		i := e.Payload.Info
-		if i.Last == nil || i.Last.Input < 0 || i.Window < 0 {
+		if json.Unmarshal(line, &e) != nil || e.Type != "event_msg" || e.Payload.Type != "token_count" {
 			return
 		}
 		at, _ := time.Parse(time.RFC3339Nano, e.Timestamp)
-		last = Usage{Used: i.Last.Input, Window: i.Window, Source: Codex, At: at}
+		// Limits arrive on token_counts whose info is null too (the first of a
+		// conversation), so they are read before the context gate below, and
+		// carried across the context readings that do not repeat them.
+		if q, ok := codexLimits(e.Payload.Limits, at); ok {
+			last.Quota = q
+		}
+		i := e.Payload.Info
+		if i == nil || i.Last == nil || i.Last.Input < 0 || i.Window < 0 {
+			return
+		}
+		last = Usage{Used: i.Last.Input, Window: i.Window, Source: Codex, At: at, Quota: last.Quota}
 	})
 	return last
 }

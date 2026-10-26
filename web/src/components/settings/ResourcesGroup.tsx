@@ -103,7 +103,7 @@ export function ResourcesGroup({ sessions, focus }: { sessions: Session[]; focus
   return (
     <div className="@container" data-testid="resources">
       <MemorySection view={view} />
-      <AutoRolloverSettings />
+      <HandoffSection view={view} onView={changed} />
       {view.supported && (
         <>
           <AllocationSection view={view} lang={lang} onView={changed} />
@@ -308,8 +308,6 @@ function AllocationSection({
         {shown.dynamic && <li>{t('res.summary.dynamic')}</li>}
       </ul>
 
-      <RolloverPolicyFields policy={view.policy} busy={busy} save={(p) => run(() => api.setResourcePolicy(p))} />
-
       {draft && (
         <CustomFields
           draft={draft}
@@ -354,13 +352,59 @@ function AllocationSection({
   )
 }
 
+/**
+ * Both ways a session hands off by itself, side by side.
+ *
+ * They were two blocks a screen apart: the context trigger above the
+ * allocation modes, and the memory trigger inside them, under a heading about
+ * how much memory sessions get. Reading the second, the first was off screen,
+ * and the page looked as though handing off were only a memory measure
+ * (「不止是内存吧」). They are still two policies with two saves -- one is the
+ * rollover machine's, the other the memory governor's -- and only the second
+ * exists where there is a governor.
+ */
+function HandoffSection({ view, onView }: { view: ResourcesView; onView: (next: ResourcesView) => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const save = async (p: ResourcePolicy) => {
+    setBusy(true)
+    setError(null)
+    try {
+      onView(await api.setResourcePolicy(p))
+      return true
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Section id="autorollover" title={t('autoRollover.title')}>
+      <div className="space-y-3">
+        <div className="rounded-vp border border-hairline p-3" data-testid="handoff-by-context">
+          <h4 className="mb-2 text-vp-sm font-semibold text-ink">{t('autoRollover.byContext')}</h4>
+          <AutoRolloverSettings />
+        </div>
+        <div className="rounded-vp border border-hairline p-3" data-testid="handoff-by-memory">
+          <h4 className="mb-2 text-vp-sm font-semibold text-ink">{t('autoRollover.byMemory')}</h4>
+          {view.supported
+            ? <RolloverPolicyFields policy={view.policy} busy={busy} save={save} />
+            : <p className="text-vp-sm text-ink-2">{t('res.unsupported')}</p>}
+          {error && <p role="alert" className="mt-2 text-vp-sm text-state-crashed">{safeText(error)}</p>}
+        </div>
+      </div>
+    </Section>
+  )
+}
+
 function RolloverPolicyFields({ policy, busy, save }: { policy: ResourcePolicy; busy: boolean; save: (p: ResourcePolicy) => Promise<boolean> }) {
   type Fields = Pick<ResourcePolicy, 'rollover' | 'idleMinutes' | 'rolloverGraceSeconds' | 'autoResume'>
   const [draft, setDraft] = useState<Fields | null>(null)
   const p = { ...policy, ...draft }
   const edit = (next: Partial<Fields>) => setDraft({ rollover: p.rollover, idleMinutes: p.idleMinutes, rolloverGraceSeconds: p.rolloverGraceSeconds, autoResume: p.autoResume, ...next })
   const valid = Number.isInteger(p.idleMinutes) && p.idleMinutes >= 0 && p.idleMinutes <= 1440 && Number.isInteger(p.rolloverGraceSeconds) && p.rolloverGraceSeconds >= 1 && p.rolloverGraceSeconds <= 1800
-  return <div className="mt-3 space-y-2 rounded-vp border border-hairline p-3" data-testid="resources-rollover">
+  return <div className="space-y-2" data-testid="resources-rollover">
     <label className={FIELD_ROW}>{t('rollover.policy.enabled')}<input type="checkbox" disabled={busy} checked={p.rollover} onChange={(e) => edit({ rollover: e.target.checked })} /></label>
     <label className={FIELD_ROW}>{t('rollover.policy.idle')}<input className={FIELD} type="number" min={0} max={1440} disabled={busy} value={Number.isFinite(p.idleMinutes) ? p.idleMinutes : ''} onChange={(e) => edit({ idleMinutes: e.target.valueAsNumber })} /></label>
     <label className={FIELD_ROW}>{t('rollover.policy.grace')}<input className={FIELD} type="number" min={1} max={1800} disabled={busy} value={Number.isFinite(p.rolloverGraceSeconds) ? p.rolloverGraceSeconds : ''} onChange={(e) => edit({ rolloverGraceSeconds: e.target.valueAsNumber })} /></label>

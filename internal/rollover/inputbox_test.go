@@ -25,6 +25,10 @@ func TestAnInputBoxIsRecognisedOnTheRealScreens(t *testing.T) {
 		showing     string
 	}{
 		{"claude", "claude-idle", true, ""},
+		// With the panel's status line named in settings.json (2.1.310, a
+		// Max login, after a reply): it prints nothing, and the box keeps
+		// its shape. This is what the limits reporter must not break.
+		{"claude", "claude-statusline", true, ""},
 		{"claude", "claude-trust", false, "❯ No, exit"},
 		{"codex", "codex-idle", true, ""},
 		{"codex", "codex-update", false, "› 1. Update now (runs `npm install -g @openai/codex`)"},

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/jiangmuran/vibepanel/internal/tz"
 	"net/http"
 	"os"
@@ -472,6 +473,12 @@ func hookAgent(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if agent == "" {
 		return "claude", true
 	}
+	// Claude Code's status line, which reports its limits. Not in hookAgents:
+	// that list is the reporting rows somebody can show or hide, and this is a
+	// second switch on the Claude row rather than an agent of its own.
+	if agent == "claude-quota" {
+		return agent, true
+	}
 	if !isHookAgent(agent) {
 		writeErr(w, http.StatusBadRequest,
 			"unknown agent "+agent+"; want "+strings.Join(hookAgents, ", "))
@@ -508,8 +515,14 @@ func (s *Server) handleHooksInstall(w http.ResponseWriter, r *http.Request) {
 		if err = hooks.InstallOpencode(); err == nil {
 			st, err = hooks.Inspect(script)
 		}
+	case "claude-quota":
+		st, err = hooks.InstallClaudeQuota(script)
 	default:
 		st, err = hooks.InstallClaude(script)
+	}
+	if errors.Is(err, hooks.ErrStatusLineTaken) {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
 	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
@@ -548,6 +561,8 @@ func (s *Server) handleHooksUninstall(w http.ResponseWriter, r *http.Request) {
 		if err = hooks.UninstallOpencode(); err == nil {
 			st, err = hooks.Inspect(script)
 		}
+	case "claude-quota":
+		st, err = hooks.UninstallClaudeQuota(script)
 	default:
 		st, err = hooks.UninstallClaude(script)
 	}

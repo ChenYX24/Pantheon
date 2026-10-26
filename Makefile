@@ -71,6 +71,10 @@ first-run-check: build ## The setup wizard and the first project, in a browser
 archive-check: build  ## Archiving a project: the sidebar, the list, the picker, a phone
 	cd web && npm run check:archive
 
+.PHONY: quota-check
+quota-check: build    ## Subscription limits from a status line to the header, the handoff settings, a page older than its panel
+	cd web && npm run check:quota
+
 .PHONY: render-check
 render-check: build   ## Drive the real binary with a real browser
 	cd web && npm run check:render

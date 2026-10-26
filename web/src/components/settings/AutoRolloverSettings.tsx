@@ -3,7 +3,6 @@ import type { AutoRolloverPolicy } from '../../protocol/wire'
 import { api } from '../../protocol/api'
 import { t, useLang } from '../../i18n'
 import { safeText } from '../text'
-import { Section } from './parts'
 import { autoRolloverLimits, validAutoRolloverPolicy } from '../rollover'
 
 export function AutoRolloverFields({ policy, busy, onChange }: {
@@ -27,6 +26,9 @@ export function AutoRolloverFields({ policy, busy, onChange }: {
   </div>
 }
 
+/** The context trigger, loaded and saved on its own: it is a different
+ *  policy from the memory trigger beside it (settings/rollover, not
+ *  resources), and the section that holds both is ResourcesGroup's. */
 export function AutoRolloverSettings() {
   useLang()
   const [policy, setPolicy] = useState<AutoRolloverPolicy | null>(null)
@@ -48,10 +50,10 @@ export function AutoRolloverSettings() {
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
-  return <Section id="autorollover" title={t('autoRollover.title')}>
+  return <div>
     {policy && <AutoRolloverFields policy={policy} busy={busy} onChange={(p) => { setPolicy(p); setDirty(true) }} />}
     {error && <p role="alert" className="text-vp-sm text-state-crashed">{safeText(error)}</p>}
     {policy && dirty && !validAutoRolloverPolicy(policy) && <p role="alert" className="text-vp-sm text-state-waiting">{t('autoRollover.outOfRange')}</p>}
     {policy && dirty && <button type="button" className="vp-control mt-3" disabled={busy || !validAutoRolloverPolicy(policy)} onClick={() => void save()}>{t('res.save')}</button>}
-  </Section>
+  </div>
 }

@@ -309,3 +309,20 @@ func TestAnImageIsNeverCompressed(t *testing.T) {
 		t.Errorf("png encoded: %v len %d", rec.Header(), rec.Body.Len())
 	}
 }
+
+// The snapshot names the build by this, and a page compares it with the
+// script it booted from; a pattern that stopped matching would say nothing
+// and the update notice would never show.
+func TestEntryNamesTheScriptTheEmbeddedIndexLoads(t *testing.T) {
+	if !Built() {
+		t.Skip("no frontend embedded")
+	}
+	b, err := dist.ReadFile("dist/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := Entry()
+	if e == "" || !strings.HasPrefix(e, "index-") || !strings.Contains(string(b), `src="/assets/`+e+`"`) {
+		t.Fatalf("entry %q", e)
+	}
+}

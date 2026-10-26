@@ -171,7 +171,9 @@ const DICT = {
   'rollover.alert': { zh: '正在交接 {title}', en: 'Handing off {title}' },
   'rollover.countdown': { zh: '最多再等待 {n} 秒', en: 'Up to {n}s remaining' },
   'rollover.open': { zh: '打开新会话', en: 'Open fresh session' },
-  'autoRollover.title': { zh: '自动换会话', en: 'Auto rollover' },
+  'autoRollover.title': { zh: '自动交接', en: 'Automatic handoff' },
+  'autoRollover.byContext': { zh: '按上下文用量', en: 'By context use' },
+  'autoRollover.byMemory': { zh: '内存不足时', en: 'Under memory pressure' },
   'autoRollover.enabled': { zh: '按上下文用量自动交接', en: 'Automatically hand off by context use' },
   'autoRollover.explain': { zh: '达到阈值后，等本轮结束、停止输入且无草稿，再倒计时交接。', en: 'Wait for the turn to finish, input to stop and drafts to clear before starting the handoff countdown.' },
   'autoRollover.thresholdPct': { zh: '上下文阈值（%）', en: 'Context threshold (%)' },
@@ -759,6 +761,10 @@ const DICT = {
   'app.gridSize': { zh: '所有观看端看到的网格', en: 'The grid every viewer of this session is seeing' },
   'app.linkLatency': { zh: '{ms} 毫秒', en: '{ms} ms' },
   'context.label': { zh: '上下文', en: 'Context' },
+  'quota.title': { zh: '{agent} 订阅额度', en: '{agent} subscription limits' },
+  'quota.resets': { zh: '{time} 重置', en: 'resets {time}' },
+  'app.updated': { zh: '面板已更新，这个页面还是旧版本。', en: 'The panel has been updated; this page is still the old version.' },
+  'app.reload': { zh: '刷新', en: 'Reload' },
   'app.linkLatencyWhy': {
     zh: '此浏览器到面板的往返延迟，包含代理；数值越高，打字越慢。',
     en: 'Round trip from this browser to the panel, including the proxy. Higher values make typing lag.',
@@ -1747,6 +1753,12 @@ const DICT = {
   'set.codex': { zh: 'Codex', en: 'Codex' },
   'set.settingsFile': { zh: '配置文件', en: 'Settings file' },
   'set.notInstalled': { zh: '未安装', en: 'not installed' },
+  'set.claudeQuota': { zh: 'Claude 额度（状态栏）', en: 'Claude limits (status line)' },
+  'set.claudeQuotaOn': { zh: '已安装', en: 'installed' },
+  'set.claudeQuotaElsewhere': { zh: '已安装，脚本在另一个数据目录', en: 'installed, calling a script in another data directory' },
+  'set.claudeQuotaTaken': { zh: '已有你自己的状态栏', en: 'a status line of your own is set' },
+  'set.claudeQuotaWhy': { zh: '从状态栏读取订阅的 5 小时和 7 天额度，显示在会话页头。', en: 'Reads the 5-hour and 7-day subscription limits from the status line into the session header.' },
+  'set.claudeQuotaTakenWhy': { zh: '面板不会替换你自己的状态栏。', en: 'The panel will not replace a status line of your own.' },
 
   // Claude Code's own settings, beyond the state-reporting hooks. The
   // per-key descriptions are NOT here: they arrive with the rows from

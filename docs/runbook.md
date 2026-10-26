@@ -433,6 +433,56 @@ tmux -L vibepanel show-environment -t =vp_x: VIBEPANEL_URL   # what one session 
 curl -sk "$(tmux -L vibepanel show-environment -t =vp_x: VIBEPANEL_URL | cut -d= -f2-)/api/health"
 ```
 
+## The limits chip is missing from the session header
+
+The chip beside the context meter shows what the session's account has used of
+its subscription's windows (`5h 12% · 7d 83%`). An absent chip means no reading
+for that account, and each agent has one way to provide it.
+
+**Claude Code** reports limits only to its status line. Settings → Sessions →
+state reporting has a "Claude limits (status line)" row:
+
+- *not installed*: press install. The panel names its reporter as
+  `statusLine` in `~/.claude/settings.json` (backed up first). A session
+  started afterwards reports after its first reply. Whether a session that
+  was already running picks the line up without a restart has not been
+  measured; if its chip never appears, restart it.
+- *a status line of your own is set*: the panel will not replace it. Remove
+  yours, or have it also run `<data dir>/hooks/vibepanel-report.sh quota`
+  with the same stdin.
+- *installed* and still nothing: the login is API-billed. Claude Code sends
+  `rate_limits` only for a subscription, and only after the first reply. The
+  welcome line says which login a session uses: `Claude Max` or `Claude Pro`
+  has limits; `API Usage Billing` does not.
+
+Check what arrived:
+
+```sh
+curl -s -H "Authorization: Bearer $(cat ~/.local/share/vibepanel/cli.token)" \
+  http://127.0.0.1:18443/api/state | python3 -c 'import json,sys; print(json.load(sys.stdin)["quota"])'
+ls "${XDG_RUNTIME_DIR:-/tmp}"/vibepanel-quota-*   # one per session that reported
+```
+
+The stamp files hold the time of the last report, and the reporter sends at
+most one every fifteen seconds. Deleting them is harmless.
+
+**Codex** writes its limits beside every `token_count` in its rollout, so
+nothing needs installing. When the chip is missing for a Codex session, the
+panel has not found that session's rollout, and the context meter will be
+missing too. See "Codex sessions never report their state" above.
+
+A chip that shows a figure and then disappears means the window reset: a
+reading past its `resetsAt` is left out until the agent reports again.
+
+## The page says the panel has been updated
+
+The page is running the interface it loaded before the panel was upgraded.
+Everything new in the release is missing from it, including new buttons and
+meters, until it is reloaded. Press reload. Nothing is lost: sessions live in
+tmux, and the page reconnects to the same ones. The notice appears only when
+the embedded interface changed. A release that changed only the backend keeps
+the same entry script and says nothing.
+
 ## A session never hands off by itself, or a handoff failed
 
 **On this Pantheon deployment the automatic trigger starts off.** The R3

@@ -46,14 +46,27 @@ func (s *Server) refreshContexts(ctx context.Context, rows []store.Session, pane
 	}
 	ids, pids := []string{}, []int{}
 	keep := map[string]bool{}
+	// Every running session, agent or not, for the limits. A status line
+	// reports for whatever session it runs in, and a claude typed into a
+	// shell is not one the poller recognises: unbinding by keep dropped such
+	// a report on the next tick, two seconds after it arrived.
+	running := map[string]bool{}
 	for _, row := range rows {
 		pane, live := panes[row.TmuxName]
+		if live && !pane.Dead && !row.Scratch {
+			running[row.ID] = true
+		}
 		agent := chat.AgentFor(row.LaunchCommand, pane.Command)
 		if !live || pane.Dead || pane.PID <= 0 || row.Scratch || (agent != "claude" && agent != "codex") {
 			continue
 		}
 		ids, pids = append(ids, row.ID), append(pids, pane.PID)
 		keep[row.ID] = true
+		if agent == "claude" {
+			// Bound before the 15-second gate: the status line reports the
+			// moment a reply lands, and an unbound session would drop it.
+			s.quotas.bind(row.ID, claudeAccount(row))
+		}
 		e := m.entries[row.ID]
 		if e == nil || e.pid != pane.PID || e.agent != agent {
 			e = &contextEntry{pid: pane.PID, agent: agent}
@@ -88,9 +101,17 @@ func (s *Server) refreshContexts(ctx context.Context, rows []store.Session, pane
 		}
 		u, ok := m.watcher.Read(row.ID, e.path, source, now)
 		m.publish(row.ID, u, ok)
+		// u, not ok: the first token_count of a conversation carries limits
+		// and no context yet, and the limits are worth showing on their own.
+		if source == agentctx.Codex && e.path != "" && u.Quota != nil {
+			account := codexAccount(e.path)
+			s.quotas.bind(row.ID, account)
+			s.quotas.observe(account, *u.Quota, u.Quota.At)
+		}
 	}
 	m.watcher.Retain(ids)
 	m.claude.Retain(pids)
+	s.quotas.forget(running)
 	for id := range m.entries {
 		if !keep[id] {
 			delete(m.entries, id)

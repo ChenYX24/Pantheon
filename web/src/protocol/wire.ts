@@ -305,12 +305,39 @@ export interface ContextUsage {
   at: string
 }
 
+/** One rolling window of a subscription. */
+export interface QuotaLimit {
+  /** 300 is five hours, 10080 seven days. */
+  minutes: number
+  /** Whole percent; over 100 once a spend limit is exceeded. */
+  used: number
+  /** Unix seconds, 0 when unknown. A window past its reset is no longer
+   *  current, and the page leaves it out. */
+  resetsAt: number
+}
+
+/** What a session's account has used of its subscription. */
+export interface AgentQuota {
+  limits: QuotaLimit[]
+  /** Codex's plan name; Claude Code does not say. */
+  plan: string
+  source: 'claude-statusline' | 'codex-rollout'
+  /** RFC 3339 time the figures last changed. */
+  at: string
+}
+
 export interface PanelState {
   projects: Project[]
   sessions: Session[]
   live: string[]
   /** Latest context input, rounded to 1,000 tokens. Absent sessions are unknown. */
   context: Record<string, ContextUsage>
+  /** Each session's account's limits. Absent sessions' agents have not said:
+   *  an API-billed login never does, and a subscription only after a reply. */
+  quota: Record<string, AgentQuota>
+  /** The script the server's embedded interface boots from; '' when it is
+   *  served from disk. Different from this page's own means a newer panel. */
+  bundle: string
   /** Absent session ids are ok; endsAt is a fixed Unix millisecond deadline. */
   rollover: Record<string, AutoRollover>
   /** Projects not in the sidebar, most recently archived first. */
@@ -936,6 +963,12 @@ export interface HookStatus {
   opencodePath: string
   /** Whether the plugin in place is this build's, not merely that one exists. */
   opencodeInstalled: boolean
+  /** Whose status line ~/.claude/settings.json names: '' none, 'ours' the
+   *  panel's limits reporter, 'other' somebody's own, which is never replaced. */
+  claudeQuota: '' | 'ours' | 'other'
+  /** Ours, and calling this script at this path. */
+  claudeQuotaCurrent: boolean
+  claudeQuotaSnippet: string
 }
 
 /** A credential a program uses instead of the session cookie. */
