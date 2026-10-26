@@ -1,9 +1,9 @@
-import { useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react'
 
 import { t, useLang } from '../i18n'
 import { safeText } from './text'
-import { dismissToast, subscribeToasts, toastsSnapshot, type ToastKind } from './toasts'
+import { dismissToast, subscribeToasts, toastsSnapshot, type ToastKind, type Toast } from './toasts'
 
 /**
  * Shape first, colour second.
@@ -81,6 +81,7 @@ export function ToastStack({ narrow }: { narrow: boolean }) {
               {toast.detail && (
                 <span className="block text-ink-2">{safeText(toast.detail)}</span>
               )}
+              {toast.actions && <ToastActions toast={toast} />}
               {toast.progress !== undefined && (
                 <span
                   data-testid="toast-progress"
@@ -137,4 +138,20 @@ export function ToastStack({ narrow }: { narrow: boolean }) {
   return (
     <div className="pointer-events-none relative z-[60] h-0 shrink-0">{stack}</div>
   )
+}
+
+function ToastActions({ toast }: { toast: Toast }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const run = async (action: NonNullable<Toast['actions']>[number]) => {
+    setBusy(true)
+    setError('')
+    try { await action.run(); dismissToast(toast.id) }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  return <span className="mt-1 flex flex-wrap gap-1">
+    {toast.actions?.map((action) => <button key={action.key} type="button" className="vp-control" disabled={busy} onClick={() => void run(action)}>{t(action.key)}</button>)}
+    {error && <span role="alert" className="w-full break-words text-state-crashed">{safeText(error)}</span>}
+  </span>
 }

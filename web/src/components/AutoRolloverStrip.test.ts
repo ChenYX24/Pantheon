@@ -58,11 +58,11 @@ describe('automatic rollover strip', () => {
     expect(html).not.toContain('Hand off now')
   })
 
-  it('reports handoff and failure without promising the old session survived', () => {
+  it('reports handoff and the failed confirmation reason', () => {
     setLang('en')
     expect(render({ state: 'handing_off', pct: 72 })).toContain('Saving the handoff')
-    const failed = render({ state: 'failed', pct: 72 })
-    expect(failed).toContain('Check the session rollover status')
+    const failed = render({ state: 'failed', pct: 72, reason: 'ack timed out' })
+    expect(failed).toContain('Handoff not confirmed: ack timed out')
     expect(failed).toContain('lucide-triangle-alert')
   })
 
@@ -70,4 +70,26 @@ describe('automatic rollover strip', () => {
     expect(rolloverSeconds(30_000, 2_001)).toBe(28)
     expect(rolloverSeconds(30_000, 30_001)).toBe(0)
   })
+})
+
+it.each(['zh', 'en'] as const)('renders both sides of confirmation and release in %s', (lang) => {
+  setLang(lang)
+  const show = (status: AutoRollover) => renderToStaticMarkup(createElement(AutoRolloverStrip, { sessionId: 'old', status, summary: 'Run the next check', onSelect: () => {} }))
+  const verifying = show({ state: 'verifying', pct: 72, newSessionId: 'new' })
+  expect(verifying).toContain('↻')
+  expect(verifying).toContain(lang === 'zh' ? '新会话正在确认交接' : 'The new session is confirming')
+  expect(verifying).toContain(lang === 'zh' ? '打开新会话' : 'Open fresh session')
+  const handed = show({ state: 'handed_off', pct: 72, newSessionId: 'new', endsAt: Date.now() + 61_000 })
+  expect(handed).toContain('1:01')
+  expect(handed).toContain(lang === 'zh' ? '保留旧会话' : 'Keep old session')
+  expect(handed).toContain(lang === 'zh' ? '立即释放' : 'Release now')
+  const receiving = show({ state: 'verifying', pct: 0, replaces: 'old' })
+  expect(receiving).toContain(lang === 'zh' ? '正在接手' : 'Taking over')
+  expect(receiving).not.toContain('<button')
+  const confirmed = show({ state: 'confirmed', pct: 0, replaces: 'old' })
+  expect(confirmed).toContain('Run the next check')
+  expect(confirmed).not.toContain('<button')
+  const failed = show({ state: 'failed', pct: 72, newSessionId: 'new', reason: 'no ack' })
+  expect(failed).toContain('no ack')
+  expect(failed).toContain(lang === 'zh' ? '打开新会话' : 'Open fresh session')
 })

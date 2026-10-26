@@ -84,12 +84,15 @@ func rolloverFixture(t *testing.T) (*Server, store.Session, *rolloverHooks, *[]s
 func TestRolloverFallbackArchiveReportAndResume(t *testing.T) {
 	s, row, h, steps := rolloverFixture(t)
 	base := homeFixture(t, s)
+	ackRolloverByLabel(t, s, h)
 	started := h.now()
 	w := homeRequest(t, s, "POST", "/api/sessions/agent/rollover", `{"reason":"long","resume":true}`, true)
 	result := homeDecode[rolloverStatus](t, w, 200)
 	if result.NewSessionID != "new" {
 		t.Fatal(result)
 	}
+	// The request answers once the replacement exists; the release follows.
+	waitRolloverState(t, s, row.ID, "done")
 	if !strings.HasPrefix(result.Handoff, filepath.Join(base, "agent-docs", "handoffs")) {
 		t.Fatal(result.Handoff)
 	}
@@ -102,8 +105,8 @@ func TestRolloverFallbackArchiveReportAndResume(t *testing.T) {
 			t.Errorf("fallback missing %q", want)
 		}
 	}
-	if h.now().Sub(started) != 8*time.Second {
-		t.Fatal("grace", h.now().Sub(started))
+	if h.now().Sub(started) != 8*time.Second+10*time.Minute {
+		t.Fatal("grace and retention", h.now().Sub(started))
 	}
 	archived, err := s.DB.GetSession(context.Background(), row.ID)
 	if err != nil {
@@ -122,7 +125,7 @@ func TestRolloverFallbackArchiveReportAndResume(t *testing.T) {
 			t.Errorf("report missing %q: %s", want, report)
 		}
 	}
-	if len(*steps) != 5 || (*steps)[1] != "end" || (*steps)[2] != "create:codex:profile" || (*steps)[3] != "ready" || (*steps)[4] != "send:new:请先阅读交接文档 "+result.Handoff+"，确认理解后从“下一步”继续。" {
+	if len(*steps) != 5 || (*steps)[1] != "create:codex:profile" || (*steps)[2] != "ready" || (*steps)[3] != "send:new:"+handoffAckPrompt(result.Handoff) || (*steps)[4] != "end" {
 		t.Fatal(*steps)
 	}
 	// The agent is asked for a draft in its own workspace; the resumed session
@@ -282,6 +285,7 @@ func TestRolloverRouteGuardsAndPolicyDefaults(t *testing.T) {
 
 type fakeRolloverTerminal struct {
 	info    tmux.Info
+	screen  string
 	steps   []string
 	options tmux.CreateOptions
 	create  func(tmux.CreateOptions) error
@@ -299,6 +303,9 @@ func (f *fakeRolloverTerminal) Keys(_ context.Context, name string, keys ...stri
 func (f *fakeRolloverTerminal) CaptureLines(context.Context, string, int) (string, error) {
 	return "scrollback", nil
 }
+func (f *fakeRolloverTerminal) Screen(context.Context, string, bool) (string, error) {
+	return f.screen, nil
+}
 func (f *fakeRolloverTerminal) Create(_ context.Context, opt tmux.CreateOptions) error {
 	f.options = opt
 	if f.create != nil {
@@ -313,11 +320,12 @@ func (f *fakeRolloverTerminal) ServerPID(context.Context) (int, error) {
 func TestRolloverRealInputAndResumeAdapter(t *testing.T) {
 	s, row, _, _ := rolloverFixture(t)
 	s.rollovers.hooks = nil
+	row.Pinned = true
 	fake := &fakeRolloverTerminal{info: tmux.Info{Command: "codex"}}
 	s.rollovers.terminal = fake
 	h := s.rolloverRuntime()
 	message := handoffPrompt("memory", "/handoff.md")
-	want := "[Pantheon] 需要结束本会话（原因：内存不足）。请立即把当前工作写成交接文档，保存到 /handoff.md，包含：目标、已完成、未完成、关键文件与命令、下一步、注意事项。写完后只回复 HANDOFF-DONE，不要做别的事。"
+	want := "[Pantheon] 需要结束本会话（原因：内存不足）。请立即把当前工作写成交接文档，保存到 /handoff.md，使用 Markdown 标题：目标、已完成、未完成、关键文件与命令（可选）、下一步、验证命令、禁止事项。写完后只回复 HANDOFF-DONE，不要做别的事。"
 	if message != want {
 		t.Fatal(message)
 	}
@@ -340,7 +348,7 @@ func TestRolloverRealInputAndResumeAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.ID == row.ID || next.ProjectID != row.ProjectID || next.LaunchProfileID != row.LaunchProfileID || strings.Join(fake.options.Command, " ") != "codex" || fake.options.Dir != row.CWD {
+	if !next.Pinned || next.Title != row.Title || next.ID == row.ID || next.ProjectID != row.ProjectID || next.LaunchProfileID != row.LaunchProfileID || strings.Join(fake.options.Command, " ") != "codex" || fake.options.Dir != row.CWD {
 		t.Fatal(next, fake.options)
 	}
 	// A pane's existence alone is not readiness; the detector must see a prompt.
@@ -359,6 +367,18 @@ func TestRolloverRealInputAndResumeAdapter(t *testing.T) {
 		t.Fatal("still drawing", ready, err)
 	}
 	s.Detector.Observe(next.ID, session.Signals{Visible: true}, time.Now().Add(-2*rolloverReadyQuiet))
+	// Drawn and still is true of a startup menu too, and the message that
+	// follows is a paste and an Enter: on /dev that Enter updated Codex for
+	// the whole machine. Excerpts of the real screens; internal/rollover has
+	// them whole.
+	codexIdle := "› Ask Codex to do anything\n\n  GPT-6-Astra max fast · ~/w\n  ? for shortcuts\n"
+	codexUpdate := "  Update available · 0.163.0 → 0.164.0\n\n› 1. Update now (runs `npm install -g @openai/codex`)\n" +
+		"  2. Skip\n  3. Skip until next version\n\n  enter continue · esc skip\n"
+	fake.screen = codexUpdate
+	if ready, err := h.ready(context.Background(), next); err != nil || ready {
+		t.Fatal("a startup menu read as ready", ready, err)
+	}
+	fake.screen = codexIdle
 	if ready, err := h.ready(context.Background(), next); err != nil || !ready {
 		t.Fatal("drawn and still", ready, err)
 	}
@@ -374,6 +394,11 @@ func TestRolloverRealInputAndResumeAdapter(t *testing.T) {
 	if ready, err := h.ready(context.Background(), next); err != nil || !ready {
 		t.Fatal(ready, err)
 	}
+	fake.screen = codexUpdate
+	if ready, err := h.ready(context.Background(), next); err != nil || ready {
+		t.Fatal("a hook's waiting at a startup menu read as ready", ready, err)
+	}
+	fake.screen = codexIdle
 	fake.info.Command = "bash"
 	if ready, err := h.ready(context.Background(), next); err != nil || ready {
 		t.Fatal("a shell is not a ready agent", ready, err)

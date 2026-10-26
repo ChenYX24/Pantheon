@@ -397,3 +397,18 @@ func TestBecomingDueCarriesItsReason(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestPairingHoldsBothSessionsBusyAndFinishKeepsTheAttempt(t *testing.T) {
+	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	for _, state := range []State{HandingOff, Verifying, HandedOff, Confirmed} {
+		m := Memory{View: View{State: state, NewSessionID: "new", Replaces: "old", EndsAt: now.Add(time.Minute).UnixMilli()}, Attempts: []time.Time{now}}
+		result := Step(m, Observation{}, DefaultPolicy(), now)
+		if !Busy(state) || result.Memory.View != m.View || result.Start || len(result.Events) != 0 {
+			t.Fatalf("pair was reconsidered: %+v", result)
+		}
+		done := Finish(result.Memory, nil).Memory
+		if Busy(done.State) || len(done.Attempts) != 1 || !done.Attempts[0].Equal(now) {
+			t.Fatalf("finish lost attempt or stayed busy: %+v", done)
+		}
+	}
+}

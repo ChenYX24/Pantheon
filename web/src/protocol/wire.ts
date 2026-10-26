@@ -2202,7 +2202,7 @@ export interface ChatRoutePreview {
 }
 
 export interface RolloverStatus {
-  state: 'idle' | 'asking' | 'waiting' | 'ending' | 'done' | 'failed'
+  state: 'idle' | 'asking' | 'waiting' | 'verifying' | 'handed_off' | 'confirmed' | 'ending' | 'done' | 'failed'
   handoff: string
   startedAt: number
   error: string
@@ -2210,7 +2210,9 @@ export interface RolloverStatus {
 }
 
 export interface AutoRollover {
-  state: 'ok' | 'due' | 'countdown' | 'handing_off' | 'cancelled' | 'failed'
+  state: 'ok' | 'due' | 'countdown' | 'handing_off' | 'verifying' | 'handed_off' | 'confirmed' | 'cancelled' | 'failed'
+  newSessionId?: string
+  replaces?: string
   pct: number
   endsAt?: number
   reason?: string
@@ -2226,7 +2228,7 @@ export interface AutoRolloverPolicy {
   idleInputSeconds: number
 }
 
-export type AutoRolloverAction = 'now' | 'later' | 'never' | 'cancel'
+export type AutoRolloverAction = 'now' | 'later' | 'never' | 'cancel' | 'keep' | 'release'
 
 // ─── plugins (docs/plugins.md) ───────────────────────────────────────────
 //

@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
+import { t } from '../i18n'
 import { Sidebar } from './Sidebar'
 import type { SidebarProps } from './Sidebar'
 import type { Project, Session } from '../protocol/wire'
@@ -37,4 +38,10 @@ it('puts context only on the session whose id has a reading, including the phone
   const unknown = html.indexOf('data-session-id="unknown"')
   expect(html.slice(known, unknown)).toContain('62%')
   expect(html.slice(unknown)).not.toContain('data-testid="context-meter"')
+  props.rollover = { unknown: { state: 'confirmed', pct: 0, replaces: 'known' } }
+  const paired = renderToStaticMarkup(createElement(Sidebar, props))
+  const label = `aria-label="${t('autoRollover.replaces')}"`
+  expect(paired.slice(paired.indexOf('data-session-id="unknown"'))).toContain(label)
+  expect(paired.slice(paired.indexOf('data-session-id="unknown"'))).toContain('↻')
+  expect(html).not.toContain(label)
 })

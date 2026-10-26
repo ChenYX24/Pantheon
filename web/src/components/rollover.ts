@@ -1,7 +1,7 @@
 import type { AutoRolloverPolicy, RolloverStatus, Session } from '../protocol/wire'
 
 export function rolloverActive(status: RolloverStatus | null): boolean {
-  return status?.state === 'asking' || status?.state === 'waiting' || status?.state === 'ending'
+  return status?.state === 'asking' || status?.state === 'waiting' || status?.state === 'ending' || status?.state === 'verifying' || status?.state === 'handed_off' || status?.state === 'confirmed'
 }
 
 export function canRollover(session: Pick<Session, 'command' | 'launchCommand'>): boolean {

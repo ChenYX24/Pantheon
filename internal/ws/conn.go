@@ -496,9 +496,16 @@ func (c *Conn) handleBinary(frame []byte) {
 	if s == nil {
 		return
 	}
-	if len(payload) > 0 && c.h.Input != nil {
-		c.h.Input(s.sessionID)
-	}
+	// Not reported to h.Input here. A keystroke is already reported by the
+	// Live (Manager.OnKey), which leaves out escape sequences; reporting every
+	// frame as well counted what a terminal sends on its own -- focus reports,
+	// answers to an application's queries, wheel reports -- as somebody
+	// typing, which keeps a handed-off session from ever being released and
+	// cancels an automatic countdown. It is the one path found that explains
+	// an old session on /dev (2026-10-22) kept for "input" with nothing on
+	// its screen typed. A paste does not go through Live.Write, so MsgPaste
+	// reports itself below.
+	//
 	// Input does not claim the grid: see session.Live.Write for why. A viewer
 	// answering "y" from a phone must not reflow the desktop it is shared with.
 	if _, err := s.live.Write(c.clientID, payload); err != nil {

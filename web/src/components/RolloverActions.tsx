@@ -62,8 +62,8 @@ export function RolloverActions({ id, menu = false, onlyResume = false, disabled
     setBusy(true)
     setError('')
     try {
-      const result = await api.rolloverSession(id, resume, reason)
-      const next: RolloverStatus = { ...result, state: 'done', startedAt: 0, error: '' }
+      await api.rolloverSession(id, resume, reason)
+      const next = await api.rolloverStatus(id)
       setStatus(next)
     }
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }

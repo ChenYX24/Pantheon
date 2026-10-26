@@ -102,20 +102,23 @@ rows, `at` is RFC 3339: the usage event's timestamp, or the observation time
 when it has none. It stays unchanged until the rounded count, window, model
 or source changes, so an identical reading does not cause a socket broadcast.
 
-`rollover` is the automatic context-rollover map, separate from the E2 operation
-status. Missing session ids mean `ok`. Only visible, unexited, non-scratch
-sessions whose automatic state is not `ok` are included:
+`rollover` contains the context trigger and all R3 handoff pairings, including
+direct manual requests. It is separate from the operation status endpoint.
+Missing session ids mean `ok`. Only visible, unexited, non-scratch sessions
+whose view is not `ok` are included:
 
 ```json
 {"rollover":{"s_abc":{"state":"countdown","pct":72,
   "endsAt":1792108830000,"reason":"threshold"}}}
 ```
 
-States are `due`, `countdown`, `handing_off` and `failed`. Cancellation is an
+States are `due`, `countdown`, `handing_off`, `verifying`, `handed_off`,
+`confirmed` and `failed`. Cancellation is an
 audit event followed immediately by `ok` (the entry disappears). `pct` is the
 rounded percentage at the last transition; `reason` describes that transition
-(`threshold`, `precompact`, `now`, or a failure message). `endsAt` is present only
-during a countdown and is **Unix milliseconds**, fixed until the state changes.
+(`threshold`, `precompact`, `now`, or a failure message). `endsAt` is present during a countdown or on the old session in `handed_off`;
+it is **Unix milliseconds**, fixed until the state changes. In `handed_off`
+it is the release deadline, measured from acknowledgement.
 The client computes remaining seconds; ticking does not rebroadcast snapshots.
 `waiting`, present only while `due`, names what keeps the session from its
 countdown: `turn` (working, or asking the person something), `draft` (an unsent
@@ -124,7 +127,21 @@ within `idleInputSeconds`) or `quiet` (done, but no hook vouches for it and it
 has not been quiet for two minutes). It is the first of those that holds, it is
 set when the session becomes due, and it is rebroadcast only when it changes,
 never as a number that counts. It is absent at the boundary.
-This map is also present in WebSocket `state` messages.
+A pairing adds these fields and views:
+
+| Session | State | Extra fields |
+|---|---|---|
+| Old | `verifying` | `newSessionId` |
+| Old | `handed_off` | `newSessionId`, `endsAt` |
+| Old | `failed` | `reason`, `newSessionId` if created |
+| Replacement | `verifying` | `replaces` (old session id) |
+| Replacement | `confirmed` | `replaces` |
+
+The replacement's restated next step is its ordinary `Session.summary`, not a
+second copy in the rollover view. `confirmed` lasts until release, keep or
+failure. Both sessions are busy for that whole pairing. Keep removes both
+views; failure removes the replacement's view and retains the old session's
+failure. This map is also present in WebSocket `state` messages.
 
 Claude counts the last non-sidechain assistant entry's input, cache-read input
 and cache-creation input. Codex counts `last_token_usage.input_tokens`, which
@@ -398,17 +415,18 @@ the frame to a remote page.
 ### `POST /api/sessions/{id}/rollover`
 ### `GET /api/sessions/{id}/rollover`
 
-Authenticated session rollover (stage E2). Development permits both routes only
+Authenticated session rollover (stages E2 and R3). Development permits both routes only
 where manual terminal sessions are enabled. POST takes
-`{"reason":"manual"|"memory"|"long","resume":false}` and waits for the operation,
-returning `{"handoff":"/absolute/path.md","newSessionId":"..."}` (the latter
+`{"reason":"manual"|"memory"|"long","resume":false}` and waits for the operation
+(a confirmed handoff: until its replacement exists, below), returning `{"handoff":"/absolute/path.md","newSessionId":"..."}` (the latter
 only when resumed). A second operation on the same session is `409`. Missing
 sessions are `404`; invalid reasons are `400`. Home execution workers and
 archived/exited sessions cannot roll over. Resume requires a recorded Claude
 Code or Codex launch command; a shell is never sent an agent continuation prompt.
 
 GET returns `{state,handoff,startedAt,error,newSessionId?}`. States are `idle`,
-`asking`, `waiting`, `ending`, `done`, `failed`; `startedAt` is Unix seconds.
+`asking`, `waiting`, `verifying`, `handed_off`, `confirmed` (replacement only),
+`ending`, `done`, `failed`; `startedAt` is Unix seconds.
 Progress belongs to the running panel; an archived row's handoff remains readable
 after a restart. Closing the requesting tab does not cancel a rollover.
 
@@ -421,26 +439,69 @@ main-chain turn ended overrules the heuristic's "working" and ends that wait
 file of at least 200 bytes unchanged for five seconds, or a new `HANDOFF-DONE`
 reply line (the prompt's echo and older markers do not count). The resource
 policy's `rolloverGraceSeconds` bounds the reply wait; critical host memory
-shortens it. A missing handoff gets a generated document with metadata, the last
+shortens it for `reason: "memory"`. A missing handoff gets a generated document with metadata, the last
 200 lines and bounded Git status/log output.
 
-The panel captures scrollback before sending SIGTERM to verified session process
-groups, then SIGKILL after ten seconds if necessary. It keeps the row and
-scrollback, sets `archivedAt` and `archiveNote: "rolled over → <path>"`, disables
-boot restoration, records a session event and writes a report for cyx projects.
-A resumed session uses the original launch command, profile and Claude account,
-with a fresh id, and receives the continuation prompt only after it is ready:
-an agent in its pane that is `waiting` or `done`, or, when only the heuristic
-speaks for it, one whose pane has drawn something and then been still for five
-seconds. Readiness has 60 seconds.
-If that fails, GET retains the error and any new session id for recovery.
+For `resume: true` with any reason except `memory`, the old session stays alive:
+
+1. The agent is asked for Markdown headings 目标 / 已完成 / 未完成 / 下一步 /
+   验证命令 / 禁止事项, with 关键文件与命令 optional. A heading line containing
+   the name counts. Missing headings are requested once using the remainder of
+   the original reply grace. If still missing, the agent's text is preserved
+   and `## Pantheon fallback` is appended with missing names, the last 200
+   lines and bounded Git status/log. No file uses the complete E2 fallback.
+2. Save scrollback, then create the replacement in the same project/directory
+   with the same launch command, profile, account, dimensions, title and pin.
+   Both sides become `verifying` while the replacement starts. Readiness is
+   unchanged: an agent in its pane that is `waiting` or `done`, or, when only
+   the heuristic speaks for it, a pane that has drawn and been still for five
+   seconds. Readiness has 60 seconds.
+3. Paste the one-line ack prompt from `docs/pantheon/stage-r-contract.md` §8.
+   Poll about once a second for `handoff-ack` in the replacement's labels
+   (`vibepanel me info set labels handoff-ack`, through `PATCH /api/me/v1`), or
+   a new standalone `HANDOFF-ACK` screen line. ANSI, whitespace and the same
+   leading bullet/prompt decoration as `HANDOFF-DONE` are tolerated; echoes,
+   inline mentions and markers present before the prompt do not count. A
+   capture that fails reads as nothing on screen, not as a failure: the label
+   can still confirm. The replacement writes its restatement with
+   `vibepanel me info set summary`.
+4. Ack changes the old view to `handed_off` and the new view to `confirmed`.
+   Release follows at `keepOldMinutes` after the ack, on `release`, or on an
+   active governor memory alert. `keep`, or input into the old session at any
+   time after the replacement exists (before the ack as well as after), cancels
+   release and leaves both sessions ordinary.
+5. Release captures fresh scrollback and prepares the governor's end against
+   the live process. It sends SIGTERM to verified session process groups,
+   then SIGKILL after ten seconds if necessary; retains the row and scrollback;
+   archives with `rolled over → <path>`; disables boot restoration; records
+   exit, done, a session event and a cyx execution report.
+
+No ack within ten minutes of the prompt, unreadable handoff, failed launch or
+readiness, or a replacement that exits/vanishes fails without ending the old
+session. Replacement liveness is checked through the retention period too.
+A running replacement is left running. GET retains the error and any new id;
+the old snapshot view has the reason and link. Cyx projects receive an execution
+report titled `Session handover needs checking: <title>` with `needs_user: true`,
+the reason, handoff path and both ids. The panel does not judge the summary.
+
+`memory` and `resume: false` retain the E2 order: save handoff and scrollback,
+end/archive/report, then create a replacement if requested and send the original
+continuation prompt when ready. Section repair and acknowledgement do not delay
+this path. The expanded initial heading request applies to both paths.
+
+For that path the POST answers once the replacement exists (`200` with both
+fields) or as soon as the operation fails before that; confirmation and
+retention continue in the background, and GET and the snapshot carry them.
+`memory` and `resume: false` still answer when the operation ends. Pairing state is in memory;
+a restart during verification or retention leaves both processes alive and ends
+the pairing. Nothing is scheduled to release either session after startup.
 
 ### `POST /api/sessions/{id}/rollover/auto`
 
 Authenticated, with the same development-terminal allow-list as manual rollover.
-Body: `{"action":"now"|"later"|"never"|"cancel"}`. Success is `204`; unknown
+Body: `{"action":"now"|"later"|"never"|"cancel"|"keep"|"release"}`. Success is `204`; unknown
 actions or fields are `400`, a missing session is `404`, and a handoff already
-started is `409`. `now` also returns `409` when the session is ineligible
+started rejects the four trigger actions with `409`. `now` also returns `409` when the session is ineligible
 (not panel-started, not claude/codex, usage window unknown), hidden, or already
 rolling over.
 
@@ -458,6 +519,12 @@ rolling over.
 - `never` does the same and persists an off switch in `rollover.auto.never`, a
   JSON settings map of session ids to `true`. Deleted session ids are pruned on
   the next successful poll. Archiving retains the preference with the session.
+- `keep` is accepted only for the old session in `verifying` or `handed_off`.
+  It ends the pairing without ending either session. The toast's *Back to old
+  session* selects the old session and sends this action.
+- `release` is accepted only for the old session in `handed_off`. It requests
+  release on the next verification tick. Both actions return `409` on the
+  replacement or in any other phase. A pending keep wins over release.
 
 Automatic rollover requires a recorded Claude Code/Codex launch command, a known
 context window, and a live, non-scratch session outside archived projects and
@@ -479,15 +546,25 @@ An active memory-governor alert, frozen session or E2 handoff takes precedence.
 
 On expiry R2 invokes the existing primitive with `resume: true` and
 `reason: "manual"` when the request came from Hand off (`now`), `"long"` otherwise.
-It saves a handoff, ends the old session and opens the replacement, as E2 does
-today. New-session acknowledgement and delayed release are R3, not implemented
-here; an error after the old session ends cannot restore its process. Failed
+It uses the same R3 confirmation and retention flow as a direct manual request.
+Both paired sessions are excluded from further rollovers and governor candidates. Failed
 automatic requests stay failed until an explicit `now`, cancellation or restart.
 Attempts are capped at three per rolling 24 hours in memory, carried into a
-replacement session so a chain cannot reset the cap. Restart loses this history.
+replacement session so a chain cannot reset the cap. A failed verify counts as
+an attempt; direct manual requests also join the history once. Restart loses
+this history.
 
-Audit events `rollover.due`, `rollover.countdown`, `rollover.cancelled` and
-`rollover.failed` carry JSON detail `{sessionId,pct,reason}`.
+Trigger events `rollover.due`, `rollover.countdown` and trigger cancellation or
+failure carry `{sessionId,pct,reason}`. Pairing events carry:
+
+| Event | JSON detail |
+|---|---|
+| `rollover.handed_off` | `{sessionId,newSessionId,summary}`; summary ≤200 Unicode runes |
+| `rollover.released` | `{sessionId,newSessionId}` |
+| `rollover.cancelled` | `{sessionId,newSessionId,reason}`; reason `keep` or `input` |
+| `rollover.failed` | `{sessionId,newSessionId?,reason}` |
+
+A failed primitive emits one failure audit, without a duplicate from the trigger.
 
 ### `GET /api/settings/rollover`
 ### `PUT /api/settings/rollover`
@@ -508,8 +585,9 @@ as `rollover.policy`. Disabling withdraws pending due/countdown requests.
 | `keepOldMinutes` | `rollover.auto.keepOldMinutes` | `10` | 1–120 |
 | `idleInputSeconds` | `rollover.auto.idleInputSeconds` | `120` | 10–1800 |
 
-`keepOldMinutes` is stored and editable now, reserved for the release timer after
-the replacement confirms in R3. It does not delay ending the old session in R2.
+`keepOldMinutes` is read when the replacement confirms and fixes that pairing's
+release deadline. Later policy edits do not move an existing deadline. It does
+not delay the E2 memory or non-resuming paths.
 
 ### `POST /api/sessions`
 ### `PATCH /api/sessions/{id}`

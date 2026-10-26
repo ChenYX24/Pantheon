@@ -16,7 +16,7 @@ it.each(['zh', 'en'] as const)('renders all controls and the retention limit in 
   expect(html.match(/type="number"/g)).toHaveLength(4)
   expect(html).toContain('type="checkbox"')
   expect(html).toContain(lang === 'en' ? 'Wait for the turn to finish' : '等本轮结束')
-  expect(html).toContain(lang === 'en' ? 'Reserved for new-session confirmation' : '新会话确认后启用保留')
+  expect(html).toContain(lang === 'en' ? 'Starts after confirmation' : '确认后计时')
   expect(html).not.toMatch(/\b(?:sm|md|lg):/)
 })
 

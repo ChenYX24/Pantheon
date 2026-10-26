@@ -407,14 +407,16 @@ func TestExitVanishedMatchesTheStore(t *testing.T) {
 // edit somebody has to look at.
 func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 	want := map[string]bool{
-		"rollover.policy":    true,
-		"rollover.due":       true,
-		"rollover.countdown": true,
-		"rollover.cancelled": true,
-		"rollover.failed":    true,
-		"blocked":            true,
-		"hooks.installed":    true,
-		"hooks.removed":      true,
+		"rollover.policy":     true,
+		"rollover.due":        true,
+		"rollover.countdown":  true,
+		"rollover.cancelled":  true,
+		"rollover.failed":     true,
+		"rollover.handed_off": true,
+		"rollover.released":   true,
+		"blocked":             true,
+		"hooks.installed":     true,
+		"hooks.removed":       true,
 		// Same file as hooks.installed and hooks.removed, so the same prefix:
 		// "what did the panel write into an agent's configuration" is one
 		// question and one GROUP BY.
@@ -578,7 +580,7 @@ func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 		t.Fatal(err)
 	}
 	found := map[string]bool{}
-	re := regexp.MustCompile(`\.audit(?:FromOutside)?\([^,]+,\s*"([a-z][a-z._]*)"`)
+	re := regexp.MustCompile(`\.audit(?:FromOutside|Rollover)?\([^,]+,\s*"([a-z][a-z._]*)"`)
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue

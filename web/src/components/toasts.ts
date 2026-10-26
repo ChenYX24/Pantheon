@@ -30,6 +30,7 @@ export interface ToastSpec {
    * one toast whose job is taking time: an upload. Undefined means no bar.
    */
   progress?: number
+  actions?: readonly { key: Key; run: () => Promise<unknown> }[]
 }
 
 export interface Toast extends ToastSpec {
@@ -91,6 +92,8 @@ function clearTimer(id: number) {
 function arm(toast: Toast) {
   clearTimer(toast.id)
   if (toast.progress !== undefined && toast.progress < 1) return
+  // Handoff decisions stay reachable until dismissed or acted on.
+  if (toast.actions?.length) return
   timers.set(
     toast.id,
     setTimeout(() => dismissToast(toast.id), TOAST_MS[toast.kind]),
@@ -125,7 +128,7 @@ export function showToast(spec: ToastSpec): number {
   // of them one toast: the bar jumped back to the second upload's 1%, and the
   // first one to finish dismissed the toast out from under the other, whose
   // remaining reports then moved a toast that was no longer there.
-  if (last && sameAs(last, spec) && last.progress === undefined && spec.progress === undefined) {
+  if (last && !last.actions && !spec.actions && sameAs(last, spec) && last.progress === undefined && spec.progress === undefined) {
     const bumped: Toast = { ...last, count: last.count + 1 }
     current = [...current.slice(0, -1), bumped]
     arm(bumped)

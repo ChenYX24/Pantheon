@@ -27625,3 +27625,317 @@ executor passed `reason: "long"` for every handoff. A request that came from the
 button (`now`) is `manual` now, in the prompt and the report.
 
 Each of the three was removed in turn and its test failed.
+
+
+## 2026-10-22 — R3: the replacement confirms before release
+
+[Stage R §8](pantheon/stage-r-contract.md) records the 2026-10-20 failure:
+the old session had already ended when its replacement failed to become ready.
+The readiness repair makes the message reach an agent without hooks, but an
+end-first handoff still risks leaving no working copy. Non-memory rollovers
+with `resume: true` now save the handoff and scrollback, start the replacement,
+and wait for acknowledgement before the old session can be released. The
+memory and non-resuming paths keep E2's order and timing rules.
+
+The replacement receives §8's exact one-line prompt. Its own `handoff-ack`
+label, accepted unchanged by `PATCH /api/me/v1`, or a new standalone
+`HANDOFF-ACK` screen line confirms the handoff. The screen matcher uses the
+same ANSI/whitespace/bullet rules as `HANDOFF-DONE` and counts before versus
+after the prompt, so a prompt echo or an old marker is insufficient. The
+summary is the replacement's ordinary session summary; the audit keeps at most
+200 runes. No semantic assessment of that summary is claimed.
+
+Both manual and automatic requests publish paired views through the existing
+rollover snapshot. The old side names `newSessionId`; the replacement names
+`replaces`. Both are busy while verifying or retained, including to the
+memory governor. The trigger's attempt history survives success and failure
+and follows the replacement; a direct manual request joins it once as well.
+
+After acknowledgement, the old side has one fixed release deadline. Release
+means a fresh scrollback capture, the governor's prepared end against the live
+process, archive note, exit/done and execution report. A memory alert or the
+release action can end retention early. Keep, or input into the old session
+after acknowledgement, cancels release. The decision rechecks input and keep
+after reading SQLite/tmux: a keystroke during that read must not be followed by
+ending the session it was sent to. Replacement liveness is checked during
+retention too; an exit after acknowledgement still keeps the old session.
+
+Verification failure leaves the old session running and leaves a running replacement alone,
+publishes the old session's failure with its replacement link, audits the
+reason, and writes a cyx execution report with `needs_user: true`, the handoff
+path and both ids. There is no persistence or startup cleanup for pairings.
+Restarting during verification or retention leaves both sessions alive and
+ordinary, at the cost of an extra session until the person archives it.
+
+The handoff prompt now requests six required Markdown headings and invites
+关键文件与命令. Section repair applies to the R3 path: one follow-up names
+missing headings; if still incomplete, an appended `## Pantheon fallback`
+reuses the complete fallback's bounded scrollback/Git evidence. The agent's
+text is retained. No document still uses E2's complete fallback. The initial
+heading request changes on both paths, which is why the literal prompt in
+`TestRolloverRealInputAndResumeAdapter` was updated; its adapter assertions now
+also pin title and pin copying. Existing memory/non-resume order tests were
+left unchanged. The previous long/resume tests now supply an ack and assert
+the reversed order.
+
+The banner stays below the terminal header, including on a 320 px phone. It
+shows both sides of confirmation, the locally ticking release time, failure
+reason and replacement link. A sidebar replacement has an accessible ↻ mark.
+The selected old session switches once per pairing, with a toast whose actions
+send keep/release. Focused text entry, including the terminal textarea and
+compose boxes, suppresses the switch but still shows the toast. Action toasts
+stay until dismissed, acted on or the pairing ends; ordinary toast timing is
+unchanged. The older manual action component now rereads the result instead
+of calling a kept session done.
+
+Readings settled here, without changing §8: `verifying` starts as soon as the
+replacement row exists, including the unchanged readiness wait; a section
+follow-up gets the remainder of the original reply grace, not another full
+grace; keep/input wins over a pending release or memory-triggered release;
+`keepOldMinutes` is read at acknowledgement and later policy changes do not
+move that deadline. Capturing an unreadable replacement screen fails safely.
+The rollover POST remains synchronous through release or keep, as documented in
+`docs/api.md`.
+
+`web/scripts/rollover-check.mjs` now covers old verification, retention and both
+actions, new verification/summary, failure links, auto-switching once, toast
+requests and focus protection, plus those strip states in both languages and
+themes at 320/768/1200 px. It was written but not run on this shared host. No
+frontend bundle was built or committed, and no service was deployed; the
+Conductor owns the browser and /dev acceptance and the bundle build.
+
+
+Validation on the shared host was serial and at niceness 19. Every Go command
+used `GOTOOLCHAIN=auto GOSUMDB=sum.golang.org GOFLAGS=-p=1 GOMAXPROCS=1
+GOMEMLIMIT=600MiB`; no `go test ./...` was run. Exact commands after that
+environment prefix:
+
+```sh
+nice -n 19 go test -count=1 -json ./internal/rollover
+nice -n 19 go test -count=1 -json ./internal/pantheon/home
+nice -n 19 go test -count=1 -json ./internal/store
+nice -n 19 go test -count=1 -json ./internal/resources
+nice -n 19 go test -count=1 -json ./internal/httpapi -run 'Rollover|AutoRollover|Me|Snapshot|TypeScript|Route'
+nice -n 19 go test -count=1 -json ./internal/httpapi
+nice -n 19 go test -count=1 -json ./internal/httpapi -run '^TestEveryAuditEventIsAccountedFor$'
+```
+
+The first four passed: 14/54, 25/25, 141/206 and 40/40 respectively (top-level
+passes / passes including subtests). The final targeted HTTP run passed 85/278;
+the audit inventory passed 1/1. The one full HTTP run passed 547/866, skipped
+`TestElevatedUpgradeAgainstRealSudo`, and failed two tests:
+
+- `TestABellThatRangWhileThePumpWasDownIsSeen`: the known tmux 3.4 bell-latch
+  failure; unchanged here. The Conductor owns comparison against main.
+- `TestEveryAuditEventIsAccountedFor`: introduced here, then fixed. Building
+  audit names from `"rollover." + event` fooled the source inventory into
+  seeing the incomplete name `rollover.`. Callers now supply complete names;
+  the inventory scans the new helper and accounts for `rollover.handed_off`
+  and `rollover.released`. That test and the full targeted HTTP pattern passed
+  after repair. The full package was not repeated.
+
+The three safety mutations used these exact commands with the same Go
+environment. Removing the verification-error return made the first test fail
+with the old session ended and archived; removing the input guard did the same
+in the second (repeated after consolidating the final decision check); bypassing
+the ack condition made the third fail with `retention started without
+acknowledgement`. Each edit was restored before the next test. All three pass
+in the final targeted run.
+
+```sh
+nice -n 19 go test -count=1 ./internal/httpapi -run '^TestRolloverNoAckKeepsOldSessionAndReportsFailure$'
+nice -n 19 go test -count=1 ./internal/httpapi -run '^TestRolloverInputKeepsOldSession$'
+nice -n 19 go test -count=1 ./internal/httpapi -run '^TestRolloverAckIsRequiredBeforeRelease$'
+```
+
+Frontend commands ran from `web`, each with
+`NODE_OPTIONS=--max-old-space-size=900`, using the existing dependencies:
+
+```sh
+nice -n 19 npx tsc -b
+nice -n 19 npx eslint src/App.tsx src/components/AutoRolloverStrip.tsx src/components/AutoRolloverStrip.test.ts src/components/HandoffButton.tsx src/components/RolloverActions.tsx src/components/Sidebar.tsx src/components/ToastStack.tsx src/components/rollover.ts src/components/toasts.ts src/components/rolloverHandoff.ts src/components/rolloverHandoff.test.ts src/components/useRolloverHandoff.ts src/components/settings/AutoRolloverSettings.test.ts src/i18n.ts src/protocol/wire.ts scripts/rollover-check.mjs
+nice -n 19 npx eslint src/i18n.ts src/components/settings/AutoRolloverSettings.test.ts src/components/Sidebar.test.ts
+nice -n 19 npx vitest run --pool=forks --maxWorkers=1 src/components/AutoRolloverStrip.test.ts src/components/rolloverHandoff.test.ts src/components/RolloverActions.test.ts src/components/Sidebar.test.ts src/components/toasts.test.ts src/components/settings/AutoRolloverSettings.test.ts src/i18n.test.ts src/chrome-vocabulary.test.ts
+nice -n 19 npx vitest run --pool=forks --maxWorkers=1
+nice -n 19 npx vitest run --pool=forks --maxWorkers=1 src/components/AutoRolloverStrip.test.ts src/components/rolloverHandoff.test.ts src/components/RolloverActions.test.ts src/components/Sidebar.test.ts src/components/toasts.test.ts src/components/settings/AutoRolloverSettings.test.ts src/i18n.test.ts src/i18n.prose.test.ts src/chrome-vocabulary.test.ts
+```
+
+TypeScript passed, including a final run. ESLint had no errors and the three
+existing App warnings (two Fast Refresh exports and `setPaneLayout` as an
+effect dependency); the later lint of the changed copy/sidebar test was clean.
+The eight-file focused suite passed 65 tests. The full suite was run once:
+118 files, 1,141 passes and one failure in `src/i18n.prose.test.ts` (`says the
+thing and stops`). Two new explanations exceeded the dictionary's length
+budget. Their Chinese and English copy was shortened without relaxing the
+budget, and the final nine-file run, including that gate, passed all 68 tests.
+No second full Vitest run was made.
+
+These source checks cover implementation commit `24daefd`; the embedded frontend
+bundle is intentionally left for the Conductor to build.
+
+### Review: four things the first cut did, and what replaced them
+
+Reviewed by the Conductor before any browser or /dev run. Each was a reading
+the task left open; each is changed in code, and each change has a test that
+fails when the change is removed (run, failed, restored):
+
+- **The rollover POST answered only at release.** The session menu's "hand off
+  and continue" and the home to-do both `await` it, so with the defaults that
+  was a spinner for up to twenty minutes and then whatever a proxy's timeout
+  said, for a handoff that was going fine. `handleRollover` now runs the
+  confirmed path in the background and answers once the replacement exists,
+  or with the error if it fails before that; `memory` and `resume: false`
+  still answer at the end. `rolloverRequest.verifying` is the hook, unexported
+  and never decoded. `TestRolloverRequestAnswersOnceTheReplacementExists`.
+- **Input counted only after the ack.** A person who asked the old agent one
+  more thing while the new one was reading got the old session released ten
+  minutes after the ack, mid-answer, which is the interruption the contract's
+  first principle rules out. Input now counts from the moment the replacement
+  exists, in the readiness wait, the ack wait and retention alike; contract §8
+  says so. `TestRolloverInputBeforeTheAckKeepsOldSession`.
+- **One failed screen capture failed the handoff.** Captures have a two-second
+  timeout and this host is loaded; a miss now reads as nothing on screen, the
+  label can still confirm, and a replacement that is really gone is
+  `alive()`'s to report. The capture during retention read nothing anyone used
+  and is gone; the input-during-the-final-check test now injects at the
+  liveness read instead. `TestRolloverUnreadableReplacementScreenStillTakesTheLabel`
+  replaces the test that pinned the failure.
+- **The focused terminal counted as typing,** so the move to the new session
+  almost never happened: with the old session selected the keyboard is
+  normally in xterm's helper textarea. `handoffInputFocused` is now
+  `focus.ts`'s `takesTyping`, which already knew that textarea is not typing;
+  a compose box still holds the move. Someone who had typed into the terminal
+  kept the old session already, so there is nothing left to protect there.
+
+```sh
+go test -count=1 ./internal/httpapi -run 'Rollover|AutoRollover|^TestMe|TypeScript|EveryAuditEvent'
+npx tsc -b
+npx vitest run --pool=forks --maxWorkers=1 src/components/rolloverHandoff.test.ts src/components/AutoRolloverStrip.test.ts src/components/RolloverActions.test.ts src/components/focus.test.ts src/i18n.test.ts src/i18n.prose.test.ts src/chrome-vocabulary.test.ts
+```
+
+## 2026-10-22 — R3 on /dev: what the first real handoffs found
+
+The first real run of R3 on /dev, a throwaway project with a Claude session
+and then a Codex one, each given a first step and handed off through the
+button's route (`POST …/rollover/auto` with `now`).
+
+**The first attempt was lost to the machine, not the handoff.** /dev's tmux
+runs in a hand-made user unit, `parthenon-dev-tmux.service`, with
+`MemoryMax=768M` and no `OOMPolicy`, so the default `stop`. R3 keeps the old
+session until the new one confirms; three Claudes and a Codex plus the
+replacement crossed the limit, the kernel killed one `claude`, and systemd
+then stopped the whole unit: the tmux server and every /dev session went with
+it (the same happened on 2026-10-17). R3 reported it correctly —
+`rollover.failed`, "replacement session exited or vanished", nothing released.
+The unit now has `OOMPolicy=continue`, as `deploy/vibepanel.service` always
+had for the same reason. The unit is not in this repository; the change and
+its backup are recorded in the progress repository's plan.
+
+**Claude: the confirmation works.** The replacement confirmed 18 seconds after
+it was created, read the handoff, restated the next step through
+`vibepanel me info set summary`, labelled itself `handoff-ack`, and when told
+to, did that step. `rollover.handed_off` carried the restatement.
+
+**The old session was then kept for "input" 37 seconds later with nothing on
+its screen typed** (the prompt line held only Claude's dim suggestion). The
+one path found that does that: R2 had added `Handler.Input` to every binary
+frame in `ws.handleBinary`, so what a terminal sends on its own — focus
+in/out, answers to queries, wheel reports — counted as typing. Keystrokes were
+already reported by the Live through `OnKey`, which leaves escape sequences
+out; that call is gone, and a paste, which does not pass through
+`Live.Write`, still reports. `TestATerminalsOwnTrafficIsNotReportedAsInput`
+fails without the change (six reports for five automatic frames and a paste)
+and passes with it. Contract §8 now says what a keystroke is.
+
+**Codex: the handoff never started.** It stayed `due`, waiting for the turn
+to end, and the session said `working` from creation onwards. Codex installed
+by npm is a `#!/usr/bin/env node` script, so the pane reports `node`;
+`readCodexLog` matched `codex` only, so a Codex with no hooks (there are none
+on this machine) never had its rollout read and could never be seen to finish
+a turn. `node` now counts when the session was launched as `codex`;
+`TestTheRolloutIsReadOnlyForAQuietCodex` has the npm cases.
+
+**Codex, second run (pantheon.9): the handoff started, and the replacement
+updated Codex.** With the rollout read, the old session was seen to finish
+its turn and the countdown ran. The replacement opened on Codex's startup
+"Update available … 1. Update now" menu. Without hooks, ready means drawn
+and then still for five seconds, which a menu is; the ack prompt was pasted
+and Enter pressed, Enter took the default, and Codex ran `npm install -g
+@openai/codex` (0.162.1 → 0.163.0, machine-wide), said "please restart" and
+exited. R3 did its part — `rollover.failed`, "replacement session exited or
+vanished", the old session untouched — but the paste has been going into
+whatever the new agent shows first since R0. A startup dialog is a menu
+whose default an Enter accepts: Codex's update prompt, and Claude's folder
+trust check, whose highlighted default is "No, exit". Not fixed yet; the
+choice of fix is open (recognise the input prompt before pasting, or start
+the replacement with those dialogs switched off).
+
+## 2026-10-25 — A replacement is typed into only at its input box
+
+The fix for the incident above, chosen by the person: recognise the agent's
+input box before pasting, and fail the handoff when it is not there, rather
+than switching the known dialogs off at launch. A list of dialogs covers the
+ones met so far; the next one — a login that expired, a changed trust prompt,
+a new "what's new" screen — would take the Enter the same way.
+
+`rollover.AtInputBox(agent, screen)` reads the visible screen (`tmux.Screen`,
+plain). Claude Code's prompt is a `❯` line with a full-width rule directly
+above and below it; its dialogs put text above their cursor line. Codex's is
+a `›` line with "? for shortcuts" (or "context left") somewhere below it; its
+menus have neither. Both agents draw their menu cursor with their prompt
+character, so a numbered item after the cursor (`❯ 1. Yes`, `› 1. Update
+now`) is never a prompt. `internal/rollover/testdata` holds the four real
+screens it was written against, captured on a throwaway tmux socket with the
+panel's configuration: Claude Code 2.1.310 idle and at its folder trust
+check, Codex 0.163.0 idle and at its update menu (0.164.0 had been released;
+nothing was pressed).
+
+`ready` now requires that box as well as the old conditions, and the minute
+runs out into `rollover.failed` with what the screen shows — the highlighted
+line of a menu, because that is what the Enter would have chosen — and
+nothing typed. The dialog is still on the replacement's screen for the person
+to answer. Strict on purpose: a box not recognised costs a handoff that
+fails with the old session running; a menu taken for a box costs whatever its
+default does.
+
+Removing each part fails a test: `ready` ignoring the screen fails
+`TestRolloverRealInputAndResumeAdapter` ("a startup menu read as ready");
+the reason without the screen fails
+`TestRolloverReplacementAtAMenuIsNotTypedInto`; the Codex numbered-item rule
+fails `TestWhatIsNotAnInputBox`.
+
+**On /dev (pantheon.10 = `893a647`).** The incident again, on purpose: a
+Codex session handed off with its update check on, so the replacement opened
+on "› 1. Update now". `rollover.failed` 60 seconds later with "new agent did
+not reach its input box within 60 seconds; it shows "› 1. Update now (runs
+`npm install -g @openai/codex`)"", nothing typed, the menu still on the
+replacement's screen, the old session untouched, and Codex still 0.163.0.
+
+A second run, with `-c check_for_update_on_startup=false` so the replacement
+would open at its box, failed for a different reason: memory. Claude Code's
+auto-updater, under the long-lived Claude session that lives in the same
+768 MB unit, ran `npm install -g @anthropic-ai/claude-code` (380 MB) during
+the handoff; the replacement Codex could not draw within the minute, and the
+reason had nothing to name because its screen was still empty. R3 failed it
+correctly. The kernel then killed the npm, and with `OOMPolicy=continue` the
+tmux server and the sessions lived. The killed install had left the machine
+without a `claude` on PATH until another update run reinstalled it. The
+release path (`keepOldMinutes`, *release*) is still untested on a real agent.
+
+**Release, on real agents (pantheon.10).** With the dev unit at 1 GiB and
+Codex at 0.164.0, so its first screen was its input box:
+
+- Codex, left alone after the ack: `rollover.handed_off` at 22:39:40,
+  `rollover.released` at 22:49:51 — `keepOldMinutes` plus one poll. The old
+  session was ended, archived with "rolled over → <handoff>", and its memory
+  came back (the unit's anonymous memory fell from 594 MB to 400 MB). The
+  replacement had already carried on with the next step.
+- Claude, released by hand: `handed_off` at 22:53:59, `release` posted at
+  22:54:46, `released` at 22:54:56. Nobody typed into the old session and it
+  was not kept, which is the half of the input fix the first run could not
+  show.
+
+Every row of contract §8's order has now happened on a real Claude or Codex:
+written, created, ready at the input box, confirmed by label, released at the
+deadline and on request, kept on input (the first run), failed with the old
+session intact (the menu, the empty screen, the dead tmux).

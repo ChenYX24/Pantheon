@@ -12,6 +12,9 @@ const (
 	Due        State = "due"
 	Countdown  State = "countdown"
 	HandingOff State = "handing_off"
+	Verifying  State = "verifying"
+	HandedOff  State = "handed_off"
+	Confirmed  State = "confirmed"
 	Cancelled  State = "cancelled"
 	Failed     State = "failed"
 )
@@ -19,10 +22,12 @@ const (
 const ConfirmInterval = 15 * time.Second
 
 type View struct {
-	State  State  `json:"state"`
-	Pct    int    `json:"pct"`
-	EndsAt int64  `json:"endsAt,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	NewSessionID string `json:"newSessionId,omitempty"`
+	Replaces     string `json:"replaces,omitempty"`
+	State        State  `json:"state"`
+	Pct          int    `json:"pct"`
+	EndsAt       int64  `json:"endsAt,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 	// Waiting names what holds a due session back from its countdown, so the
 	// banner can say why nothing is happening. It changes only when the
 	// blocker does; it never carries a number that ticks, because every change
@@ -149,7 +154,7 @@ func Step(m Memory, o Observation, p Policy, now time.Time) Result {
 		}
 	}
 	m.Attempts = kept
-	if m.State == HandingOff {
+	if Busy(m.State) {
 		return Result{Memory: m}
 	}
 	// A person pressing the button decided this session should be handed off.
@@ -244,11 +249,15 @@ func Cancel(m Memory, reason string) Result { return cancel(m, reason, true) }
 // pressure as the person's choice to raise this session's threshold.
 func Suspend(m Memory, reason string) Result { return cancel(m, reason, false) }
 
-// Finish is the execution seam. R2 calls the existing long/resume primitive;
-// R3 can retain HandingOff while verifying the replacement before finishing.
+// Busy holds the trigger still while the primitive owns either side of a pair.
+func Busy(state State) bool {
+	return state == HandingOff || state == Verifying || state == HandedOff || state == Confirmed
+}
+
+// Finish retains the attempt history through confirmation, release or failure.
 func Finish(m Memory, err error) Result {
 	if err != nil {
-		m.View = View{State: Failed, Pct: m.Pct, Reason: err.Error()}
+		m.View = View{State: Failed, Pct: m.Pct, Reason: err.Error(), NewSessionID: m.NewSessionID}
 		return Result{Memory: m, Events: []View{m.View}}
 	}
 	m.View = View{State: OK}
