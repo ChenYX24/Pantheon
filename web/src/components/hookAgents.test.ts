@@ -30,6 +30,9 @@ function status(over: Partial<HookStatus> = {}): HookStatus {
     agentsShown: ['claude', 'codex', 'opencode'],
     opencodePath: '/h/.config/opencode/plugin/vibepanel.js',
     opencodeInstalled: false,
+    claudeQuota: '',
+    claudeQuotaCurrent: false,
+    claudeQuotaSnippet: '',
     ...over,
   }
 }

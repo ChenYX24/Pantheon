@@ -70,6 +70,7 @@ type Server struct {
 	// thing its hooks never report, an interrupt.
 	claudeLogs claudelog.Watcher
 	contexts   contextMeter
+	quotas     quotaMeter
 	Sampler    *sysmon.Sampler
 
 	// Resources is the memory governor. Nil where there is nothing to govern
@@ -1000,7 +1001,7 @@ func (s *Server) handleHookState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Signal != "" {
-		if req.Signal != hooks.SignalPreCompact || req.State != "" || req.Source != "" {
+		if req.Signal != hooks.SignalPreCompact && req.Signal != hooks.SignalQuota || req.State != "" || req.Source != "" {
 			writeErr(w, http.StatusBadRequest, "unknown or conflicting hook signal")
 			return
 		}
@@ -1009,7 +1010,19 @@ func (s *Server) handleHookState(w http.ResponseWriter, r *http.Request) {
 			s.writeStoreErr(w, err)
 			return
 		}
-		if hooks.CompactionImminent(body) {
+		if req.Signal == hooks.SignalQuota {
+			// Red line 6: what reaches the snapshot is two windows of checked
+			// numbers, never the document. One that does not parse is dropped
+			// with a 204 like any other unreadable hook body: the status line
+			// must not learn to retry.
+			if q, ok := agentctx.ClaudeLimits(body, received); ok {
+				account := claudeAccount(row)
+				s.quotas.bind(row.ID, account)
+				if s.quotas.observe(account, q, received) {
+					s.notifyState()
+				}
+			}
+		} else if hooks.CompactionImminent(body) {
 			s.signalAutoCompaction(ctx, row)
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -1207,6 +1220,19 @@ type stateResponse struct {
 	Context  map[string]agentctx.Usage `json:"context"`
 	Rollover map[string]rollover.View  `json:"rollover"`
 
+	// Quota is each session's account's subscription windows, for the
+	// sessions whose agent has said. See quota.go for why it is per account.
+	Quota map[string]agentctx.Quota `json:"quota"`
+
+	// Bundle is the script the embedded frontend boots from. A page compares
+	// it with the one it booted from, and a difference means it is running the
+	// interface of a panel that has since been replaced: everything new in the
+	// release is missing from it, with nothing on screen to say so. That was
+	// the first report after R3 went out -- no handoff button and no context
+	// meter -- from a tab opened before the upgrade. Empty when the frontend is
+	// served from disk, where it changes under a running panel by design.
+	Bundle string `json:"bundle"`
+
 	// Archived is the projects that are not in the sidebar. Their sessions
 	// are left out of Sessions -- hidden means not sent, so no view has to
 	// remember a filter -- and counted here instead. See archive.go.
@@ -1302,6 +1328,8 @@ func (s *Server) buildState(ctx context.Context) (stateResponse, error) {
 		Sessions:        emptyIfNil(sessions),
 		Context:         s.contexts.snapshot(sessions),
 		Rollover:        s.autoRolloverSnapshot(sessions),
+		Quota:           s.quotas.snapshot(sessions),
+		Bundle:          s.bundle(),
 		Archived:        archived,
 		Live:            emptyIfNil(s.Manager.LiveIDs()),
 		Fullscreen:      emptyIfNil(fullscreenNow(&s.fullscreen)),

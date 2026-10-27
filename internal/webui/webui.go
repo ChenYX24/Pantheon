@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,6 +73,27 @@ func Built() bool {
 	defer f.Close()
 	st, err := f.Stat()
 	return err == nil && st.Size() > 0
+}
+
+// entryScript is the entry module index.html loads: /assets/index-<hash>.js.
+var entryScript = regexp.MustCompile(`src="/assets/(index-[A-Za-z0-9_-]+\.js)"`)
+
+var entryOnce = sync.OnceValue(func() string {
+	b, err := fs.ReadFile(dist, "dist/index.html")
+	if err != nil {
+		return ""
+	}
+	if m := entryScript.FindSubmatch(b); m != nil {
+		return string(m[1])
+	}
+	return ""
+})
+
+// Entry names the embedded build by the script it boots from, whose name
+// carries a hash of its content: a release that changed nothing in web/ keeps
+// it, and one that changed anything does not. Empty when nothing is embedded.
+func Entry() string {
+	return entryOnce()
 }
 
 type spaHandler struct {

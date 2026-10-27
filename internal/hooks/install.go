@@ -116,6 +116,14 @@ type Status struct {
 	// rather than whether anything ever arrived.
 	OpencodePath      string `json:"opencodePath"`
 	OpencodeInstalled bool   `json:"opencodeInstalled"`
+
+	// ClaudeQuota is whose status line ~/.claude/settings.json names: "",
+	// "ours" or "other" (statusline.go). ClaudeQuotaCurrent says ours calls
+	// this script, at this path, with `quota`; ClaudeQuotaSnippet is what an
+	// install merges, shown before the button is pressed like the others.
+	ClaudeQuota        string `json:"claudeQuota"`
+	ClaudeQuotaCurrent bool   `json:"claudeQuotaCurrent"`
+	ClaudeQuotaSnippet string `json:"claudeQuotaSnippet"`
 }
 
 // events maps a hook event to its state or the state-neutral PreCompact signal.
@@ -182,26 +190,27 @@ func Inspect(scriptPath string) (Status, error) {
 	zcodeEventsInstalled := zcodeHookEvents(zcodePath)
 
 	st := Status{
-		SettingsPath:      settingsPath,
-		ScriptPath:        scriptPath,
-		Snippet:           ClaudeSettings(scriptPath),
-		CodexSnippet:      CodexHooks(scriptPath),
-		CodexPath:         codexHooks,
-		CodexInstalled:    len(codexEventsInstalled) == len(codexEvents),
-		CodexEvents:       codexEventsInstalled,
-		CodexTrust:        codexTrust(codexHooks, codexConfig),
-		CodexLegacyNotify: codexNotifyInstalled(codexConfig),
-		KimiPath:          kimiPath,
-		KimiInstalled:     len(kimiEventsInstalled) == len(kimiEvents),
-		KimiEvents:        kimiEventsInstalled,
-		KimiSnippet:       KimiHooks(scriptPath),
-		ZcodePath:         zcodePath,
-		ZcodeInstalled:    len(zcodeEventsInstalled) == len(zcodeEvents),
-		ZcodeEvents:       zcodeEventsInstalled,
-		ZcodeSnippet:      ZcodeHooks(scriptPath),
-		OpencodePath:      opencodePath,
-		OpencodeInstalled: OpencodeInstalled(),
-		Events:            []string{},
+		SettingsPath:       settingsPath,
+		ScriptPath:         scriptPath,
+		Snippet:            ClaudeSettings(scriptPath),
+		CodexSnippet:       CodexHooks(scriptPath),
+		CodexPath:          codexHooks,
+		CodexInstalled:     len(codexEventsInstalled) == len(codexEvents),
+		CodexEvents:        codexEventsInstalled,
+		CodexTrust:         codexTrust(codexHooks, codexConfig),
+		CodexLegacyNotify:  codexNotifyInstalled(codexConfig),
+		KimiPath:           kimiPath,
+		KimiInstalled:      len(kimiEventsInstalled) == len(kimiEvents),
+		KimiEvents:         kimiEventsInstalled,
+		KimiSnippet:        KimiHooks(scriptPath),
+		ZcodePath:          zcodePath,
+		ZcodeInstalled:     len(zcodeEventsInstalled) == len(zcodeEvents),
+		ZcodeEvents:        zcodeEventsInstalled,
+		ZcodeSnippet:       ZcodeHooks(scriptPath),
+		OpencodePath:       opencodePath,
+		OpencodeInstalled:  OpencodeInstalled(),
+		ClaudeQuotaSnippet: ClaudeQuotaSnippet(scriptPath),
+		Events:             []string{},
 		// Empty here rather than normalised at the end, because there are two
 		// returns and the early one -- no settings file, which is the state of
 		// every fresh install -- skipped the normalisation and sent `null`.
@@ -217,6 +226,8 @@ func Inspect(scriptPath string) (Status, error) {
 		// A missing or unreadable file simply means nothing is installed.
 		return st, nil
 	}
+	st.ClaudeQuota = statusLineOwner(doc)
+	st.ClaudeQuotaCurrent = statusLineCurrent(doc, scriptPath)
 	hooks, _ := doc["hooks"].(map[string]any)
 	for event := range events {
 		if entriesFor(hooks, event, scriptPath) {

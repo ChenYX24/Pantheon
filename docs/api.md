@@ -102,6 +102,33 @@ rows, `at` is RFC 3339: the usage event's timestamp, or the observation time
 when it has none. It stays unchanged until the rounded count, window, model
 or source changes, so an identical reading does not cause a socket broadcast.
 
+`quota` maps session ids to what that session's account has used of its
+subscription. It is per account: every session on one login gets that login's
+freshest reading, and a reading outlives the session that took it, so the next
+session on the login shows it before its first reply. Codex's comes from the
+`rate_limits` beside the `token_count` the context is read from; Claude Code's
+only from its status line (`POST /api/hook/state` with `signal=quota`, below).
+An absent entry means the agent has not said: an API-billed login never does,
+and a subscription only after a reply.
+
+```json
+{"quota":{"s_abc":{"limits":[{"minutes":300,"used":12,"resetsAt":1793037000},
+  {"minutes":10080,"used":7,"resetsAt":1793062800}],
+  "plan":"","source":"claude-statusline","at":"2026-10-26T16:11:23Z"}}}
+```
+
+`limits` is shortest window first; `used` is a whole percent and may pass 100
+when a spend limit has been exceeded; `resetsAt` is Unix seconds, `0` when the
+agent did not say. A window whose `resetsAt` has passed is no longer current
+and is left out by the page, not the server, so the snapshot does not change
+when a clock crosses a line. `plan` is Codex's `plan_type`; Claude Code does not
+report one. `source` is `claude-statusline` or `codex-rollout`. `at` changes
+only when the figures do.
+
+`bundle` is the entry script the embedded interface boots from
+(`index-<hash>.js`), or empty when it is served from disk. A page whose own
+script differs is running an interface older than the panel, and says so.
+
 `rollover` contains the context trigger and all R3 handoff pairings, including
 direct manual requests. It is separate from the operation status endpoint.
 Missing session ids mean `ok`. Only visible, unexited, non-scratch sessions
@@ -1091,6 +1118,15 @@ appended to `~/.kimi-code/config.toml`; zcode's events are merged into
 on and the uninstall turns back off only if it was the one that turned it on
 *and* no events of anybody's are left in that file;
 opencode gets a plugin file of the panel's own, which it auto-discovers.
+
+`?agent=claude-quota` is not an agent: it names the reporter as Claude Code's
+`statusLine` in `~/.claude/settings.json`, running it with `quota`, which prints
+nothing. That is the only place Claude Code gives a subscription's limits. There
+is one status line, and it may be somebody's own, so `POST` answers `409` when
+one that is not the panel's is set and changes nothing; `DELETE` removes it only
+when it is the panel's. `GET` reports it as `claudeQuota` (`""`, `"ours"`,
+`"other"`), `claudeQuotaCurrent` (ours, calling this script at this path) and
+`claudeQuotaSnippet`, what an install writes.
 
 `PUT /api/settings/hooks/agents` takes `{"agents": ["claude", "codex"]}` and
 decides which of them the settings page and the first-run tour offer. `GET
@@ -2543,6 +2579,15 @@ The signal marks due regardless of percentage while retaining eligibility,
 policy, cap and boundary checks. It cannot change the session row or detector
 state. The reporter backgrounds the bounded HTTP request and never waits for
 the panel before allowing compaction.
+
+Claude Code's status line runs the reporter with `quota`, and the reporter sends
+`?sessionId=…&signal=quota&state=&source=` with the status line's document as
+its body: only a document carrying `rate_limits`, at most once in fifteen
+seconds per session, in the background, printing nothing. The server reads
+`rate_limits.five_hour` and `seven_day` only, each a percentage from 0 to 1000
+and a reset before 2100, and files them under the session's Claude account;
+anything else in the document is never stored. A document it cannot read is a
+`204` like a valid one, so that a status line has nothing to retry.
 
 ## The WebSocket
 

@@ -4,6 +4,10 @@ import "encoding/json"
 
 const SignalPreCompact = "precompact"
 
+// SignalQuota is the status line's report: a Claude Code document carrying
+// rate_limits. Like PreCompact, a signal and never a session state.
+const SignalQuota = "quota"
+
 // CompactionImminent accepts only the Claude event and its two known triggers.
 // Missing or unfamiliar fields do nothing; a future document shape cannot
 // accidentally authorise a handoff. Extra fields are deliberately ignored.

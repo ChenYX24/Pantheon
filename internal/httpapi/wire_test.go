@@ -63,6 +63,8 @@ func TestTypeScriptRowsMatchWhatIsSent(t *testing.T) {
 		// were pinned and the envelope carrying them was not.
 		{"PanelState", stateResponse{}},
 		{"ContextUsage", agentctx.Usage{}},
+		{"AgentQuota", agentctx.Quota{}},
+		{"QuotaLimit", agentctx.Limit{}},
 		{"ArchivedProject", archivedProject{}},
 		// The rest of the hand-written surface. These went uncovered only
 		// because the test could not see this package from where it lived;
