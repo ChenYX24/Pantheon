@@ -28084,3 +28084,48 @@ Sessions the panel launches with an account carry its id.
 session to the header chip in both themes, checks the handoff section fits the
 settings dialog at three widths, and serves a page an older entry script to
 show the notice, which goes away after a reload.
+
+## 2026-10-27 — Limits on main and in production, and the status line installed
+
+**Merged as `c038c0b`** (`--no-ff`; main was the branch's base `38abffb`, so
+the merged tree is `3ef64b7`'s exactly). `scripts/head-check.sh main` failed
+two tests in `internal/httpapi`: the known bell flake, and
+`TestContextPollThrottle`, which had not been seen before. It is older than
+this work. Run 300 times from compiled test binaries, it failed 22 times on
+`c038c0b` and 23 times on `38abffb`. The test rewrites a rollout with a
+number of the same length (`62000`, then `72000`), and the watcher treats a
+file with the same inode, size and mtime as unchanged (`watcher.go`). When
+both writes fall in one kernel timestamp tick, the mtimes are equal and the
+fifteen-second read returns the cached figure. The rate fits that. The
+production path is not affected, because a rollout only grows. The fix belongs
+in the test: set the second write's mtime forward. It is not in this merge.
+Everything else in head-check passed: build, vet, npm ci, tsc, eslint, vitest,
+and the committed bundle.
+
+**Production: v1.30.0-pantheon.13, 2026-10-27 15:18.** It comes from
+pantheon.11 (`6176ba2`). `internal/store/` and `deploy/` are unchanged since
+then, so the database stays at 42 and the rollback is the old binary alone.
+The deploy script is the pantheon.11 one with new hashes. Its
+`INSERT OR IGNORE` found `rollover.auto.enabled=false` already set and left
+it. After the deploy, health reported `c038c0b`, the running binary's hash
+matched the package, and all three panes were still there. `bundle` was
+`index-l5KgXsW5.js`. A tab left open from pantheon.11 shows no notice, because
+its interface has no notice. From this release on, the next upgrade will show
+one.
+
+**The status line, installed from production's settings route.** The
+open question from /dev was whether sessions that are already running read a
+new `statusLine`. They do. The install wrote the line at 15:19:22, and both
+running production sessions on the Max account reported at 15:19:23 (`5h 3% ·
+7d 1%`), with no restart and nothing typed into them. The other question was
+only found here. The panel launches an account's sessions with
+`CLAUDE_CONFIG_DIR=<data>/claude-accounts/<id>`, and Claude Code reads
+`settings.json` from that directory, not from `~/.claude`. On this machine the
+account directory's `settings.json` is a symlink to `~/.claude/settings.json`,
+so one install reaches every account. The `--settings` the panel passes
+overrides only `apiKeyHelper` and `env`. An account directory with a settings
+file of its own would never see the line, and the settings row would still
+say installed, because it reads `~/.claude/settings.json`. The runbook says so.
+The stamp files are in `/tmp`, not `$XDG_RUNTIME_DIR`, because production's
+sessions run without that variable. That is the fallback the reporter was
+written with.

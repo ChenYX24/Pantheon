@@ -443,10 +443,13 @@ for that account, and each agent has one way to provide it.
 state reporting has a "Claude limits (status line)" row:
 
 - *not installed*: press install. The panel names its reporter as
-  `statusLine` in `~/.claude/settings.json` (backed up first). A session
-  started afterwards reports after its first reply. Whether a session that
-  was already running picks the line up without a restart has not been
-  measured; if its chip never appears, restart it.
+  `statusLine` in `~/.claude/settings.json` (backed up first). Sessions that
+  are already running pick it up without a restart: on production (Claude
+  Code 2.1.311) both running Max sessions reported a second after the install.
+  A session the panel launches with an account reads it too, because the
+  account directory's `settings.json` is a symlink to `~/.claude/settings.json`.
+  If an account directory has a `settings.json` of its own, the line is not
+  there and that account's sessions never report.
 - *a status line of your own is set*: the panel will not replace it. Remove
   yours, or have it also run `<data dir>/hooks/vibepanel-report.sh quota`
   with the same stdin.
