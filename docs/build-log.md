@@ -28129,3 +28129,65 @@ say installed, because it reads `~/.claude/settings.json`. The runbook says so.
 The stamp files are in `/tmp`, not `$XDG_RUNTIME_DIR`, because production's
 sessions run without that variable. That is the fallback the reporter was
 written with.
+
+## 2026-10-29 — The service worker leaves page loads alone, and a second person gets a panel of their own
+
+**A phone that "would not open" production.** Safari showed one line:
+`FetchEvent.respondWith received an error: TypeError: Load failed`. That is the
+panel's own service worker. It passed every GET to the network, page loads
+included, so when a load failed Safari reported the worker's failure and not
+the real one. Two causes fit, and the message could not tell them apart. The
+connection from that phone was unreliable at the time (an open desktop tab
+said *Cannot reach the panel*). And production sits behind Caddy's basic auth.
+When Safari forgets that password, a worker's fetch cannot show the prompt,
+so every load fails the same way and reloading never helps. The worker now
+returns without `respondWith` for `request.mode === 'navigate'`. A navigation
+is the browser's own request again, with its own error page and its own
+password prompt. Every other GET still goes through the worker's fetch
+handler, which is what installability asks for. `render-check` gained one
+assertion: reloading a page the worker controls is not `fromServiceWorker()`.
+It passes. The run's only failures were the two clipboard ones it has always
+had. The mutation, the old worker against the new assertion, was not run.
+
+**A second person.** The owner asked for an account for `liyunfei` that
+cannot reach the owner's projects, with its own server account, Claude and
+Codex (granted by the owner or set up by him), and the owner able to look at
+his projects. Production is single-user: projects have no owner, and a
+session's terminal runs as the panel's Linux user. A second login inside
+production would be a shell as `cyx`: `/home/cyx`, `~/.claude`'s
+credentials, the database and `secrets.key`, whatever the interface hid. So
+the boundary is the Linux account. He gets his own instance:
+`vibepanel-liyunfei.service`, the same binary as `liyunfei`, on
+`127.0.0.2:18450`, behind `liyunfei.parthenon.atombit.top`. The scope
+naming already allowed this (`ScopeName` puts the uid in system scopes because
+"every account's system unit shares that one namespace"), and so did
+`service prepare --as`. Nothing in the panel had to change.
+
+Three things only came up on the machine itself:
+
+- `claude` and `codex` are npm installs under `/home/cyx`, which is 0700. The
+  member gets copies of the same versions under his own home, with an
+  `.npmrc` prefix so later updates are his.
+- Caddy's admin API on `localhost:2019` has no authentication. Any local
+  account could rewrite every route, including production's basic auth. His
+  sessions' scope therefore gets `IPAddressDeny=127.0.0.1/32 ::1/128`, which is
+  also where the owner's panel (18443) and /dev (19444) listen. His panel is
+  bound to `127.0.0.2` so his own hooks still reach it: `LoopbackURL` uses the
+  bound host. The panel unit itself is not filtered, because Caddy connects
+  to it from 127.0.0.1.
+- A Claude grant is a `claude setup-token` token, not a copy of the owner's
+  `.credentials.json`. Two copies of one refresh token can rotate each other
+  away, and the side that loses would be the owner's production sessions. The
+  token is in a root-owned environment file that his unit reads, so he cannot
+  edit the grant. It is not hidden from him: his processes see it.
+
+The member's panel configuration is root's too (`/etc/vibepanel-members/`),
+because the unit's `ExecStartPre` runs as root with that environment.
+Production's own `~/.config/vibepanel.env` is the owner's, which is fine for
+the owner and not for a member. His sessions have a 1 GiB ceiling on the scope.
+His panel's resource policy is set to 28% of the machine, so its memory
+question fires before the kernel's OOM killer would.
+
+The deploy scripts upgrade the shared binary and restart only
+`vibepanel.service`. The runbook now says to restart each member unit after
+an upgrade.

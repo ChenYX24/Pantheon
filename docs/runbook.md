@@ -486,6 +486,58 @@ tmux, and the page reconnects to the same ones. The notice appears only when
 the embedded interface changed. A release that changed only the backend keeps
 the same entry script and says nothing.
 
+## Safari says "FetchEvent.respondWith received an error: TypeError: Load failed"
+
+That message comes from a page loaded through the panel's service worker,
+which until pantheon.14 handled every GET, including loading the page itself.
+When the request failed, Safari reported only the worker's failure. Two
+different causes looked the same:
+
+- the phone could not reach the server at that moment (the header of an open
+  page says *Cannot reach the panel* for the same reason);
+- a proxy in front asked for a password (production has basic auth before the
+  panel) and Safari had forgotten it. A worker's fetch cannot show a password
+  prompt, so every load failed and reloading changed nothing.
+
+Since pantheon.14 the worker does not touch a navigation, so the browser
+shows its own error page or its own prompt. A phone still running an older
+worker picks up the new one on its next successful load. To get there when
+loads keep failing, open the panel in a private tab, which has no worker, or
+remove the site's data (Settings → Apps → Safari → Advanced → Website Data,
+search for the hostname).
+
+## A second person has a panel of their own
+
+A member gets their own Linux account and their own panel instance, not a
+login inside the owner's panel. A session's terminal runs as its panel's Linux
+user, so a second login inside the owner's panel would be a shell as the owner,
+whatever the interface hid. The instance for `liyunfei` is:
+
+- `vibepanel-liyunfei.service`, running the same `/usr/local/bin/vibepanel` as
+  `liyunfei`, listening on `127.0.0.2:18450`, with its configuration in
+  `/etc/vibepanel-members/liyunfei/` (root's, because the unit's root
+  `ExecStartPre` reads it);
+- its sessions in `vibepanel-sessions-<uid>.scope`, limited by
+  `/etc/systemd/system/vibepanel-sessions-<uid>.scope.d/50-member.conf`:
+  1 GiB, no swap, and `IPAddressDeny=127.0.0.1/32 ::1/128`. That address is
+  where Caddy's admin API, which has no authentication, and the owner's panels
+  listen. The member's own panel is on `127.0.0.2`, so its hooks still report;
+- a Caddy route with `@id` `vibepanel_member_liyunfei` for
+  `liyunfei.parthenon.atombit.top`, with basic auth in front as production has.
+
+A Claude subscription is granted with a `claude setup-token` token in
+`/etc/vibepanel-members/liyunfei/grants.env`, which reaches the member's tmux
+server as `CLAUDE_CODE_OAUTH_TOKEN`. It is a token and not a copy of the
+owner's login, because a copied refresh token can be rotated away by whichever
+side refreshes first.
+
+The script that creates, grants, revokes and removes all of this is in the
+operator's task directory (`member.sh`, with `--check` as a read-only
+preflight), next to the deploy scripts. **A production upgrade replaces the
+shared binary but restarts only `vibepanel.service`.** Restart each
+`vibepanel-<member>.service` afterwards so the members run the new version
+too; their sessions survive it as the owner's do (`KillMode=process`).
+
 ## A session never hands off by itself, or a handoff failed
 
 **On this Pantheon deployment the automatic trigger starts off.** The R3

@@ -4201,6 +4201,17 @@ browser = await chromium.launch({ headless: true })
         if (!read.fromServiceWorker()) {
           note('WARN', 'pwa', 'a GET did not go through the service worker either; its fetch handler is what installability asks for')
         }
+        // Loading the page is the browser's own request. Through the worker,
+        // Safari reported every failure as "FetchEvent.respondWith received
+        // an error" and never showed the proxy's password prompt.
+        const nav = await pwa.reload({ waitUntil: 'domcontentloaded' })
+        if (!nav) {
+          note('FAIL', 'pwa', 'reloading a page the service worker controls returned no response to inspect')
+        } else if (nav.fromServiceWorker()) {
+          note('FAIL', 'pwa', 'loading the page went through the service worker; a failure there hides the real error and the password prompt')
+        } else {
+          note('PASS', 'pwa', 'loading the page goes to the network, not through the service worker')
+        }
       }
     }
     await pwaCtx.close()

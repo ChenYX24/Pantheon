@@ -35,6 +35,14 @@ self.addEventListener('fetch', (event) => {
   // a proxy's bare 413 included -- showed in DevTools as "from ServiceWorker",
   // which read as this worker being what refused the file.
   if (event.request.method !== 'GET') return
+  // Loading the page itself is the browser's too. Through the worker, any
+  // failure on the way became Safari's "FetchEvent.respondWith received an
+  // error: TypeError: Load failed" and nothing else: a phone that could not
+  // reach the server and a proxy asking for its password looked the same, and
+  // the password prompt never appeared, because a worker's fetch cannot show
+  // one. Left to the browser, a navigation gets its own error page and its own
+  // prompt.
+  if (event.request.mode === 'navigate') return
   // Required for installability, and otherwise a pass-through. Written out
   // rather than left empty so that the next person to open this file sees the
   // decision instead of an apparent omission.
