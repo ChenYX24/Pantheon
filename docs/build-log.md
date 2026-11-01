@@ -28258,3 +28258,45 @@ being re-runnable, finished on the second run. After that, through
 signed him in as a member, and his state had none of the owner's 11 projects.
 The owner's list showed his panel healthy on pantheon.15. The lesson for next
 time: a trial that skips a step has not tested that step.
+
+## 2026-11-01 — A Members page, and a contract taken from dsh-superagent
+
+**The Members page** (`/members`, pantheon.16, `0aa6485`) replaces the
+settings section. A member is a card with forms under it, which is why
+Sharing became a page too. The page shows the panel's own list (who can sign
+in, and whether their panel answers) beside what root knows from
+`pantheon-member status --json`: the unit, the memory their sessions use
+against the 1 GiB ceiling, and whether Claude is granted (never the token).
+Adding, the Claude grant and revoke, restart and remove run
+`sudo -n pantheon-member <verb> <name>` from the panel, with the password or
+token on stdin. This gives the panel no new reach. An owner signed in here
+already has a terminal as `cyx`, and since today `cyx` has passwordless sudo
+by the owner's decision. What it adds is a fixed shape: a fixed verb, a name
+that matched the pattern before any process started, nothing secret in argv.
+`TestTheMembersPageRunsFixedVerbsWithSecretsOnStdin` reads the fake command's
+argv and stdin to check that. Without sudo, the page says what to run on the
+server and offers no buttons that would fail. `/api/members` joined the
+member-refused list: with a member's cookie it would otherwise have reached
+the member's own instance, which has no members to manage.
+
+`members-check` drives the page against the real binary with a fake `sudo`
+first on the panel's PATH, and a node server standing in for a member
+instance. It checks the list, a member's sessions and projects, the grant and
+restart (the token never in argv), the page without sudo, a member opening
+it, and layout at 390/820/1280 in both themes. The first green run was
+checked against its screenshots before being believed. One assertion was
+dropped and its absence noted in the script: whether a member's settings rail
+hides the link. A fake instance has no socket, so a member's main page never
+draws there.
+
+Deployed with `restart-all` after it, because the member's unit runs the same
+binary. liyunfei's panel then reported pantheon.16.
+
+**A contract from dsh-superagent.** `deepseek-ai/dsh-superagent-prototype`
+was read, not run (it is a DeepSeek Harness bundle). What it does better
+than this panel is make a worker say where its work stands in a few fixed
+words, and compute "who is this waiting for" from a first-match table instead
+of reading free text. `docs/pantheon/stage-w-contract.md` writes that down for
+this panel, with the source's runtime, its isolation stance and its
+model-run gate explicitly not taken. It is proposed, not built: four
+decisions in its §8 wait for the owner.
