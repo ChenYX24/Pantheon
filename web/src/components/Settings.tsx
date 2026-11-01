@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, Bell, Gauge, MemoryStick, MessageSquare, Puzzle, Share2, Terminal, UserRound, X } from 'lucide-react'
+import { ArrowUpRight, Bell, Gauge, MemoryStick, MessageSquare, Puzzle, Share2, Terminal, UserRound, Users, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 import { api } from '../protocol/api'
 import type { Session, SettingsInfo } from '../protocol/wire'
 import { t, useLang } from '../i18n'
-import { CHAT_PATH, PLUGINS_PATH, SHARING_PATH } from '../routes'
+import { CHAT_PATH, MEMBERS_PATH, PLUGINS_PATH, SHARING_PATH } from '../routes'
 import { useDialogFocus } from './useDialogFocus'
 import { LanguageSwitch } from './LanguageSwitch'
 import { PluginSections } from './plugins/slots'
@@ -254,6 +254,16 @@ export function Settings({
               >
                 <Puzzle size={13} className="vp-tab-icon shrink-0" />
                 <span className="text-vp-base">{t('grp.plugins')}</span>
+                <ArrowUpRight size={12} className="ml-auto shrink-0 text-ink-3" aria-hidden="true" />
+              </a>
+              {/* Who else has a panel here: a page, like the three above. */}
+              <a
+                href={MEMBERS_PATH}
+                data-testid="settings-members-link"
+                className="vp-tab shrink-0 justify-start @xl:w-full"
+              >
+                <Users size={13} className="vp-tab-icon shrink-0" />
+                <span className="text-vp-base">{t('mem.title')}</span>
                 <ArrowUpRight size={12} className="ml-auto shrink-0 text-ink-3" aria-hidden="true" />
               </a>
             </div>}

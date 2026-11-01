@@ -6,7 +6,6 @@ import { safeText } from '../text'
 import { t } from '../../i18n'
 import { ApiTokens } from '../ApiTokens'
 import { PasskeysSection } from './Passkeys'
-import { MembersSection } from './Members'
 import { Section } from './parts'
 
 /**
@@ -37,7 +36,6 @@ export function AccountGroup({ info, member }: { info: SettingsInfo | null; memb
         <ApiTokens />
       </Section>
       <AuditSection />
-      {!member && <MembersSection />}
     </>
   )
 }

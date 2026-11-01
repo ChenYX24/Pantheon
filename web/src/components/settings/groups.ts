@@ -81,7 +81,6 @@ export const SETTINGS_SECTIONS = [
   'passkeys',
   'tokens',
   'activity',
-  'members',
   'memory',
   'autorollover',
   'allocation',
@@ -128,8 +127,6 @@ export const SECTION_GROUP: Record<SettingsSection, SettingsGroup> = {
   passkeys: 'account',
   tokens: 'account',
   activity: 'account',
-  // Who else has a panel here: the other half of "who has come in".
-  members: 'account',
   memory: 'resources',
   autorollover: 'resources',
   allocation: 'resources',

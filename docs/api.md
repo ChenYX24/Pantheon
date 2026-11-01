@@ -933,6 +933,35 @@ instance and its data are not this panel's to remove.
 Audited as `member.created`, `member.changed` (with what changed) and
 `member.removed`. A member's sign-in is `login` with detail `member`.
 
+### `GET /api/members/system`
+### `POST /api/members/provision`
+### `POST /api/members/{id}/claude`
+### `DELETE /api/members/{id}/claude`
+### `POST /api/members/{id}/restart`
+### `POST /api/members/{id}/remove`
+
+The Members page's root half. Each runs one verb of `pantheon-member` under
+`sudo -n`: `status --json`, `add <name>`, `grant-claude`, `revoke-claude`,
+`restart` and `remove`, with the member's Linux name. A password or a token
+goes on the command's stdin, never its argv. This widens nothing: an owner
+signed in here already has a terminal as the panel's Linux user.
+
+```sh
+curl -sX POST .../api/members/provision -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"username":"li","password":"…"}'
+# {"output":"[ ok ] user li …","member":{"id":"…","username":"li",…}}
+```
+
+`system` answers `{"available":false,"reason":…}` when the panel cannot run
+the command, and the page then says what to run on the server instead.
+Otherwise it gives each member's unit state, the memory their sessions use
+against the scope's ceiling, and whether a Claude grant is in place (never its
+value). `provision` takes up to ten minutes, most of it copying the owner's
+`claude` and `codex`. A failing command is a 502 carrying its last line as
+`error` and its output as `output`. `claude` takes `{"token": …}` from
+`claude setup-token`. `remove` stops the member's panel and sessions and
+unregisters them, and keeps the Linux account and its home.
+
 ### `GET /api/members/{id}/home`
 ### `GET /api/members/{id}/home/projects/{pid}`
 ### `GET /api/members/{id}/state`

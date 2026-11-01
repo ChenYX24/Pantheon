@@ -92,6 +92,10 @@ type Server struct {
 	// it: the elevated path runs the upgrade command as root, and on a CI
 	// runner with passwordless sudo the real one would run the test binary.
 	sudo string
+	// memberCmd is the root half of member management: argv before the verb.
+	// Empty means sudo -n and the installed pantheon-member. Tests always set
+	// it, for the same reason as sudo above.
+	memberCmd []string
 
 	// upgradeCommand replaces `<this binary> service upgrade`, for the same
 	// reason. Nil means the real command.

@@ -71,6 +71,10 @@ first-run-check: build ## The setup wizard and the first project, in a browser
 archive-check: build  ## Archiving a project: the sidebar, the list, the picker, a phone
 	cd web && npm run check:archive
 
+.PHONY: members-check
+members-check: build  ## The Members page: the list beside what root knows, a member's work, actions through a fake sudo, three widths, both themes
+	cd web && npm run check:members
+
 .PHONY: quota-check
 quota-check: build    ## Subscription limits from a status line to the header, the handoff settings, a page older than its panel
 	cd web && npm run check:quota

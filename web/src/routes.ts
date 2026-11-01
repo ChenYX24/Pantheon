@@ -36,6 +36,8 @@ export const CHAT_PATH = appURL('/chat')
 
 /** The page plugins are installed, granted and switched from (docs/plugins.md). */
 export const PLUGINS_PATH = appURL('/plugins')
+/** The owner's page for the other people with a panel here. */
+export const MEMBERS_PATH = appURL('/members')
 
 /**
  * Where a plugin's `page` slot mounts: `/x/<path>`, the path from its
@@ -51,6 +53,7 @@ export type Route =
   | { kind: 'sharing' }
   | { kind: 'chat' }
   | { kind: 'plugins' }
+  | { kind: 'members' }
   | { kind: 'plugin-page'; path: string }
 
 export function routeFor(pathname: string): Route {
@@ -70,6 +73,7 @@ export function routeFor(pathname: string): Route {
   if (pathname === SHARING_PATH || pathname === `${SHARING_PATH}/`) return { kind: 'sharing' }
   if (pathname === CHAT_PATH || pathname === `${CHAT_PATH}/`) return { kind: 'chat' }
   if (pathname === PLUGINS_PATH || pathname === `${PLUGINS_PATH}/`) return { kind: 'plugins' }
+  if (pathname === MEMBERS_PATH || pathname === `${MEMBERS_PATH}/`) return { kind: 'members' }
   const page = pluginPageOf(pathname)
   if (page !== null) return { kind: 'plugin-page', path: page }
   return { kind: 'panel' }

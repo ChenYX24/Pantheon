@@ -4,6 +4,8 @@ import type {
   ApiToken,
   AuditEntry,
   PanelMember,
+  MemberSystem,
+  MemberOpResult,
   DirListing,
   AuthState,
   FileListing,
@@ -400,6 +402,18 @@ export const api = {
     }),
   /** A member's home page, read by this panel and drawn by this interface. */
   memberHome: (id: string) => request<unknown>(`/api/members/${encodeURIComponent(id)}/home`),
+  memberState: (id: string) => request<PanelState>(`/api/members/${encodeURIComponent(id)}/state`),
+  memberSystem: () => request<MemberSystem>('/api/members/system'),
+  provisionMember: (username: string, password: string) =>
+    request<MemberOpResult>('/api/members/provision', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  grantMemberClaude: (id: string, token: string) =>
+    request<MemberOpResult>(`/api/members/${encodeURIComponent(id)}/claude`, { method: 'POST', body: JSON.stringify({ token }) }),
+  revokeMemberClaude: (id: string) =>
+    request<MemberOpResult>(`/api/members/${encodeURIComponent(id)}/claude`, { method: 'DELETE' }),
+  restartMember: (id: string) =>
+    request<MemberOpResult>(`/api/members/${encodeURIComponent(id)}/restart`, { method: 'POST', body: '{}' }),
+  removeMember: (id: string) =>
+    request<MemberOpResult>(`/api/members/${encodeURIComponent(id)}/remove`, { method: 'POST', body: '{}' }),
 
   passkeyLoginBegin: () => request<unknown>('/api/auth/passkey/login/begin', { method: 'POST' }),
 

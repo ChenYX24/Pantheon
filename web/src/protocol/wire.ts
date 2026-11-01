@@ -866,7 +866,21 @@ export interface AuthState {
   member?: boolean
 }
 
-/** A member, as the owner's settings list them. */
+/** What root knows about each member, from `pantheon-member status`. */
+export interface MemberSystem {
+  /** Whether the panel can run pantheon-member; when not, say what to run. */
+  available: boolean
+  reason?: string
+  members: Record<string, { unit: string; memoryCurrent: number; memoryMax: number; claude: boolean }>
+}
+
+/** What a pantheon-member run printed, and the member it made. */
+export interface MemberOpResult {
+  output: string
+  member?: PanelMember
+}
+
+/** A member, as the owner's Members page lists them. */
 export interface PanelMember {
   id: string
   username: string

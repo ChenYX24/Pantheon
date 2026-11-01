@@ -46,6 +46,7 @@ const ProjectWorkspace = lazy(() => import('./components/ProjectWorkspace').then
 const SharingPage = lazy(() => import('./components/SharingPage').then((m) => ({ default: m.SharingPage })))
 const ChatPage = lazy(() => import('./components/ChatPage').then((m) => ({ default: m.ChatPage })))
 const PluginsPage = lazy(() => import('./components/PluginsPage').then((m) => ({ default: m.PluginsPage })))
+const MembersPage = lazy(() => import('./components/MembersPage').then((m) => ({ default: m.MembersPage })))
 const PluginPageRoot = lazy(() => import('./components/plugins/slots').then((m) => ({ default: m.PluginPageRoot })))
 const App = lazy(() => import('./App').then((m) => ({ default: m.App })))
 
@@ -69,6 +70,10 @@ if (document.documentElement.dataset.vpUnsupported !== '1') createRoot(root).ren
     ) : route.kind === 'plugins' ? (
       <ErrorBoundary label="The plugins page">
         <AuthGate>{(auth, signOut) => <PluginsPage auth={auth} onSignOut={signOut} />}</AuthGate>
+      </ErrorBoundary>
+    ) : route.kind === 'members' ? (
+      <ErrorBoundary label="The members page">
+        <AuthGate>{(auth, signOut) => <MembersPage auth={auth} onSignOut={signOut} />}</AuthGate>
       </ErrorBoundary>
     ) : route.kind === 'plugin-page' ? (
       <ErrorBoundary label="A plugin's page">

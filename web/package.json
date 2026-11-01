@@ -21,7 +21,8 @@
     "check:archive": "node scripts/archive-check.mjs",
     "check:plugins": "node scripts/plugins-check.mjs",
     "check:rollover": "node scripts/rollover-check.mjs",
-    "check:quota": "node scripts/quota-check.mjs"
+    "check:quota": "node scripts/quota-check.mjs",
+    "check:members": "node scripts/members-check.mjs"
   },
   "dependencies": {
     "@types/qrcode": "^1.5.5",

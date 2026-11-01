@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -363,9 +365,16 @@ func TestOwnerReadsOfAMemberAreTheseRoutes(t *testing.T) {
 		"GET /api/members/{id}/home",
 		"GET /api/members/{id}/home/projects/{pid}",
 		"GET /api/members/{id}/state",
+		"GET /api/members/system",
 		"PATCH /api/members/{id}",
 		"POST /api/members",
+		"POST /api/members/provision",
+		"POST /api/members/{id}/claude",
+		"DELETE /api/members/{id}/claude",
+		"POST /api/members/{id}/remove",
+		"POST /api/members/{id}/restart",
 	}
+	sort.Strings(want)
 	var got []string
 	if err := chi.Walk(srv.Routes().(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		if strings.HasPrefix(route, "/api/members") {
@@ -445,5 +454,95 @@ func TestADisabledMemberLosesTheirTerminal(t *testing.T) {
 	defer readCancel()
 	if _, _, err := conn.Read(readCtx); err == nil || readCtx.Err() != nil {
 		t.Errorf("the terminal stayed open after the member was disabled: %v", err)
+	}
+}
+
+// fakeMemberCommand stands in for sudo pantheon-member: it writes its argv and
+// its stdin where the test can read them, and answers status as JSON.
+func fakeMemberCommand(t *testing.T, srv *Server) (argvFile, stdinFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	argvFile, stdinFile = filepath.Join(dir, "argv"), filepath.Join(dir, "stdin")
+	script := filepath.Join(dir, "pantheon-member")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" >> " + argvFile + "\ncat >> " + stdinFile + "\n" +
+		"case \"$1\" in status) echo '{\"members\":{\"li\":{\"unit\":\"active\",\"memoryCurrent\":5,\"memoryMax\":9,\"claude\":true}}}';; " +
+		"fail) echo 'pantheon-member: it broke' >&2; exit 1;; *) echo '[ ok ] done';; esac\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	srv.memberCmd = []string{script}
+	return argvFile, stdinFile
+}
+
+func TestTheMembersPageRunsFixedVerbsWithSecretsOnStdin(t *testing.T) {
+	ts, srv := newTestServer(t)
+	argvFile, stdinFile := fakeMemberCommand(t, srv)
+	f := newFakeInstance(t)
+	_, id := addMember(t, ts, "li", f)
+
+	sys := getJSON[memberSystem](t, ts, "/api/members/system")
+	if !sys.Available || !sys.Members["li"].Claude || sys.Members["li"].MemoryMax != 9 {
+		t.Errorf("system = %+v", sys)
+	}
+	postJSON[map[string]any](t, ts, "/api/members/provision", `{"username":"newbie","password":"a long enough password"}`)
+	postJSON[map[string]any](t, ts, "/api/members/"+id+"/claude", `{"token":"sk-ant-oat-secret-value"}`)
+	postJSON[map[string]any](t, ts, "/api/members/"+id+"/restart", `{}`)
+
+	argv, _ := os.ReadFile(argvFile)
+	stdin, _ := os.ReadFile(stdinFile)
+	if got := strings.Fields(string(argv)); !slices.Equal(got, []string{"status", "--json", "add", "newbie", "grant-claude", "li", "restart", "li"}) {
+		t.Errorf("argv = %q", got)
+	}
+	for _, secret := range []string{"a long enough password", "sk-ant-oat-secret-value"} {
+		if strings.Contains(string(argv), secret) {
+			t.Errorf("%q went on the command line", secret)
+		}
+		if !strings.Contains(string(stdin), secret) {
+			t.Errorf("%q did not reach stdin", secret)
+		}
+	}
+
+	for _, bad := range []string{`{"username":"Root","password":"a long enough password"}`, `{"username":"a;b","password":"a long enough password"}`, `{"username":"tester","password":"a long enough password"}`} {
+		res, err := ts.Client().Post(ts.URL+"/api/members/provision", "application/json", strings.NewReader(bad))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode < 400 {
+			t.Errorf("provision %s = %d", bad, res.StatusCode)
+		}
+	}
+	if after, _ := os.ReadFile(argvFile); string(after) != string(argv) {
+		t.Errorf("a refused name reached the command: %q", strings.TrimPrefix(string(after), string(argv)))
+	}
+
+	srv.memberCmd = append(srv.memberCmd, "fail")
+	res, err := ts.Client().Post(ts.URL+"/api/members/"+id+"/restart", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadGateway || !strings.Contains(string(b), "it broke") {
+		t.Errorf("a failing command = %d %s", res.StatusCode, b)
+	}
+}
+
+func TestMemberManagementIsNotAMembers(t *testing.T) {
+	ts, srv := newTestServer(t)
+	argvFile, _ := fakeMemberCommand(t, srv)
+	f := newFakeInstance(t)
+	c, _ := addMember(t, ts, "li", f)
+	for _, p := range []string{"/api/members", "/api/members/system"} {
+		res, body := memberDo(t, c, http.MethodGet, ts.URL+p)
+		if res.StatusCode != http.StatusNotFound || strings.Contains(body, memberMarker) {
+			t.Errorf("a member on %s: %d %.80s", p, res.StatusCode, body)
+		}
+	}
+	if res, _ := memberDo(t, c, http.MethodPost, ts.URL+"/api/members/provision"); res.StatusCode != http.StatusNotFound {
+		t.Errorf("a member provisioning = %d", res.StatusCode)
+	}
+	if b, _ := os.ReadFile(argvFile); len(b) != 0 {
+		t.Errorf("a member's request ran pantheon-member: %q", b)
 	}
 }

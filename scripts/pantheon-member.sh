@@ -14,7 +14,11 @@
 #   pantheon-member grant-claude <name>   a Claude subscription for their new
 #                                         sessions: paste a `claude setup-token`
 #   pantheon-member revoke-claude <name>
+#   pantheon-member restart <name>        restart one member's panel; their
+#                                         sessions live on (KillMode=process)
 #   pantheon-member restart-all           after a deploy: members share the binary
+#   pantheon-member status --json         what root knows about each member,
+#                                         for the owner's Members page
 #   pantheon-member list
 #   pantheon-member remove <name>         unregister and stop; keeps the Linux
 #                                         account, its home and its data
@@ -389,6 +393,42 @@ restart_all() {
   done
 }
 
+restart_one() {
+  local name=$1; need_root restart "$name"; valid_name "$name"
+  [[ -f $ETC/$name/panel.env ]] || fail "no member $name"
+  systemctl restart "$(unit "$name")"
+  local up i; up=$(upstream "$name")
+  for i in {1..30}; do curl -fsS --max-time 2 "http://$up/api/health" >/dev/null 2>&1 && break; sleep 1; done
+  curl -fsS --max-time 2 "http://$up/api/health" >/dev/null || fail "$(unit "$name") did not come back"
+  ok "$(unit "$name") restarted"
+}
+
+# One JSON object for the owner's page: each member's unit, the memory their
+# sessions use against the ceiling, and whether a Claude grant is in place.
+# Nothing secret: the grant's value never leaves grants.env.
+status_json() {
+  need_root status
+  local d n first=1 active mem max claude
+  printf '{"members":{'
+  for d in "$ETC"/*/; do
+    [[ -f $d/panel.env ]] || continue
+    n=$(basename "$d"); valid_name "$n"
+    active=$(systemctl is-active "$(unit "$n")" 2>/dev/null || true)
+    mem=0; max=0
+    if id "$n" >/dev/null 2>&1; then
+      mem=$(systemctl show "$(scope "$n")" -p MemoryCurrent --value 2>/dev/null || echo 0)
+      max=$(systemctl show "$(scope "$n")" -p MemoryMax --value 2>/dev/null || echo 0)
+    fi
+    [[ $mem =~ ^[0-9]+$ ]] || mem=0
+    [[ $max =~ ^[0-9]+$ ]] || max=0
+    claude=false; grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$d/grants.env" 2>/dev/null && claude=true
+    [[ $first == 1 ]] || printf ','
+    first=0
+    printf '"%s":{"unit":"%s","memoryCurrent":%s,"memoryMax":%s,"claude":%s}' "$n" "${active:-unknown}" "$mem" "$max" "$claude"
+  done
+  printf '}}\n'
+}
+
 list() {
   local res; res=$(gw GET /api/members)
   [[ $(status_of "$res") == 200 ]] || fail "$(body_of "$res")"
@@ -423,7 +463,9 @@ case ${1:-} in
   add) [[ -n ${2:-} ]] || fail 'add <name>'; add "$2" ;;
   grant-claude) [[ -n ${2:-} ]] || fail 'grant-claude <name>'; grant_claude "$2" ;;
   revoke-claude) [[ -n ${2:-} ]] || fail 'revoke-claude <name>'; revoke_claude "$2" ;;
+  restart) [[ -n ${2:-} ]] || fail 'restart <name>'; restart_one "$2" ;;
   restart-all) restart_all ;;
+  status) [[ ${2:-} == --json ]] || fail 'status --json'; status_json ;;
   list) list ;;
   remove) [[ -n ${2:-} ]] || fail 'remove <name>'; remove "$2" ;;
   *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;

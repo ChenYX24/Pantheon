@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +102,10 @@ var memberRefused = []string{
 	"/api/settings/plugin", "/api/settings/pages", "/api/settings/shares", "/api/settings/previews",
 	"/api/me/", "/api/me", "/api/hook/", "/api/chat/hooks/", "/api/chat/tools/",
 	"/api/auth/", "/api/update",
+	// Member management is the owner's. With a member's cookie it would reach
+	// the member's own instance, which has no members and no root, and the
+	// answer would only confuse.
+	"/api/members",
 }
 
 func memberRefusedPath(p string) bool {
@@ -453,6 +459,13 @@ func (s *Server) memberChangePassword(w http.ResponseWriter, r *http.Request, m 
 func (s *Server) registerMemberRoutes(r chi.Router) {
 	r.Get("/members", s.handleListMembers)
 	r.Post("/members", s.handleCreateMember)
+	// The Members page's root half, through pantheon-member (memberOp).
+	r.Get("/members/system", s.handleMemberSystem)
+	r.Post("/members/provision", s.handleProvisionMember)
+	r.Post("/members/{id}/claude", s.handleMemberOp("grant-claude", "token", "claude granted"))
+	r.Delete("/members/{id}/claude", s.handleMemberOp("revoke-claude", "", "claude revoked"))
+	r.Post("/members/{id}/restart", s.handleMemberOp("restart", "", "restarted"))
+	r.Post("/members/{id}/remove", s.handleMemberOp("remove", "", ""))
 	r.Patch("/members/{id}", s.handlePatchMember)
 	r.Delete("/members/{id}", s.handleDeleteMember)
 	// The owner looking at a member: named reads with fixed upstream paths,
@@ -707,5 +720,160 @@ func (s *Server) handleMemberRead(upstream string) http.HandlerFunc {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(res.StatusCode)
 		_, _ = w.Write(body)
+	}
+}
+
+// ─── the root half ────────────────────────────────────────────────────────
+
+// Creating a member makes a Linux account, and granting Claude writes a file
+// only root reads, so the Members page does them through one fixed command,
+// pantheon-member, under `sudo -n`. That widens nothing: whoever is signed in
+// here as the owner already has a terminal as the panel's Linux user, and the
+// command is what that terminal would run. What it does constrain is the
+// shape: a fixed verb, a name that matched memberName, and secrets on stdin
+// (never argv, which every account on the machine can read).
+var memberName = regexp.MustCompile(`^[a-z][a-z0-9_-]{1,30}$`)
+
+const memberCommandPath = "/usr/local/sbin/pantheon-member"
+
+// memberOpLimit bounds what is kept of the command's output: it is shown on
+// the page when something fails, and the last lines are the ones that say why.
+const memberOpLimit = 16 << 10
+
+func (s *Server) memberOp(ctx context.Context, timeout time.Duration, stdin string, args ...string) (string, error) {
+	argv := s.memberCmd
+	if len(argv) == 0 {
+		argv = []string{"sudo", "-n", "--", memberCommandPath}
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], append(append([]string{}, argv[1:]...), args...)...) //nolint:gosec // fixed argv, validated name
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin + "\n")
+	}
+	out, err := cmd.CombinedOutput()
+	text := string(out)
+	if len(text) > memberOpLimit {
+		text = text[len(text)-memberOpLimit:]
+	}
+	if ctx.Err() == context.DeadlineExceeded {
+		return text, errors.New("pantheon-member did not finish in time")
+	}
+	return strings.TrimSpace(text), err
+}
+
+type memberSystem struct {
+	// Available is whether the panel can run pantheon-member. When it cannot,
+	// the page says what to run on the server instead of offering buttons
+	// that would fail.
+	Available bool                        `json:"available"`
+	Reason    string                      `json:"reason,omitempty"`
+	Members   map[string]memberSystemFact `json:"members"`
+}
+
+type memberSystemFact struct {
+	Unit          string `json:"unit"`
+	MemoryCurrent int64  `json:"memoryCurrent"`
+	MemoryMax     int64  `json:"memoryMax"`
+	Claude        bool   `json:"claude"`
+}
+
+func (s *Server) handleMemberSystem(w http.ResponseWriter, r *http.Request) {
+	out, err := s.memberOp(r.Context(), 20*time.Second, "", "status", "--json")
+	if err != nil {
+		writeJSON(w, http.StatusOK, memberSystem{Reason: lastLine(out, err), Members: map[string]memberSystemFact{}})
+		return
+	}
+	var sys memberSystem
+	if jerr := json.Unmarshal([]byte(out), &sys); jerr != nil {
+		writeJSON(w, http.StatusOK, memberSystem{Reason: "pantheon-member status said something that is not JSON", Members: map[string]memberSystemFact{}})
+		return
+	}
+	sys.Available = true
+	if sys.Members == nil {
+		sys.Members = map[string]memberSystemFact{}
+	}
+	writeJSON(w, http.StatusOK, sys)
+}
+
+func lastLine(out string, err error) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if l := strings.TrimSpace(lines[len(lines)-1]); l != "" {
+		return l
+	}
+	return err.Error()
+}
+
+type memberOpResult struct {
+	Output string        `json:"output"`
+	Member *store.Member `json:"member,omitempty"`
+}
+
+func (s *Server) handleProvisionMember(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	if !memberName.MatchString(req.Username) {
+		writeErr(w, http.StatusBadRequest, "a member name is 2–31 lowercase letters, digits, - and _, starting with a letter")
+		return
+	}
+	if err := validateCredentials(req.Username, req.Password); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := s.DB.UserByName(r.Context(), req.Username); err == nil {
+		writeErr(w, http.StatusConflict, "that name is the owner's")
+		return
+	}
+	// Copying the owner's claude and codex is most of the time this takes.
+	out, err := s.memberOp(r.Context(), 10*time.Minute, req.Password, "add", req.Username)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": lastLine(out, err), "output": out})
+		return
+	}
+	res := memberOpResult{Output: out}
+	if m, err := s.DB.MemberByName(r.Context(), req.Username); err == nil {
+		res.Member = &m
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleMemberOp runs one pantheon-member verb for a member. field names the
+// request's JSON string that goes to stdin, if any.
+func (s *Server) handleMemberOp(verb, field, audited string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		m, err := s.DB.MemberByID(r.Context(), chi.URLParam(r, "id"))
+		if err != nil {
+			s.writeStoreErr(w, err)
+			return
+		}
+		if !memberName.MatchString(m.LinuxUser) {
+			writeErr(w, http.StatusConflict, "this member's Linux account name cannot be passed to pantheon-member")
+			return
+		}
+		stdin := ""
+		if field != "" {
+			var req map[string]string
+			if !decode(w, r, &req) {
+				return
+			}
+			if stdin = strings.TrimSpace(req[field]); stdin == "" || strings.ContainsAny(stdin, "\r\n") {
+				writeErr(w, http.StatusBadRequest, field+" is required, on one line")
+				return
+			}
+		}
+		out, err := s.memberOp(r.Context(), 2*time.Minute, stdin, verb, m.LinuxUser)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": lastLine(out, err), "output": out})
+			return
+		}
+		if u, ok := currentUserFrom(r); ok && audited != "" {
+			s.audit(r.Context(), "member.changed", u.Username, s.clientIP(r), m.Username+": "+audited)
+		}
+		writeJSON(w, http.StatusOK, memberOpResult{Output: out})
 	}
 }

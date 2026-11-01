@@ -483,16 +483,16 @@ func TestEveryAuditEventIsAccountedFor(t *testing.T) {
 		"page.imported":     true,
 		// A link a build with boards handed out, pointed at a page at startup.
 		// No user and no address: nobody asked, the upgrade did.
-		"share.converted":  true,
-		"page.moved":       true,
-		"page.deleted":     true,
-		"token.created":    true,
-		"token.revoked":    true,
+		"share.converted": true,
+		"page.moved":      true,
+		"page.deleted":    true,
+		"token.created":   true,
+		"token.revoked":   true,
 		// Who else has a panel here, and who changed that. One prefix, so
 		// "every change to who can sign in" is one GROUP BY with login.
-		"member.created": true,
-		"member.changed": true,
-		"member.removed": true,
+		"member.created":   true,
+		"member.changed":   true,
+		"member.removed":   true,
 		"update.installed": true,
 		// Written when somebody authorises the upgrade of a binary this panel
 		// does not own. The same prefix as update.installed on purpose: "what
