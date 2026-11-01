@@ -28242,3 +28242,19 @@ Everything was removed afterwards, the Linux account included.
 
 Found on the way: `poolPercent` is at least 30, so a member's panel budget is
 30% (about 1.07 GiB here). The scope's 1 GiB is still the ceiling.
+
+**Production, the same evening.** pantheon.15 (`61dccb8`) deployed at 19:23:
+the database went 42 → 43, all 11 panes were kept, and health reported
+`61dccb8`. The deploy script also printed "`/home` did not return the app shell".
+That was the check running too early: `/home` answered 200 with the shell a
+moment later. Adding the first real member found two bugs in the script, both
+in the Caddy step, which the trial had skipped (`PANTHEON_CADDY_HOST=`).
+`python3 - <<HEREDOC` makes the heredoc the program, so the routes piped to it
+never arrived. A read-only dry run caught that before anything was written.
+The second was `caddy hash-password`, which reads a line, so a password file
+without a newline was EOF. It failed before the config was touched, and `add`,
+being re-runnable, finished on the second run. After that, through
+`https://parthenon.atombit.top`: basic auth admitted `liyunfei`, the panel
+signed him in as a member, and his state had none of the owner's 11 projects.
+The owner's list showed his panel healthy on pantheon.15. The lesson for next
+time: a trial that skips a step has not tested that step.
