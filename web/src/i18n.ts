@@ -1467,6 +1467,31 @@ const DICT = {
   'settings.languageZh': { zh: '简体中文', en: '简体中文' },
   'settings.languageEn': { zh: 'English', en: 'English' },
 
+  'mem.title': { zh: '成员', en: 'Members' },
+  'mem.why': {
+    zh: '同一地址登录、各用自己面板的人。看不到你的项目。',
+    en: 'People who sign in here and get a panel of their own. They cannot see your projects.',
+  },
+  'mem.none': { zh: '还没有成员。', en: 'No members yet.' },
+  'mem.how': {
+    zh: '在服务器上添加：sudo pantheon-member add <名字>',
+    en: 'Add one on the server: sudo pantheon-member add <name>',
+  },
+  'mem.up': { zh: '面板在线 {version}', en: 'panel answering {version}' },
+  'mem.down': { zh: '面板没有响应', en: 'panel not answering' },
+  'mem.paused': { zh: '已暂停登录', en: 'sign-in paused' },
+  'mem.view': { zh: '看项目', en: 'Projects' },
+  'mem.hide': { zh: '收起', en: 'Hide' },
+  'mem.pause': { zh: '暂停登录', en: 'Pause sign-in' },
+  'mem.resume': { zh: '恢复登录', en: 'Resume sign-in' },
+  'mem.pauseTitle': { zh: '暂停 {name} 的登录？', en: 'Pause sign-in for {name}?' },
+  'mem.pauseBody': {
+    zh: '他的终端半分钟内断开；会话继续运行，恢复后都在。',
+    en: 'Their terminals disconnect within half a minute. Sessions keep running.',
+  },
+  'mem.noProjects': { zh: '还没有项目。', en: 'No projects yet.' },
+  'mem.sessions': { zh: '{n} 个会话', en: '{n} sessions' },
+
   'tok.title': { zh: 'API 令牌', en: 'API tokens' },
   'tok.why': {
     zh: '给 agent 或脚本用。不会过期，可以单独吊销。',

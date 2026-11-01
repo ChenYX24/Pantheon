@@ -60,8 +60,10 @@ func TestPantheon37UpgradesWithoutLosingRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if v, err := db.Version(ctx); err != nil || v != 42 {
-		t.Fatalf("version = %d, %v; want 42", v, err)
+	// The current version, not a number: this is the deployed 37 upgrading to
+	// whatever this build is, and every later step has to keep its rows too.
+	if v, err := db.Version(ctx); err != nil || v != schemaVersion {
+		t.Fatalf("version = %d, %v; want %d", v, err, schemaVersion)
 	}
 	s, err := db.GetSession(ctx, "s1")
 	if err != nil {

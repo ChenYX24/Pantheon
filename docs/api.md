@@ -898,6 +898,65 @@ the directory's path, and nothing else will ever say it is still there.
 
 Audited as `claude_account.created`, `claude_account.renamed` and
 `claude_account.deleted`, with the name only.
+
+## Members
+
+A member is a second person with a panel of their own on this machine: their
+own Linux account and instance, signing in at this panel's address. The design
+is `docs/pantheon/stage-m-contract.md`. These routes are the owner's. A
+member's cookie is unknown to all of them (401).
+
+### `GET /api/members`
+### `POST /api/members`
+### `PATCH /api/members/{id}`
+### `DELETE /api/members/{id}`
+
+```sh
+curl -s .../api/members -H "Authorization: Bearer $TOKEN"
+# {"members":[{"id":"…","username":"li","linuxUser":"li","upstream":"127.0.0.2:18450",
+#   "disabled":false,"createdAt":1793520000,"healthy":true,"version":"v1.30.0-pantheon.15"}]}
+```
+
+`POST` takes `username`, `password` (the member's sign-in, 12 or more
+characters), `linuxUser`, `upstream` (a loopback `host:port`, refused
+otherwise) and `token`, an API token minted on the member's instance that this
+panel presents to it. The token is sealed with `secrets.key` and never
+returned. A name an owner already has is a 409. `scripts/pantheon-member.sh
+add` is what calls this. It creates the Linux account and the instance first,
+which an HTTP route cannot.
+
+`PATCH` takes any of `disabled`, `password` and `token`. Disabling or a new
+password ends the member's sessions here, and an open terminal closes within
+30 seconds. `DELETE` removes the row and its sessions. The Linux account, the
+instance and its data are not this panel's to remove.
+
+Audited as `member.created`, `member.changed` (with what changed) and
+`member.removed`. A member's sign-in is `login` with detail `member`.
+
+### `GET /api/members/{id}/home`
+### `GET /api/members/{id}/home/projects/{pid}`
+### `GET /api/members/{id}/state`
+
+The owner looking at a member, read-only: this panel reads the member
+instance's `/api/home`, `/api/home/projects/{pid}` or `/api/state` with its
+token and returns the JSON. Anything that is not JSON is a 502. These three are
+the whole list (`TestOwnerReadsOfAMemberAreTheseRoutes`).
+
+### Signed in as a member
+
+`POST /api/auth/login` checks owners first, then members, with one throttle
+and one answer for a wrong password, an unknown name and a paused member. A
+member's session is a separate cookie. `GET /api/auth/state` says
+`"member": true`.
+
+With that cookie, `/api/*` and `/ws` go to the member's instance, except
+`/api/health` and `/api/auth/{state,login,logout,password}`, which this panel
+answers, and the routes for share pages, admin pages, plugins, previews, `me`,
+hooks, the chat bridge's doors and updates, which are 404 for a member.
+Everything outside `/api` is this panel's own interface. A response from the
+instance keeps only an allowlist of headers (no `Set-Cookie`,
+`Clear-Site-Data`, `Location`), always has `nosniff`, and anything a browser
+could render as a document gets `Content-Security-Policy: sandbox`.
 ## The repository
 
 ### `GET /api/projects/{id}/git`

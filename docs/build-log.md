@@ -28191,3 +28191,54 @@ question fires before the kernel's OOM killer would.
 The deploy scripts upgrade the shared binary and restart only
 `vibepanel.service`. The runbook now says to restart each member unit after
 an upgrade.
+
+## 2026-11-01 — Members behind one front door
+
+The owner tried a subdomain per member (`liyunfei.parthenon…`) and asked
+instead for one address, "because sign-in is the check". Sign-in decides who
+someone is. It does not decide what they can reach, because a session's
+terminal runs as its panel's Linux user. And on one origin, a page from code
+the member controls could use the owner's cookie. So the owner's panel became
+a front door: members are Linux accounts with instances of their own, signed in
+here and proxied there. `docs/pantheon/stage-m-contract.md` is the design. The
+part that keeps it safe is that a member's instance never serves a document on
+this origin. The interface is always the gateway's own embedded files. What an
+instance returns has its headers on an allowlist (no `Set-Cookie`,
+`Clear-Site-Data`, `Location`). Anything renderable gets
+`Content-Security-Policy: sandbox`. No cookie is passed in either direction.
+
+`members` and `member_sessions` (043) are tables `currentUser` never reads. A
+member's cookie is therefore an unknown string to every owner route, the way
+a share token is (red line 8). `TestAMemberNeverReachesAnOwnerHandler` walks
+the whole router with a member's cookie and accepts only three outcomes: the
+instance's answer, an explicit refusal, or one of the five routes the gateway
+answers itself. Its first run found `/api/plugin-http/*` missing from the
+refusal list, because the prefixes had been written as three separate
+surfaces. They are now one bare `/api/plugin`.
+
+`scripts/pantheon-member.sh` provisions a member: the Linux account, copies of
+the owner's `claude`/`codex`, the unit, a scope with 1 GiB and
+`IPAddressDeny=127.0.0.1` (Caddy's admin API has no authentication), and the
+gateway's token, minted on the instance through its own API. It also adds a
+basic-auth account on the existing Caddy route, found by walking the routes,
+not by index. Passwords and tokens go through stdin and root-only files, never
+argv.
+
+**The trial.** /dev could not be the gateway, because its planning-only mode
+refuses most writes, so the trial used a throwaway gateway: the same build, a
+temp data directory, `127.0.0.1:18499`. A throwaway member `pmtest` was
+provisioned for real by the script, against real systemd. The script's own
+checks passed: from his session `/home/cyx` was denied, Caddy's admin API
+blocked, and his own panel reachable. Signed in at the gateway, he created a
+project in his own panel, and the gateway's owner still listed none.
+Registering `/home/cyx/projects` failed with "permission denied" from Linux,
+which is the boundary doing its job. A command pasted through the gateway's
+WebSocket ran as `pmtest`, in `vibepanel-sessions-1002.scope/pool/s-…`, and
+printed `cyx-denied owner-blocked`. Disabled, he got 401 at sign-in, and his
+tmux session lived on. Revoking an open socket was not shown live, because the
+probe client closed on its own timer first.
+`TestADisabledMemberLosesTheirTerminal` holds a socket open and shows it.
+Everything was removed afterwards, the Linux account included.
+
+Found on the way: `poolPercent` is at least 30, so a member's panel budget is
+30% (about 1.07 GiB here). The scope's 1 GiB is still the ceiling.

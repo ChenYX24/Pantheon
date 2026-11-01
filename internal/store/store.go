@@ -1314,6 +1314,42 @@ var migrations = []migration{
 		}
 		return nil
 	}},
+	// Members behind the front door (docs/pantheon/stage-m-contract.md). Two
+	// tables of their own rather than a column on users: currentUser reads
+	// users and auth_sessions, and a member must be an unknown string to it,
+	// the way a share token is (red line 8). A flag on users would be a check
+	// every owner route had to remember.
+	{"043-members", func(tx *sql.Tx) error {
+		for _, stmt := range []string{
+			`CREATE TABLE IF NOT EXISTS members (
+			     id            TEXT PRIMARY KEY,
+			     username      TEXT NOT NULL UNIQUE,
+			     password_hash TEXT NOT NULL,
+			     linux_user    TEXT NOT NULL,
+			     upstream      TEXT NOT NULL,
+			     -- Sealed: the bearer the gateway presents to the member's
+			     -- instance. The member's browser never holds it.
+			     token         TEXT NOT NULL DEFAULT '',
+			     disabled      INTEGER NOT NULL DEFAULT 0,
+			     created_at    INTEGER NOT NULL
+			 )`,
+			`CREATE TABLE IF NOT EXISTS member_sessions (
+			     token_hash   BLOB PRIMARY KEY,
+			     member_id    TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+			     created_at   INTEGER NOT NULL,
+			     expires_at   INTEGER NOT NULL,
+			     last_seen_at INTEGER NOT NULL,
+			     user_agent   TEXT NOT NULL DEFAULT '',
+			     ip           TEXT NOT NULL DEFAULT ''
+			 )`,
+			`CREATE INDEX IF NOT EXISTS idx_member_sessions_member ON member_sessions(member_id)`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("%s: %w", stmt, err)
+			}
+		}
+		return nil
+	}},
 }
 
 // scanner is *sql.Row and *sql.Rows both, so one scan function serves a
