@@ -151,7 +151,8 @@ caddy_add_account() { # name, password on stdin of the caller via file
     ok "Caddy basic auth already admits $1"; return 0
   fi
   local hash etag f
-  hash=$(caddy hash-password < "$2")
+  # It reads a line, and a password file with no newline is EOF to it.
+  hash=$( { cat "$2"; echo; } | caddy hash-password)
   f=$(mktemp "$TMPD/acct.XXXXXX")
   python3 -I -c 'import json,sys; print(json.dumps({"username": sys.argv[1], "password": sys.argv[2]}))' "$1" "$hash" > "$f"
   etag=$(curl -s -D - -o /dev/null "$CADDY$path" | awk -F': ' 'tolower($1)=="etag"{sub(/\r$/,"",$2); print $2}')
