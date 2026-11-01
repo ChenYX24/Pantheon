@@ -36,9 +36,10 @@ GATEWAY_TOKEN_FILE=${PANTHEON_GATEWAY_TOKEN:-/home/$OWNER/.local/share/vibepanel
 CADDY_HOST=${PANTHEON_CADDY_HOST-parthenon.atombit.top}
 SESSIONS_MEM=${PANTHEON_MEMBER_MEM:-1G}
 PANEL_MEM=400M
-# Their panel's own memory question fires at this share of the machine,
-# before the scope's ceiling has the kernel kill something (1 GiB of 3.5).
-POOL_PERCENT=${PANTHEON_MEMBER_POOL:-28}
+# Their panel's own budget, as a share of the machine. 30 is the lowest the
+# panel accepts (resources.MinPoolPercent), a little over the scope's 1 GiB
+# on 3.5: the scope is the ceiling, and this is what their page shows.
+POOL_PERCENT=${PANTHEON_MEMBER_POOL:-30}
 PORT=18450
 BIN=/usr/local/bin/vibepanel
 ETC=/etc/vibepanel-members
