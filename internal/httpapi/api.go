@@ -541,6 +541,7 @@ func (s *Server) Routes() http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.Compress(5, "application/json"))
 				s.registerHomeRoutes(r)
+				s.registerMemberRoutes(r)
 			})
 			s.registerPanelRoutes(r)
 			s.registerGitRoutes(r)
@@ -641,8 +642,12 @@ func (s *Server) Routes() http.Handler {
 	s.registerPluginCodeRoute(r)
 
 	r.Handle("/*", webui.HandlerAt(s.Cfg.StaticDir, s.Cfg.BasePath))
+	// Members: outermost, so a member's cookie decides before any owner route
+	// is reached, and inside the base path, so the paths it sees are the same
+	// with and without one. See members.go.
+	routes := gatedRouter{Router: r, gate: s.memberGate(r)}
 	if s.Cfg.BasePath == "" {
-		return r
+		return routes
 	}
 	outer := chi.NewRouter()
 	outer.Get(s.Cfg.BasePath, func(w http.ResponseWriter, req *http.Request) {
@@ -652,7 +657,7 @@ func (s *Server) Routes() http.Handler {
 		}
 		http.Redirect(w, req, to, http.StatusTemporaryRedirect)
 	})
-	outer.Mount(s.Cfg.BasePath+"/", http.StripPrefix(s.Cfg.BasePath, r))
+	outer.Mount(s.Cfg.BasePath+"/", http.StripPrefix(s.Cfg.BasePath, routes))
 	return outer
 }
 

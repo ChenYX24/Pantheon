@@ -55,9 +55,12 @@ export function Settings({
   onClose,
   sessions,
   focusSession,
+  member,
 }: {
   openAt: SettingsSection
   onClose: () => void
+  /** Signed in as a member: sharing, chat and plugins are not theirs here. */
+  member?: boolean
   /** The snapshot's sessions, for names and states on the resources page. */
   sessions: Session[]
   /** A session the resources page opens on, when the memory question sent somebody here. */
@@ -225,7 +228,7 @@ export function Settings({
                 to be. A link in the rail's own clothes, after a rule, with the
                 arrow that says it leaves: somebody who last saw the list of
                 pages under this word still finds it under this word. */}
-            <div className="flex shrink-0 gap-1 @xl:mt-1 @xl:flex-col @xl:border-t @xl:border-hairline @xl:pt-1">
+            {!member && <div className="flex shrink-0 gap-1 @xl:mt-1 @xl:flex-col @xl:border-t @xl:border-hairline @xl:pt-1">
               <a
                 href={SHARING_PATH}
                 data-testid="settings-sharing-link"
@@ -253,7 +256,7 @@ export function Settings({
                 <span className="text-vp-base">{t('grp.plugins')}</span>
                 <ArrowUpRight size={12} className="ml-auto shrink-0 text-ink-3" aria-hidden="true" />
               </a>
-            </div>
+            </div>}
           </div>
 
           {/* Keyed by the group, so switching remounts rather than reuses:
@@ -272,7 +275,7 @@ export function Settings({
           >
             {group === 'sessions' && <SessionsGroup />}
             {group === 'notify' && <NotificationsGroup />}
-            {group === 'account' && <AccountGroup info={info} />}
+            {group === 'account' && <AccountGroup info={info} member={member} />}
             {group === 'resources' && <ResourcesGroup sessions={sessions} focus={focusSession} />}
             {group === 'panel' && <PanelGroup info={info} />}
             {/* What plugins add under this rail item: a frame per

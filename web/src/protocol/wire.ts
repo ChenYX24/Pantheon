@@ -858,6 +858,25 @@ export interface AuthState {
   passkeysUsable: boolean
   /** Why the passkey button is disabled; the browser's own error is opaque. */
   passkeyReason?: string
+  /**
+   * A member of this panel, whose requests go to a panel of their own
+   * (docs/pantheon/stage-m-contract.md). Sharing, plugins, the chat bridge and
+   * passkeys are not theirs here, and the interface hides them.
+   */
+  member?: boolean
+}
+
+/** A member, as the owner's settings list them. */
+export interface PanelMember {
+  id: string
+  username: string
+  linuxUser: string
+  upstream: string
+  disabled: boolean
+  createdAt: number
+  /** Whether the member's own panel answered just now. */
+  healthy: boolean
+  version?: string
 }
 
 export interface Passkey {

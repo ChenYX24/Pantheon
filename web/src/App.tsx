@@ -2033,6 +2033,7 @@ export function App({ auth, onSignOut }: { auth: AuthState; onSignOut: () => voi
           openAt={settingsAt}
           sessions={state.sessions}
           focusSession={focusSession}
+          member={auth.member}
           onClose={() => {
             setSettingsAt(null)
             setFocusSession(undefined)

@@ -6,6 +6,7 @@ import { safeText } from '../text'
 import { t } from '../../i18n'
 import { ApiTokens } from '../ApiTokens'
 import { PasskeysSection } from './Passkeys'
+import { MembersSection } from './Members'
 import { Section } from './parts'
 
 /**
@@ -18,7 +19,7 @@ import { Section } from './parts'
  * answers is "has anybody else been in here", which is the question you are
  * already asking when you came to change a password.
  */
-export function AccountGroup({ info }: { info: SettingsInfo | null }) {
+export function AccountGroup({ info, member }: { info: SettingsInfo | null; member?: boolean }) {
   return (
     <>
       <PasswordSection />
@@ -28,11 +29,15 @@ export function AccountGroup({ info }: { info: SettingsInfo | null }) {
         * configured had no passkey section at all and nothing saying why —
         * which is a feature somebody goes looking for, does not find, and
         * reports as missing. The reason is one line and it names the setting. */}
-      <PasskeysSection blocker={info?.passkeyReason ?? ''} rpID={info?.domain ?? ''} />
+      {/* A member's passkey would be bound to this origin and checked by a
+          panel that is not theirs; the gateway refuses the routes, and the
+          section is not offered rather than offered and failing. */}
+      {!member && <PasskeysSection blocker={info?.passkeyReason ?? ''} rpID={info?.domain ?? ''} />}
       <Section id="tokens" title={t('tok.title')}>
         <ApiTokens />
       </Section>
       <AuditSection />
+      {!member && <MembersSection />}
     </>
   )
 }

@@ -3,6 +3,7 @@ import { t, tKey } from '../i18n'
 import type {
   ApiToken,
   AuditEntry,
+  PanelMember,
   DirListing,
   AuthState,
   FileListing,
@@ -388,6 +389,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ current, next }),
     }),
+
+  // Members (owner only). Created on the server by the provisioning command;
+  // here they are listed, paused, given a new password, and looked at.
+  members: () => request<{ members: PanelMember[] }>('/api/members'),
+  patchMember: (id: string, patch: { disabled?: boolean; password?: string }) =>
+    request<PanelMember>(`/api/members/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  /** A member's home page, read by this panel and drawn by this interface. */
+  memberHome: (id: string) => request<unknown>(`/api/members/${encodeURIComponent(id)}/home`),
 
   passkeyLoginBegin: () => request<unknown>('/api/auth/passkey/login/begin', { method: 'POST' }),
 

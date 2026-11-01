@@ -456,6 +456,10 @@ type authState struct {
 	// PasskeyReason explains a disabled passkey button instead of leaving the
 	// user to guess why the browser refused.
 	PasskeyReason string `json:"passkeyReason,omitempty"`
+	// Member is a signed-in member of this panel (stage-m-contract.md), whose
+	// requests go to a panel of their own. The interface hides what a member
+	// cannot reach rather than showing it and answering 404.
+	Member bool `json:"member,omitempty"`
 }
 
 func (s *Server) handleAuthState(w http.ResponseWriter, r *http.Request) {
@@ -709,6 +713,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, err := s.DB.UserByName(ctx, req.Username)
 	if err != nil {
+		// Not an owner: perhaps a member. The same throttle has already
+		// counted this attempt, and a wrong password there is answered the
+		// same way as one here.
+		if s.memberLogin(w, r, req.Username, req.Password, ip) {
+			return
+		}
 		// The same response and the same work either way: a fast "no such
 		// user" and a slow "wrong password" tells an attacker which usernames
 		// exist.
@@ -804,6 +814,8 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, user store
 		return
 	}
 	auth.SetCookieAt(w, token, s.cookieSecureFor(r), s.Cfg.BasePath)
+	// One identity per browser; issueMemberSession does the reverse.
+	s.clearMemberCookie(w, r)
 }
 
 // validateCredentials delegates to internal/auth, which is where the rules
