@@ -108,10 +108,15 @@ read_password() {
 # gateway on $CADDY_HOST. Found by walking, not by index: the routes include
 # another service's, and their order is not this script's.
 caddy_accounts_path() {
-  curl -fsS "$CADDY/config/apps/http/servers/srv0/routes" | python3 -I - "$CADDY_HOST" "$GATEWAY" <<'PY'
+  # Through a file: `python3 - <<HEREDOC` makes the heredoc the program, so
+  # the routes cannot also arrive on stdin.
+  local routes; routes=$(mktemp "$TMPD/routes.XXXXXX")
+  curl -fsS "$CADDY/config/apps/http/servers/srv0/routes" > "$routes"
+  python3 -I - "$CADDY_HOST" "$GATEWAY" "$routes" <<'PY'
 import json, sys
 from urllib.parse import urlparse
-routes, host, gw = json.load(sys.stdin), sys.argv[1], urlparse(sys.argv[2])
+host, gw = sys.argv[1], urlparse(sys.argv[2])
+routes = json.load(open(sys.argv[3]))
 dial = f"{gw.hostname}:{gw.port}"
 found = []
 def walk(node, path, auth):
